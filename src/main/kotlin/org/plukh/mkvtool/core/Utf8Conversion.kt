@@ -177,7 +177,3 @@ fun convertDirectory(
     renderer.render(root)
     return root
 }
-
-/** True when [bytes] begins with the unsigned byte sequence [prefix] (JVM bytes are signed; mask to 0–255). */
-private fun startsWith(bytes: ByteArray, vararg prefix: Int): Boolean =
-    bytes.size >= prefix.size && prefix.indices.all { (bytes[it].toInt() and 0xFF) == prefix[it] }

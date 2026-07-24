@@ -1,5 +1,8 @@
 /**
- * Ported v1 `src/lib/` internals — probing, discovery, episodes, YAML, substitution,
- * consistency checks. Filled in across Phases 1–2 of the port; empty scaffold for now.
+ * The domain layer: one engine per command, plus the shared internals they sit on —
+ * file semantics (YAML loading, charset detection), episode metadata, discovery,
+ * probing, substitution, consistency checks. Everything here is free of CLI plumbing
+ * and of presentation: engines take their inputs explicitly, return a result model, and
+ * leave rendering to the `out` and `cli` layers.
  */
 package org.plukh.mkvtool.core

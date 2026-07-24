@@ -24,4 +24,8 @@ class NativeSmokeTest : FunSpec({
     test("native language name for ru is Русский (upper-cased in-locale)") {
         nativeLanguageName("ru") shouldBe "Русский"
     }
+
+    test("a YAML document round-trips through the real loader") {
+        yamlProbeValue() shouldBe "Русский"
+    }
 })

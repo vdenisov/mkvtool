@@ -1,23 +1,28 @@
 package org.plukh.mkvtool.core
 
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 /**
- * Probe logic for the two native-image failure modes that fail *silently*: a native
- * binary built without `-H:+AddAllCharsets` cannot decode single-byte charsets like
- * Windows-1251, and one built without locale-data inclusion returns empty CLDR display
- * names. Both work on any ordinary JVM, so only an end-to-end run of the actual native
- * binary catches a broken build - which is what the hidden `native-smoke` command does.
+ * Probe logic for the native-image failure modes that fail *silently*: a native binary
+ * built without `-H:+AddAllCharsets` cannot decode single-byte charsets like
+ * Windows-1251, one built without locale-data inclusion returns empty CLDR display
+ * names, and a dependency that needs reachability config it did not get fails only when
+ * its code is first reached. All work on any ordinary JVM, so only an end-to-end run of
+ * the actual native binary catches a broken build - which is what the hidden
+ * `native-smoke` command does.
  *
- * These two functions are deliberately minimal and self-contained. They mirror the v1
+ * The first two functions are deliberately minimal and self-contained. They mirror the v1
  * idioms (`to_utf8.groovy`'s strict decoder and `subst.groovy`'s native-name lookup) and
  * exist only until the real utilities land: the `to-utf8` command will own strict
  * decoding and the external-track language guesser will own native language names. Once
  * those exist the probe can point at them, or retire. Do not grow shared abstractions
- * here in the meantime.
+ * here in the meantime. The third one already points at the real utility, which is the
+ * shape the others should reach.
  */
 
 /**
@@ -46,4 +51,26 @@ fun nativeLanguageName(code: String): String? {
     val name = locale.getDisplayLanguage(locale)
     if (name.isBlank() || name.equals(code, ignoreCase = true)) return null
     return name.substring(0, 1).uppercase(locale) + name.substring(1)
+}
+
+/**
+ * Round-trips a one-key UTF-8 YAML document through the real [loadMapping] and returns
+ * the value it read back, or null if anything about the load went wrong. snakeyaml is a
+ * third-party dependency and the GraalVM reachability-metadata repository is disabled for
+ * this build (see build.gradle.kts), so nothing but running the parser proves it works in
+ * the native image. Passing no charset puts [detectCharset] on the same path, and a
+ * Cyrillic value converges on the same expected string as the other two probes.
+ */
+fun yamlProbeValue(): String? {
+    val file = File.createTempFile("mkvtool-smoke", ".yaml")
+    return try {
+        file.writeText("show: Русский\n", StandardCharsets.UTF_8)
+        (loadMapping(file) as? MappingLoad.Loaded)?.value?.get("show") as? String
+    } catch (_: Exception) {
+        // The loader classifies rather than throws; this guards the temp-file I/O only, so a probe run
+        // on a locked-down filesystem reports a FAIL line like the other two rather than a stack trace.
+        null
+    } finally {
+        file.delete()
+    }
 }

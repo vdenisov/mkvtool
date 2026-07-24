@@ -116,6 +116,12 @@ data class FixRun(val files: List<FileFix>, val fixed: Int, val failed: Int) : C
  *
  * `.srt.fixed` outputs do not end in `.srt`, so a re-run does not re-pick them. [dir] is passed in
  * explicitly (rather than read from `File(".")`) so the engine is unit-testable in-process.
+ *
+ * Reading auto-detects the charset as v1 did; writing is explicit UTF-8, where v1 used the platform
+ * default. The asymmetry is not reproduced on purpose: UTF-8 has been the effective default on all three
+ * platforms for years, so the two agree in practice, and an explicit charset is the one that keeps
+ * agreeing. Legacy single-byte input is still `to-utf8`'s job — see [readTextDetected] on what the
+ * detection fallback can and cannot rescue.
  */
 fun fixDirectory(dir: File, renderer: Renderer): FixRun {
     val files = (dir.listFiles() ?: emptyArray())
@@ -133,7 +139,7 @@ fun fixDirectory(dir: File, renderer: Renderer): FixRun {
     for (file in files) {
         renderer.render(Header("*** Fixing ${file.name}"))
 
-        val outcome: FixOutcome = when (val result = reformatSrt(file.readLines(StandardCharsets.UTF_8))) {
+        val outcome: FixOutcome = when (val result = reformatSrt(readLinesDetected(file))) {
             is ReformatOutcome.Reformatted -> {
                 // The .fixed output is written only after a clean parse. Each line gets a trailing newline
                 // (v1 println'd them one by one); an empty line list writes an empty file.

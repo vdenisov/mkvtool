@@ -23,6 +23,7 @@ group = "org.plukh"
 
 val picocliVersion = providers.gradleProperty("picocliVersion").get()
 val kotestVersion = providers.gradleProperty("kotestVersion").get()
+val snakeyamlVersion = providers.gradleProperty("snakeyamlVersion").get()
 
 // JDK 21 (LTS) toolchain via Gradle toolchains — compilation and test execution use
 // JDK 21 regardless of the JDK that launched Gradle.
@@ -39,6 +40,7 @@ application {
 dependencies {
     implementation("info.picocli:picocli:$picocliVersion")
     kapt("info.picocli:picocli-codegen:$picocliVersion")
+    implementation("org.yaml:snakeyaml:$snakeyamlVersion")
 
     testImplementation("io.kotest:kotest-runner-junit5:$kotestVersion")
     testImplementation("io.kotest:kotest-assertions-core:$kotestVersion")
