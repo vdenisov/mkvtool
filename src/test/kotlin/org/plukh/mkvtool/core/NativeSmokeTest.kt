@@ -29,6 +29,10 @@ class NativeSmokeTest : FunSpec({
         languageGuessProbeValue() shouldBe "rus"
     }
 
+    test("an mkvmerge -J document parses through the real prober") {
+        jsonProbeValue() shouldBe "Русский"
+    }
+
     test("a YAML document round-trips through the real loader") {
         yamlProbeValue() shouldBe "Русский"
     }

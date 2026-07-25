@@ -7,6 +7,10 @@ plugins {
     // run it. picocli-codegen generates the GraalVM reflection config under
     // META-INF/native-image, consumed by the native-image build below.
     kotlin("kapt")
+    // kotlinx.serialization is a *compiler* plugin: it generates each @Serializable
+    // class's serializer at compile time, so JSON parsing needs no runtime reflection
+    // and therefore no native-image reachability config.
+    kotlin("plugin.serialization")
     // installDist provides the dev launcher; also names it via applicationName below.
     application
     // Maintained shadow fork (com.gradleup.*); the old johnrengelman fork is dead.
@@ -24,6 +28,7 @@ group = "org.plukh"
 val picocliVersion = providers.gradleProperty("picocliVersion").get()
 val kotestVersion = providers.gradleProperty("kotestVersion").get()
 val snakeyamlVersion = providers.gradleProperty("snakeyamlVersion").get()
+val kotlinxSerializationVersion = providers.gradleProperty("kotlinxSerializationVersion").get()
 
 // JDK 21 (LTS) toolchain via Gradle toolchains — compilation and test execution use
 // JDK 21 regardless of the JDK that launched Gradle.
@@ -41,6 +46,7 @@ dependencies {
     implementation("info.picocli:picocli:$picocliVersion")
     kapt("info.picocli:picocli-codegen:$picocliVersion")
     implementation("org.yaml:snakeyaml:$snakeyamlVersion")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:$kotlinxSerializationVersion")
 
     testImplementation("io.kotest:kotest-runner-junit5:$kotestVersion")
     testImplementation("io.kotest:kotest-assertions-core:$kotestVersion")
@@ -101,6 +107,13 @@ graalvmNative {
             mainClass.set(application.mainClass.get())
             buildArgs.add("-H:+AddAllCharsets")
             buildArgs.add("-H:+IncludeAllLocales")
+            // kotlinx.serialization initializes its generated serializers at build time, which reaches
+            // kotlin.DeprecationLevel (the enum behind every @Deprecated annotation) and leaves it
+            // initialized while native-image's default policy still wants it at run time — the build then
+            // fails outright. Marking the enum build-time settles the disagreement; it is a compile-time
+            // constant holder with no state worth deferring. Without this, nativeCompile fails as soon as
+            // anything @Serializable is reachable.
+            buildArgs.add("--initialize-at-build-time=kotlin.DeprecationLevel")
         }
     }
 }

@@ -65,6 +65,23 @@ fun nativeLanguageName(code: String): String? {
 fun languageGuessProbeValue(): String? = guessLanguage(listOf("Русский"))
 
 /**
+ * Parses a minimal `mkvmerge -J` document through the real [parseProbe] and returns the track name it
+ * read back, or null if anything about the parse went wrong.
+ *
+ * kotlinx.serialization generates its serializers at compile time, so this should need no reachability
+ * config — but "should" is what a native probe is for, and the cost of being wrong is `inspect` and `mux`
+ * failing on the first file they touch. The Cyrillic track name converges on the same expected string as
+ * the charset, locale and YAML probes.
+ */
+fun jsonProbeValue(): String? {
+    val json = """{"container":{"recognized":true,"supported":true},
+                  "tracks":[{"id":0,"type":"audio","codec":"AAC",
+                             "properties":{"track_name":"Русский"}}]}"""
+    return (parseProbe(File("smoke.mkv"), json) as? ProbeResult.Probed)
+        ?.allTracks?.singleOrNull()?.trackName
+}
+
+/**
  * Round-trips a one-key UTF-8 YAML document through the real [loadMapping] and returns
  * the value it read back, or null if anything about the load went wrong. snakeyaml is a
  * third-party dependency and the GraalVM reachability-metadata repository is disabled for

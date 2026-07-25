@@ -1,6 +1,7 @@
 package org.plukh.mkvtool.cli
 
 import org.plukh.mkvtool.core.decodeWindows1251Strict
+import org.plukh.mkvtool.core.jsonProbeValue
 import org.plukh.mkvtool.core.languageGuessProbeValue
 import org.plukh.mkvtool.core.nativeLanguageName
 import org.plukh.mkvtool.core.yamlProbeValue
@@ -46,18 +47,21 @@ class NativeSmokeCommand : Callable<Int> {
         val decoded = decodeWindows1251Strict(cp1251Sample)
         val nativeName = nativeLanguageName("ru")
         val languageGuess = languageGuessProbeValue()
+        val jsonValue = jsonProbeValue()
         val yamlValue = yamlProbeValue()
 
         utf8Out.println("charset (windows-1251 decode): $decoded")
         utf8Out.println("locale (ru native name):       $nativeName")
         utf8Out.println("language (guess for Русский):  $languageGuess")
+        utf8Out.println("json (parsed track name):      $jsonValue")
         utf8Out.println("yaml (round-tripped value):    $yamlValue")
 
         val charsetOk = decoded == expected
         val localeOk = nativeName == expected
         val languageOk = languageGuess == expectedGuess
+        val jsonOk = jsonValue == expected
         val yamlOk = yamlValue == expected
-        if (charsetOk && localeOk && languageOk && yamlOk) {
+        if (charsetOk && localeOk && languageOk && jsonOk && yamlOk) {
             utf8Out.println("native-smoke: OK")
             return 0
         }
@@ -67,6 +71,7 @@ class NativeSmokeCommand : Callable<Int> {
         if (!languageOk) {
             utf8Out.println("native-smoke: FAIL language - expected '$expectedGuess', got '$languageGuess'")
         }
+        if (!jsonOk) utf8Out.println("native-smoke: FAIL json - expected '$expected', got '$jsonValue'")
         if (!yamlOk) utf8Out.println("native-smoke: FAIL yaml - expected '$expected', got '$yamlValue'")
         return 1
     }
