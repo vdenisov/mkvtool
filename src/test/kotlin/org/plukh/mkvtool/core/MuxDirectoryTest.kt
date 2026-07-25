@@ -16,6 +16,9 @@ import java.io.File
  * mkvmerge is injected, so this runs in-process — what it pins is the orchestration around the command
  * line, which is where the batch's promises live. The important one is that **nothing aborts**: a season
  * where one episode fails is a normal outcome, and the other twenty-three are worth muxing.
+ *
+ * Every case here runs with the pre-flight check off, so a probe is never needed and the walk is what is
+ * under test. The gates themselves are `MuxPreflightTest`'s subject.
  */
 class MuxDirectoryTest : FunSpec({
 
@@ -186,10 +189,11 @@ private fun mux(
         uiLanguage = "en",
         trackOrder = "0:0,0:1",
         dryRun = dryRun,
+        check = false,
         fileMasks = fileMasks,
         excludeMasks = excludeMasks,
     ),
     renderer = renderer,
-    probe = { error("no probe expected without \${codec}") },
+    probe = { error("no probe expected: the check is off and no template asks for a codec") },
     runCommand = { command, where -> record(command, where); exitCode(command) },
 )

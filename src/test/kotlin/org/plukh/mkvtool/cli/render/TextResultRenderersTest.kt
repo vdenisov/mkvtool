@@ -13,7 +13,10 @@ import org.plukh.mkvtool.core.ExternalLegend
 import org.plukh.mkvtool.core.FileConversion
 import org.plukh.mkvtool.core.FileFix
 import org.plukh.mkvtool.core.FileIdentification
+import org.plukh.mkvtool.core.CompanionDrops
 import org.plukh.mkvtool.core.FileMux
+import org.plukh.mkvtool.core.MuxAbort
+import org.plukh.mkvtool.core.SubstitutionDrops
 import org.plukh.mkvtool.core.FileProped
 import org.plukh.mkvtool.core.FileRenamed
 import org.plukh.mkvtool.core.FileTitled
@@ -69,6 +72,10 @@ class TextResultRenderersTest : FunSpec({
             StrictVerdict::class,
             TrackOrder.Derived::class,
             TrackOrder.Configured::class,
+            SubstitutionDrops::class,
+            CompanionDrops::class,
+            MuxAbort.UnresolvedVariables::class,
+            MuxAbort.BlockingDiscrepancies::class,
             FileMux::class,
         )
     }

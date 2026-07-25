@@ -5,6 +5,7 @@ import org.plukh.mkvtool.out.CommandResult
 import org.plukh.mkvtool.out.Header
 import org.plukh.mkvtool.out.Notice
 import org.plukh.mkvtool.out.Renderer
+import org.plukh.mkvtool.out.plural
 import java.io.File
 
 /**
@@ -49,6 +50,58 @@ data class FileMux(
     val outcome: MuxOutcome,
 ) : CommandResult
 
+/** One file-scope variable a template asked for, and the episodes no source could supply it for. */
+data class UnresolvedVariable(val name: String, val fileNames: List<String>)
+
+/**
+ * Episodes dropped because a variable their titles use has no value for them — validation's **second**
+ * stage.
+ *
+ * The split from stage one is the point. A name that is not a variable at all is config-static and affects
+ * every file, so it is fatal before anything is read; a valid variable with no data for episode 25 is
+ * *data*-shaped — TheMovieDB missing an entry, a stray file with no episode number in its name — so that
+ * episode is dropped and the rest of the season still muxes. Exactly the companion pre-flight's philosophy,
+ * which is why the two sit together and read alike.
+ *
+ * [episodeSource] is the metadata file the batch had, or null when there was none — worth saying outright,
+ * since "no episodes.yaml or episodes.txt here" explains every unresolved variable at once.
+ */
+data class SubstitutionDrops(
+    val variables: List<UnresolvedVariable>,
+    val fileNames: List<String>,
+    val episodeSource: String?,
+) : CommandResult
+
+/** One `additionalSources` pattern, and the episodes it resolves to nothing for. [pattern] is the template
+ *  as the config wrote it, since that is the line a reader has to go and look at. */
+data class MissingCompanion(val pattern: String, val fileNames: List<String>)
+
+/**
+ * Episodes dropped because a companion file they need is not there.
+ *
+ * Never an abort, `--strict` included: a dub studio releasing 22 of 24 episodes is an ordinary situation,
+ * and those two episodes would have failed in mkvmerge anyway — partway through a long batch, which is the
+ * whole reason to check up front instead.
+ */
+data class CompanionDrops(
+    val sources: List<MissingCompanion>,
+    val fileNames: List<String>,
+) : CommandResult
+
+/**
+ * Why `--strict` stopped the batch before anything was written.
+ *
+ * Two leaves because they are two different verdicts reached at two different moments — one before a single
+ * file has been read, one after the whole batch has been probed — and each says what it found.
+ */
+sealed interface MuxAbort : CommandResult {
+    /** Stage two found episodes it could not resolve a title for. */
+    data class UnresolvedVariables(val fileCount: Int) : MuxAbort
+
+    /** The pre-flight check found discrepancies on tracks the config selects by id. */
+    data class BlockingDiscrepancies(val count: Int) : MuxAbort
+}
+
 /**
  * The run root.
  *
@@ -61,6 +114,15 @@ data class MuxRun(
     val destinationDir: String,
     val trackOrder: String,
     val dryRun: Boolean,
+    /** Null when nothing was dropped — not an empty report, which would claim the stage ran and found
+     *  nothing to say. Same for [companionDrops]. */
+    val substitutionDrops: SubstitutionDrops? = null,
+    val companionDrops: CompanionDrops? = null,
+    /** Null under `--no-check`: the field is empty because nothing computed it, not because a flag
+     *  reshaped the document. */
+    val check: CheckReport? = null,
+    /** Set only when `--strict` stopped the batch; the caller turns it into exit 2. */
+    val aborted: MuxAbort? = null,
 ) : CommandResult {
     val muxed: Int = files.count { it.outcome is MuxOutcome.Muxed }
     val failed: Int = files.count { it.outcome is MuxOutcome.Failed }
@@ -112,7 +174,18 @@ data class MuxOptions(
     /** Whether any template uses `${'$'}{codec}`. False means no track is ever probed, so a config without
      *  it costs no subprocesses at all. */
     val usesCodec: Boolean = false,
+    /**
+     * The file-scope variables the config actually uses, from stage one. Stage two checks only these —
+     * a variable nothing asks for cannot drop an episode for being unresolvable.
+     */
+    val usedFileVars: Set<String> = emptySet(),
+    /** Which metadata file supplied the episode data, or null when there was none. Stage two says so. */
+    val episodeSource: String? = null,
     val dryRun: Boolean = false,
+    /** The pre-flight consistency check, wanted unless `--no-check` says otherwise. */
+    val check: Boolean = true,
+    /** Turn the pre-flights' findings into an abort instead of a report. */
+    val strict: Boolean = false,
     val fileMasks: List<String> = emptyList(),
     val excludeMasks: List<String> = emptyList(),
 ) {
@@ -220,6 +293,11 @@ fun resolveTrackOrder(config: Config): TrackOrder {
  * Substitution resolves **eagerly** here: the builder is called once per file, with that file's variables
  * already resolved, so nothing needs deferring the way v1's lazy GStrings did. Probing happens only when a
  * template actually asks for a codec, and [probe] is injected so the unit tier never launches mkvmerge.
+ *
+ * **[probe] is expected to memoize**, because the caller owns the batch and has usually read these files
+ * already — the pre-flight check probes every one of them. A builder holding its own cache would read a
+ * season twice over a network share for the sake of `${'$'}{codec}`. Companions are the exception and are
+ * cached here: nothing else reads them.
  */
 class MuxCommandBuilder(
     /** The media directory. Only the companion probe reads it — every path the command line itself
@@ -229,7 +307,6 @@ class MuxCommandBuilder(
     private val probe: (File) -> ProbeResult,
 ) {
     private val config = options.config
-    private val mainProbes = HashMap<File, ProbeResult>()
     private val companionProbes = HashMap<String, ProbeResult?>()
 
     /** Where [file] will be written — always with a forward slash, and relative unless the config wrote an
@@ -336,12 +413,11 @@ class MuxCommandBuilder(
         return listOf("--track-name", "$id:${expand(title.text)}")
     }
 
-    /** The probed record behind a configured track, for `${'$'}{codec}` alone. Normally already cached by
+    /** The probed record behind a configured track, for `${'$'}{codec}` alone. Normally already read by
      *  the pre-flight; probed on demand when `--no-check` skipped it. */
     private fun probedTrack(file: File, trackId: Int): ProbedTrack? {
         if (!options.usesCodec) return null
-        val info = mainProbes.getOrPut(file) { probe(file) }
-        return (info as? ProbeResult.Probed)?.allTracks?.firstOrNull { it.id == trackId }
+        return (probe(file) as? ProbeResult.Probed)?.allTracks?.firstOrNull { it.id == trackId }
     }
 
     /** The same for a companion, which mkvmerge always reports as holding exactly track 0. */
@@ -374,12 +450,17 @@ class MuxCommandBuilder(
 /**
  * Mux every media file in [dir], reporting each as it completes.
  *
+ * Four gates run before anything is written, in this order: the masks, stage-two substitution, the
+ * companion pre-flight, and the consistency check. The first two of them can *empty* the batch, and all
+ * four run before the output directory is created, so a fully blocked batch leaves no litter behind.
+ *
+ * Only `--strict` stops the run, and it does so by returning [MuxRun.aborted] rather than by throwing.
+ * Otherwise nothing here aborts: a file that is not media is named and passed over, a file mkvmerge
+ * rejects is reported, the batch carries on, and the caller exits 0.
+ *
  * [runCommand] is injected so the orchestration is testable without mkvmerge; the default inherits the
  * child's streams, so mkvmerge's own progress reaches the console unchanged, and runs it with [dir] as the
  * working directory — the command line names its sources by bare relative name.
- *
- * Nothing here aborts. A file that is not media is named and passed over, a file mkvmerge rejects is
- * reported and the batch carries on, and the caller always exits 0.
  */
 fun muxDirectory(
     dir: File,
@@ -391,7 +472,28 @@ fun muxDirectory(
     val selection = selectMedia(dir, options.allowedExtensions, options.fileMasks, options.excludeMasks)
     val hasMasks = options.fileMasks.isNotEmpty() || options.excludeMasks.isNotEmpty()
 
-    fun empty() = MuxRun(emptyList(), options.destinationDir, options.trackOrder, options.dryRun)
+    // Filled as the stages run and folded into whichever result this returns, so a run that stops early
+    // still reports everything that made it stop.
+    var substitutionDrops: SubstitutionDrops? = null
+    var companionDrops: CompanionDrops? = null
+    var check: CheckReport? = null
+
+    fun stopped(aborted: MuxAbort? = null) = MuxRun(
+        files = emptyList(),
+        destinationDir = options.destinationDir,
+        trackOrder = options.trackOrder,
+        dryRun = options.dryRun,
+        substitutionDrops = substitutionDrops,
+        companionDrops = companionDrops,
+        check = check,
+        aborted = aborted,
+    )
+
+    /** A pre-flight emptied the batch: said outright, since a bare green "Done" would read as success. */
+    fun nothingLeft(): MuxRun {
+        renderer.render(Advisory("*** Nothing left to mux"))
+        return stopped()
+    }
 
     // A mask that matches nothing must say so. Falling through to a bare "Done" after a typo'd pattern
     // looks exactly like a successful run that had no work to do.
@@ -399,7 +501,7 @@ fun muxDirectory(
         renderer.render(
             Advisory("*** No files match: ${maskDescription(options.fileMasks, options.excludeMasks)}"),
         )
-        return empty()
+        return stopped()
     }
 
     // Matched something, but nothing that is media. A different message from the one above, because it is
@@ -408,17 +510,78 @@ fun muxDirectory(
         renderer.render(
             Advisory(noMediaMessage(options.allowedExtensions, options.fileMasks, options.excludeMasks)),
         )
-        return empty()
+        return stopped()
+    }
+
+    // Both pre-flights drop episodes from the batch by name, so it shrinks as they run. Non-media files
+    // ride along in it: the loop below reports them as skipped, and nothing can drop them.
+    var batch = selection.matched
+    fun media() = batch.filter { extensionOf(it.name) in options.allowedExtensions }
+
+    val dropped = substitutionDropsFor(media(), options)
+    if (dropped != null) {
+        substitutionDrops = dropped
+        if (options.strict) {
+            val abort = MuxAbort.UnresolvedVariables(dropped.fileNames.size)
+            renderer.render(abort)
+            return stopped(abort)
+        }
+        renderer.render(dropped)
+        val names = dropped.fileNames.toSet()
+        batch = batch.filterNot { it.name in names }
+        if (media().isEmpty()) return nothingLeft()
+    }
+
+    // Never strict, unlike the stage above: a dub studio releasing 22 of 24 episodes is ordinary, and the
+    // two that are missing would have failed in mkvmerge anyway.
+    val missing = companionDropsFor(dir, media(), options)
+    if (missing != null) {
+        companionDrops = missing
+        renderer.render(missing)
+        val names = missing.fileNames.toSet()
+        batch = batch.filterNot { it.name in names }
+        if (media().isEmpty()) return nothingLeft()
+    }
+
+    // `mkvmerge -J` over a season takes a couple of seconds where muxing takes minutes per file, so the
+    // check is essentially free and runs by default. The probes it fills are the same ones `${'$'}{codec}`
+    // reads below, which is why the cache lives here rather than in the builder.
+    val probeCache = HashMap<File, ProbeResult>()
+    val probeCached = { file: File -> probeCache.getOrPut(file) { probe(file) } }
+
+    if (options.check) {
+        val mediaFiles = media()
+        val meter = renderer.progress("*** Reading ${plural(mediaFiles.size, "file")}", mediaFiles.size)
+        val infos = mediaFiles.map { probeCached(it).also { _ -> meter.tick() } }
+        meter.finish()
+        renderer.render(Notice(""))
+
+        // No externals: `mux` discovers nothing, so every external path in the report is inert here and it
+        // renders exactly as `inspect`'s does bar the header.
+        val report = buildCheckReport(
+            infos = infos,
+            selection = trackSelectionOf(options.config),
+            headerLabel = "Pre-flight check",
+        )
+        check = report
+        renderer.render(report)
+
+        if (report.blockingCount > 0 && options.strict) {
+            val abort = MuxAbort.BlockingDiscrepancies(report.blockingCount)
+            renderer.render(abort)
+            return stopped(abort)
+        }
     }
 
     // mkvmerge only creates a missing output directory in recent versions; older ones simply fail to open
-    // the output file. Never on a dry run, which must leave the filesystem exactly as it found it.
+    // the output file. Never on a dry run, which must leave the filesystem exactly as it found it — and
+    // after every gate above, so a fully blocked batch leaves no empty directory behind.
     if (!options.dryRun) resolveAgainst(dir, options.destinationDir).mkdirs()
 
-    val builder = MuxCommandBuilder(dir, options, probe)
-    val results = ArrayList<FileMux>(selection.matched.size)
+    val builder = MuxCommandBuilder(dir, options, probeCached)
+    val results = ArrayList<FileMux>(batch.size)
 
-    for (file in selection.matched) {
+    for (file in batch) {
         if (extensionOf(file.name) !in options.allowedExtensions) {
             results += FileMux(file.name, null, null, MuxOutcome.Skipped).also(renderer::render)
             continue
@@ -440,7 +603,67 @@ fun muxDirectory(
         results += FileMux(file.name, outputPath, command, outcome).also(renderer::render)
     }
 
-    return MuxRun(results, options.destinationDir, options.trackOrder, options.dryRun)
+    return MuxRun(
+        files = results,
+        destinationDir = options.destinationDir,
+        trackOrder = options.trackOrder,
+        dryRun = options.dryRun,
+        substitutionDrops = substitutionDrops,
+        companionDrops = companionDrops,
+        check = check,
+    )
+}
+
+/**
+ * Stage two: which episodes a template's variables have no value for, or null when every one resolves.
+ *
+ * Only the variables the config actually uses are checked ([MuxOptions.usedFileVars]) — a season with no
+ * show name in its metadata is nobody's problem if no template asks for one.
+ */
+private fun substitutionDropsFor(mediaFiles: List<File>, options: MuxOptions): SubstitutionDrops? {
+    if (options.usedFileVars.isEmpty()) return null
+
+    val byVariable = LinkedHashMap<String, MutableList<String>>()
+    val blocked = LinkedHashSet<String>()
+
+    for (file in mediaFiles) {
+        val missing = options.substitution.fileVarsFor(file).missing intersect options.usedFileVars
+        missing.forEach { byVariable.getOrPut(it) { ArrayList() } += file.name }
+        if (missing.isNotEmpty()) blocked += file.name
+    }
+
+    if (blocked.isEmpty()) return null
+    return SubstitutionDrops(
+        variables = byVariable.map { (name, names) -> UnresolvedVariable(name, names) },
+        fileNames = blocked.toList(),
+        episodeSource = options.episodeSource,
+    )
+}
+
+/** The companion pre-flight: which episodes an `additionalSources` pattern resolves to nothing for, or
+ *  null when every companion is on disk. */
+private fun companionDropsFor(dir: File, mediaFiles: List<File>, options: MuxOptions): CompanionDrops? {
+    val sources = options.config.additionalSources.mapNotNull { it.file }
+    if (sources.isEmpty()) return null
+
+    val bySource = LinkedHashMap<String, MutableList<String>>()
+    val blocked = LinkedHashSet<String>()
+
+    for (file in mediaFiles) {
+        val vars = options.substitution.fileVarsFor(file).vars
+        for (pattern in sources) {
+            if (!resolveAgainst(dir, substitute(pattern, vars)).isFile) {
+                bySource.getOrPut(pattern) { ArrayList() } += file.name
+                blocked += file.name
+            }
+        }
+    }
+
+    if (blocked.isEmpty()) return null
+    return CompanionDrops(
+        sources = bySource.map { (pattern, names) -> MissingCompanion(pattern, names) },
+        fileNames = blocked.toList(),
+    )
 }
 
 /** The real runner: mkvmerge with its streams inherited, in [dir]. */

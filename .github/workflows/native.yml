@@ -43,13 +43,12 @@ jobs:
 
   harness-app:
     # The Groovy acceptance harness (the port's oracle) run against the mkvtool binary
-    # instead of the scripts. Expected mostly RED during the port — no subcommands are
-    # wired up yet — so it is NON-BLOCKING: continue-on-error keeps it off the merge gate,
-    # and it is deliberately not added to branch-protection required checks. It flips to
-    # required once phase 5 (mux) lands and the full harness is green under --target app.
+    # instead of the scripts. It was non-blocking while the port was under way and every
+    # command was still missing; with `mux` landed it passes in full, so it is now a
+    # blocking check — a case that goes red here is a behavior difference from the scripts,
+    # which is exactly what must not merge. Add it to branch-protection required checks.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    continue-on-error: true
     name: Acceptance harness (--target app)
     env:
       GROOVY_VERSION: "5.0.6"

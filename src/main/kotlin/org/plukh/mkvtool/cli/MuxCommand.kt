@@ -64,8 +64,6 @@ class MuxCommand : Callable<Int> {
     )
     var dryRun: Boolean = false
 
-    // These two are declared here and act only once the pre-flights exist: there is no check yet to
-    // suppress and no finding yet to be strict about, so a run behaves today as though both were given.
     @Option(
         names = ["--no-check"],
         description = ["Skip the automatic pre-flight consistency check before muxing"],
@@ -144,22 +142,33 @@ class MuxCommand : Callable<Int> {
         val trackOrder = resolveTrackOrder(config)
         renderer.render(trackOrder)
 
-        muxDirectory(
+        val loaded = episodes as? EpisodeMetadata.Loaded
+        val run = muxDirectory(
             dir = dir,
             options = MuxOptions(
                 config = config,
                 mkvmergeExe = mkvmergeExe,
                 uiLanguage = uiLanguage,
                 trackOrder = trackOrder.order,
-                substitution = SubstitutionEngine((episodes as? EpisodeMetadata.Loaded)?.data),
+                substitution = SubstitutionEngine(loaded?.data),
                 usesCodec = validation.usesCodec,
+                usedFileVars = validation.usedFileVars,
+                episodeSource = loaded?.name,
                 dryRun = dryRun,
+                check = !noCheck,
+                strict = strict,
                 fileMasks = fileMasks,
                 excludeMasks = excludeMasks,
             ),
             renderer = renderer,
             probe = { probeFile(it, mkvmergeExe) },
         )
+
+        // `--strict` is the only thing that stops a batch, and it has already said why. Everything else —
+        // a file mkvmerge rejected, an episode dropped for a missing companion — leaves the run a success:
+        // a partially muxed season is a normal outcome, and exiting non-zero over one bad episode would
+        // make the command unusable from a shell script for the twenty-three good ones.
+        if (run.aborted != null) return 2
 
         renderer.render(Notice(""))
         renderer.render(Success("*** Done"))

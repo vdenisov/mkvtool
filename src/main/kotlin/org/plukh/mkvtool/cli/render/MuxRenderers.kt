@@ -1,9 +1,13 @@
 package org.plukh.mkvtool.cli.render
 
+import org.plukh.mkvtool.core.CompanionDrops
 import org.plukh.mkvtool.core.FileMux
+import org.plukh.mkvtool.core.MuxAbort
 import org.plukh.mkvtool.core.MuxOutcome
+import org.plukh.mkvtool.core.SubstitutionDrops
 import org.plukh.mkvtool.core.TrackOrder
 import org.plukh.mkvtool.out.ResultTextRenderer
+import org.plukh.mkvtool.out.plural
 
 /**
  * The derived track order, announced once before the batch.
@@ -56,6 +60,71 @@ val TrackOrderConfiguredRenderer = ResultTextRenderer<TrackOrder.Configured> { r
             ),
         )
     }
+}
+
+/**
+ * The episodes stage two dropped, and which variable left each of them unresolvable.
+ *
+ * Grouped by variable rather than by file, because that is the shape of the answer: one missing
+ * `${'$'}{episodeName}` across eleven episodes is one thing to fix, and eleven lines saying so is not. The
+ * missing-metadata note comes first when there is no metadata at all — it explains every line below it at
+ * once, and is usually the whole story.
+ */
+val SubstitutionDropsRenderer = ResultTextRenderer<SubstitutionDrops> { result, s ->
+    s.out.println(
+        s.yellow(
+            "*** ${plural(result.fileNames.size, "file")} will be skipped: " +
+                "substitution variables have no value",
+        ),
+    )
+    if (result.episodeSource == null) s.out.println("      no episodes.yaml or episodes.txt in this directory")
+    for (variable in result.variables) {
+        s.out.println("      \${${variable.name}}  (unresolved for ${plural(variable.fileNames.size, "file")})")
+        formatFileList(variable.fileNames, "        ").forEach { s.out.println(it) }
+    }
+    s.out.println()
+}
+
+/**
+ * The episodes whose companions are not on disk, grouped by the pattern that failed to resolve.
+ *
+ * The pattern is printed unresolved — `${'$'}{fileName}[Studio].mka` — because that is the line in the
+ * config a reader has to go and look at, and the files it did not find are listed under it.
+ */
+val CompanionDropsRenderer = ResultTextRenderer<CompanionDrops> { result, s ->
+    s.out.println(
+        s.yellow("*** ${plural(result.fileNames.size, "file")} will be skipped: companion files are missing"),
+    )
+    for (source in result.sources) {
+        s.out.println("      ${source.pattern}  (missing for ${plural(source.fileNames.size, "file")})")
+        formatFileList(source.fileNames, "        ").forEach { s.out.println(it) }
+    }
+    s.out.println()
+}
+
+/** Stage two under `--strict`: the same finding the report above would have made, as a refusal. */
+val UnresolvedVariablesAbortRenderer = ResultTextRenderer<MuxAbort.UnresolvedVariables> { result, s ->
+    s.err.println(
+        s.red(
+            "*** Strict mode: aborting (${plural(result.fileCount, "file")} with " +
+                "unresolved substitution variables).",
+        ),
+    )
+}
+
+/**
+ * The check under `--strict`. Two lines, because the first says what was found and the second says what it
+ * cost — and what to do about it, since "aborting" alone leaves a reader to guess whether anything was
+ * written.
+ */
+val BlockingDiscrepanciesAbortRenderer = ResultTextRenderer<MuxAbort.BlockingDiscrepancies> { result, s ->
+    s.err.println(
+        s.red(
+            "*** Strict mode: aborting (${plural(result.count, "discrepancy", "discrepancies")} " +
+                "affecting selected tracks).",
+        ),
+    )
+    s.err.println(s.red("*** Nothing was muxed. Fix config.yaml or the inputs, or drop --strict to continue."))
 }
 
 /**

@@ -222,31 +222,35 @@ class MuxCommandLineTest : FunSpec({
     }
 
     context("\${codec}") {
-        test("resolves from the probed track the config names, and probes nothing otherwise") {
-            var probes = 0
+        test("resolves from the probed track the config names, for each track from one read") {
+            val read = mutableSetOf<String>()
             val cfg = config(
                 audio = listOf(track(2, "en", "\${languageName} \${codec}")),
                 subtitles = listOf(track(4, "en", "\${languageName} \${codec}")),
             )
+            // Memoizing, as the orchestrator's own probe is: the builder asks per track and expects the
+            // caller to have made that cheap, since the pre-flight has usually read the file already.
+            val cache = HashMap<File, ProbeResult>()
             val probe: (File) -> ProbeResult = { file ->
-                probes++
-                ProbeResult.Probed(
-                    file = file,
-                    allTracks = listOf(
-                        ProbedTrack(2, "audio", "AAC", "A_AAC", "eng", "", false, false),
-                        ProbedTrack(4, "subtitles", "SubRip/SRT", "S_TEXT/UTF8", "eng", "", false, false),
-                    ),
-                    tracks = emptyMap(),
-                    chapters = 0,
-                )
+                cache.getOrPut(file) {
+                    read += file.name
+                    ProbeResult.Probed(
+                        file = file,
+                        allTracks = listOf(
+                            ProbedTrack(2, "audio", "AAC", "A_AAC", "eng", "", false, false),
+                            ProbedTrack(4, "subtitles", "SubRip/SRT", "S_TEXT/UTF8", "eng", "", false, false),
+                        ),
+                        tracks = emptyMap(),
+                        chapters = 0,
+                    )
+                }
             }
 
             val command = cfg.commandFor(usesCodec = true, probe = probe)
 
             command.valueFor("--track-name", "2:") shouldBe "2:English AAC"
             command.valueFor("--track-name", "4:") shouldBe "4:English SRT"
-            // One probe for both tracks: the record is memoized per file.
-            probes shouldBe 1
+            read shouldContainExactly setOf("Show - S01E01.mkv")
         }
 
         test("a config that never asks for a codec probes nothing at all") {

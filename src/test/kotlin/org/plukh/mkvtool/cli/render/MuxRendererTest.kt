@@ -3,9 +3,14 @@ package org.plukh.mkvtool.cli.render
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import org.plukh.mkvtool.core.CompanionDrops
 import org.plukh.mkvtool.core.FileMux
+import org.plukh.mkvtool.core.MissingCompanion
+import org.plukh.mkvtool.core.MuxAbort
 import org.plukh.mkvtool.core.MuxOutcome
+import org.plukh.mkvtool.core.SubstitutionDrops
 import org.plukh.mkvtool.core.TrackOrder
+import org.plukh.mkvtool.core.UnresolvedVariable
 
 /**
  * What a mux says beyond mkvmerge's own output — which is not much, and deliberately so: the child owns
@@ -61,6 +66,104 @@ class MuxRendererTest : FunSpec({
             )
 
             err.lines().filter { it.startsWith("*** Warning:") }.size shouldBe 3
+        }
+    }
+
+    context("the pre-flight drops") {
+        test("stage two names the count, then each variable and the episodes it failed for") {
+            val (out, err) = renderResult(
+                SubstitutionDropsRenderer,
+                SubstitutionDrops(
+                    variables = listOf(
+                        UnresolvedVariable("episodeNum", listOf("Odd.mkv")),
+                        UnresolvedVariable("episodeName", listOf("Odd.mkv", "Other.mkv")),
+                    ),
+                    fileNames = listOf("Odd.mkv", "Other.mkv"),
+                    episodeSource = "episodes.yaml",
+                ),
+            ).lf()
+
+            out shouldBe "*** 2 files will be skipped: substitution variables have no value\n" +
+                "      \${episodeNum}  (unresolved for 1 file)\n" +
+                "        Odd.mkv\n" +
+                "      \${episodeName}  (unresolved for 2 files)\n" +
+                "        Odd.mkv\n" +
+                "        Other.mkv\n" +
+                "\n"
+            err shouldBe ""
+        }
+
+        test("with no metadata at all it says so first, since that explains every line under it") {
+            val (out, _) = renderResult(
+                SubstitutionDropsRenderer,
+                SubstitutionDrops(
+                    variables = listOf(UnresolvedVariable("episodeName", listOf("a.mkv"))),
+                    fileNames = listOf("a.mkv"),
+                    episodeSource = null,
+                ),
+            ).lf()
+
+            out.lines()[1] shouldBe "      no episodes.yaml or episodes.txt in this directory"
+        }
+
+        test("a long list of episodes truncates, as the check report's evidence lists do") {
+            val many = (1..12).map { "S01E%02d.mkv".format(it) }
+            val (out, _) = renderResult(
+                SubstitutionDropsRenderer,
+                SubstitutionDrops(listOf(UnresolvedVariable("episodeName", many)), many, "episodes.txt"),
+            ).lf()
+
+            out shouldContain "        ... and 4 more"
+        }
+
+        test("the companion drop names the pattern unresolved, not what it expanded to") {
+            // The pattern is the line in the config to go and look at; a resolved path is one episode's
+            // story, and there are usually several.
+            val (out, err) = renderResult(
+                CompanionDropsRenderer,
+                CompanionDrops(
+                    sources = listOf(MissingCompanion("\${fileName}[Studio].mka", listOf("S01E02.mkv"))),
+                    fileNames = listOf("S01E02.mkv"),
+                ),
+            ).lf()
+
+            out shouldBe "*** 1 file will be skipped: companion files are missing\n" +
+                "      \${fileName}[Studio].mka  (missing for 1 file)\n" +
+                "        S01E02.mkv\n" +
+                "\n"
+            err shouldBe ""
+        }
+    }
+
+    context("--strict aborts") {
+        test("stage two's abort counts the files it could not resolve") {
+            val (out, err) = renderResult(
+                UnresolvedVariablesAbortRenderer,
+                MuxAbort.UnresolvedVariables(3),
+            ).lf()
+
+            err shouldBe "*** Strict mode: aborting (3 files with unresolved substitution variables).\n"
+            out shouldBe ""
+        }
+
+        test("the check's abort counts the discrepancies and says nothing was written") {
+            val (out, err) = renderResult(
+                BlockingDiscrepanciesAbortRenderer,
+                MuxAbort.BlockingDiscrepancies(2),
+            ).lf()
+
+            err shouldBe "*** Strict mode: aborting (2 discrepancies affecting selected tracks).\n" +
+                "*** Nothing was muxed. Fix config.yaml or the inputs, or drop --strict to continue.\n"
+            out shouldBe ""
+        }
+
+        test("one discrepancy is singular, and it is the irregular plural that gets it wrong") {
+            val (_, err) = renderResult(
+                BlockingDiscrepanciesAbortRenderer,
+                MuxAbort.BlockingDiscrepancies(1),
+            ).lf()
+
+            err shouldContain "(1 discrepancy affecting selected tracks)"
         }
     }
 
