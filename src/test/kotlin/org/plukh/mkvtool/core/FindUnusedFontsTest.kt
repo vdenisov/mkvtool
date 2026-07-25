@@ -108,20 +108,3 @@ private object FontsSilentRenderer : Renderer {
             override fun finish() {}
         }
 }
-
-/** Captures diagnostics events so the missing-fonts advisory can be asserted. */
-private class RecordingRenderer : Renderer {
-    val events = mutableListOf<OutputEvent>()
-
-    override fun render(event: OutputEvent) {
-        events += event
-    }
-
-    override fun render(result: CommandResult) {}
-
-    override fun progress(label: String, total: Int, interactive: Boolean?): ProgressHandle =
-        object : ProgressHandle {
-            override fun tick() {}
-            override fun finish() {}
-        }
-}

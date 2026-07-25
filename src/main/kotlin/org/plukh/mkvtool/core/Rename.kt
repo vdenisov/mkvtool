@@ -35,41 +35,23 @@ sealed interface EpisodeSource {
 }
 
 /**
- * Read `episodes.yaml`, else `episodes.txt`, from [dir].
+ * [loadEpisodeMetadata] under rename's policy: without metadata there is nothing to rename by, so both
+ * an unusable file and no file at all are fatal here.
  *
- * The yaml wins when present: it carries real episode numbers, so a season with a gap stays aligned, and
- * it supplies the show name. [offset] applies to the text file **alone** — that file has no numbers in it,
- * so the offset is part of how it is read, while the yaml needs no shifting and must not get one.
- *
- * Charsets differ by design: the yaml is machine-written and read back as explicit UTF-8, while the text
- * file is auto-detected because it is the format a human types (Notepad on a Cyrillic Windows writes
- * cp1251). Forcing UTF-8 there would mangle exactly that case and gain nothing.
+ * The reading itself — yaml preferred, `offset` applying to the text file alone, the two charset
+ * contracts — belongs to [loadEpisodeMetadata], which `inspect` and `mux` share with the opposite
+ * policies. Only the wording and the verdict are rename's.
  */
-fun loadEpisodeSource(dir: File, offset: Int): EpisodeSource {
-    val yamlFile = File(dir, "episodes.yaml")
-    val textFile = File(dir, "episodes.txt")
-
-    if (yamlFile.isFile) {
-        // Guarded, unlike v1, which parsed it bare and met a hand-edited `episode: "one"` with a stack
-        // trace. `mux` and `inspect` both guard the same file; this was the odd one out.
-        return when (val load = loadMapping(yamlFile, Charsets.UTF_8, ::normalizeYaml)) {
-            is MappingLoad.Loaded -> EpisodeSource.Loaded(load.value, yamlFile.name)
-            is MappingLoad.Problem -> EpisodeSource.Problem("${load.message}; there is nothing to rename by")
-        }
-    }
-
-    if (textFile.isFile) {
-        return EpisodeSource.Loaded(
-            EpisodeData(byEpisode = indexFromLines(readLinesDetected(textFile), offset)),
-            textFile.name,
+fun loadEpisodeSource(dir: File, offset: Int): EpisodeSource =
+    when (val loaded = loadEpisodeMetadata(dir, offset)) {
+        is EpisodeMetadata.Loaded -> EpisodeSource.Loaded(loaded.data, loaded.name)
+        is EpisodeMetadata.Unusable ->
+            EpisodeSource.Problem("${loaded.message}; there is nothing to rename by")
+        EpisodeMetadata.Absent -> EpisodeSource.Problem(
+            "No episode data: expected episodes.yaml or episodes.txt in the current directory",
+            hint = "  - run mkvtool fetch-episodes, or write episodes.txt by hand (one episode name per line)",
         )
     }
-
-    return EpisodeSource.Problem(
-        "No episode data: expected episodes.yaml or episodes.txt in the current directory",
-        hint = "  - run mkvtool fetch-episodes, or write episodes.txt by hand (one episode name per line)",
-    )
-}
 
 /** One rename that will be performed. [relPath] is set for an external file, whose path is what says
  *  which directory's copy is being renamed; the target stays a bare name because the directory never

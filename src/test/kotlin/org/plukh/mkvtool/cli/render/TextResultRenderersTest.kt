@@ -2,16 +2,21 @@ package org.plukh.mkvtool.cli.render
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.plukh.mkvtool.core.CheckReport
 import org.plukh.mkvtool.core.ConversionRun
 import org.plukh.mkvtool.core.EpisodeFetch
+import org.plukh.mkvtool.core.ExternalLeftovers
+import org.plukh.mkvtool.core.ExternalLegend
 import org.plukh.mkvtool.core.FileConversion
 import org.plukh.mkvtool.core.FileFix
+import org.plukh.mkvtool.core.FileIdentification
 import org.plukh.mkvtool.core.FileProped
 import org.plukh.mkvtool.core.FileRenamed
 import org.plukh.mkvtool.core.FileTitled
+import org.plukh.mkvtool.core.InspectReport
 import org.plukh.mkvtool.core.FixRun
 import org.plukh.mkvtool.core.FontUsageReport
 import org.plukh.mkvtool.core.PropeditRun
@@ -19,6 +24,7 @@ import org.plukh.mkvtool.core.RenamePlan
 import org.plukh.mkvtool.core.RenameRun
 import org.plukh.mkvtool.core.ShowFetched
 import org.plukh.mkvtool.core.ShowNameResolved
+import org.plukh.mkvtool.core.StrictVerdict
 import org.plukh.mkvtool.core.TitleRun
 import org.plukh.mkvtool.core.TranslationFallback
 import org.plukh.mkvtool.core.TrackSelection
@@ -54,7 +60,19 @@ class TextResultRenderersTest : FunSpec({
             FileRenamed::class,
             RenameRun::class,
             CheckReport::class,
+            FileIdentification::class,
+            ExternalLegend::class,
+            ExternalLeftovers::class,
+            StrictVerdict::class,
         )
+    }
+
+    test("the inspect root is deliberately unbound, because nothing emits it") {
+        // InspectReport is the core's return value and the future --json document, not something the text
+        // side draws: its children *are* the output, so emitting it too would print them twice. The
+        // registry is consulted on emission only, so an unbound type that is never emitted is legal — and
+        // this is the one such type, pinned here so nobody "completes" the table by adding it.
+        textResultRenderers().registeredTypes shouldNotContain InspectReport::class
     }
 
     test("a render hint reaches the renderer it is meant for") {

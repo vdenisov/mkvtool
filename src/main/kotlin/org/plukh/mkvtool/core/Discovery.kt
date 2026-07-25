@@ -5,7 +5,8 @@ import java.io.IOException
 
 /**
  * External-file discovery: finding the audio and subtitle files that belong to a main media file but do
- * not sit next to it. A port of `src/lib/discovery.groovy`, minus the language guesser (task 2.4).
+ * not sit next to it. A port of `src/lib/discovery.groovy`; the language guesser it leans on to name a
+ * variant's language lives beside it in `LanguageGuess.kt`.
  *
  * Two layouts are in the wild and both are supported, including combined:
  *
@@ -21,7 +22,7 @@ import java.io.IOException
  * share. [PROBE_EXTENSIONS] only says which formats would repay a probe if a caller wants one.
  *
  * The engine returns data, never prose: a variant's display name and a section's path pattern are
- * composed by the renderer from the fields here, the same split task 2.2 made for membership labels.
+ * composed by the renderer from the fields here, the same split the episode-membership labels use.
  */
 
 /**
@@ -140,7 +141,7 @@ fun walkTree(root: File, excluded: Set<String> = emptySet()): List<TreeEntry> {
                     dirRel = prefix,
                     leaf = if (prefix.isEmpty()) null else prefix.substringAfterLast('/'),
                     base = baseNameOf(child.name),
-                    ext = extensionOf(child.name).lowercase(),
+                    ext = extensionOf(child.name),
                 )
             }
         }
@@ -453,10 +454,4 @@ private fun canonicalOrNull(file: File): String? =
 private fun baseNameOf(name: String): String {
     val dot = name.lastIndexOf('.')
     return if (dot < 0) name else name.substring(0, dot)
-}
-
-/** Everything after the last dot, or the empty string when there is none. */
-private fun extensionOf(name: String): String {
-    val dot = name.lastIndexOf('.')
-    return if (dot < 0) "" else name.substring(dot + 1)
 }
