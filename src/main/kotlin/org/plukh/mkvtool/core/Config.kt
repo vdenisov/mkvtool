@@ -17,10 +17,6 @@ import java.io.File
  * carries on — and the classification it decides on comes from [loadMapping], not from here.
  */
 
-/** What `mux` and `inspect` treat as a main source when the config names nothing. */
-val DEFAULT_ALLOWED_EXTENSIONS =
-    setOf("mkv", "mp4", "m4v", "avi", "mov", "ts", "m2ts", "webm", "mka", "mks")
-
 /**
  * A configured template, and the distinction the whole substitution stage rests on: a **missing** key is
  * a null [Template] reference (the field falls back to its default — the file name), while a key written
