@@ -45,6 +45,9 @@ data class Error(val text: String, val hint: String? = null) : OutputEvent
 
 /**
  * A warning. Rendered yellow to **stderr**; the renderer applies the shared `*** Warning: ` prefix,
- * so [text] carries the message only.
+ * so [text] carries the message only. [hint] behaves exactly as [Error]'s: a verbatim, uncolored
+ * continuation printed to stderr on the following lines, carrying its own indentation. The two events
+ * differ in severity and color, never in what they can say — the same diagnosis is fatal in `mux` and a
+ * warning in `inspect`, and it must read identically in both.
  */
-data class Warning(val text: String) : OutputEvent
+data class Warning(val text: String, val hint: String? = null) : OutputEvent

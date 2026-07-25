@@ -1,4 +1,4 @@
-package org.plukh.mkvtool.cli
+package org.plukh.mkvtool.cli.render
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.string.shouldBeEmpty
@@ -6,32 +6,21 @@ import io.kotest.matchers.string.shouldContain
 import org.plukh.mkvtool.core.FileProped
 import org.plukh.mkvtool.core.PropeditOutcome
 import org.plukh.mkvtool.core.PropeditRun
-import org.plukh.mkvtool.out.CommandResult
-import org.plukh.mkvtool.out.TextStyle
-import java.io.ByteArrayOutputStream
-import java.io.PrintStream
-import java.nio.charset.StandardCharsets
 
 /**
- * Pins the v1 text of every `propedit` result line, rendered through a [TextStyle] wired to captured
- * streams. The per-file failure carries the `*** Error:` prefix the harness pins (case 89); the summary
- * reads `<succeeded> processed, <failed> failed`, matching v1's `total - failed` arithmetic.
+ * Pins the v1 text of every `propedit` result line, rendered over captured streams. The per-file failure
+ * carries the `*** Error:` prefix the harness pins (case 89); the summary reads
+ * `<succeeded> processed, <failed> failed`, matching v1's `total - failed` arithmetic.
  */
-class PropeditResultRendererTest : FunSpec({
+class PropeditRendererTest : FunSpec({
 
     val esc = Char(27).toString()
 
-    fun render(colorEnabled: Boolean, result: CommandResult): Pair<String, String> {
-        val outBytes = ByteArrayOutputStream()
-        val errBytes = ByteArrayOutputStream()
-        val style = TextStyle(
-            colorEnabled = colorEnabled,
-            out = PrintStream(outBytes, true, StandardCharsets.UTF_8),
-            err = PrintStream(errBytes, true, StandardCharsets.UTF_8),
-        )
-        PropeditResultRenderer.render(result, style)
-        return outBytes.toString(StandardCharsets.UTF_8) to errBytes.toString(StandardCharsets.UTF_8)
-    }
+    fun render(colorEnabled: Boolean, result: FileProped) =
+        renderResult(FilePropedRenderer, result, colorEnabled)
+
+    fun render(colorEnabled: Boolean, result: PropeditRun) =
+        renderResult(PropeditRunRenderer, result, colorEnabled)
 
     test("a succeeded file prints nothing (its header is a diagnostics event)") {
         val (out, err) = render(colorEnabled = true, FileProped("ep.mkv", PropeditOutcome.Succeeded))

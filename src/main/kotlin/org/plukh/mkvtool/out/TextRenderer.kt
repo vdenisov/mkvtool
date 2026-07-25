@@ -7,17 +7,18 @@ import kotlin.math.ceil
  * A [Renderer] that produces plain text for any destination — an interactive terminal, a pipe, or a
  * file. (The machine-readable counterpart is a separate JSON renderer over the same events and results.)
  *
- * It renders diagnostics ([OutputEvent]s) itself and **delegates result rendering to an injected
- * [ResultTextRenderer]** — result text is command-specific, so this class never names a concrete result
- * type, which keeps the layering acyclic. Both the diagnostics and the delegated results write through
- * one [TextStyle], so every line obeys the same palette (red 31 errors, green 32 success, yellow 33
- * warnings/advisories, cyan 36 headers, gray 90 de-emphasis) and the whole-line color invariant: color
- * wraps a whole line so any substring of the uncolored text stays contiguous for assertions and search.
+ * It renders diagnostics ([OutputEvent]s) itself and **delegates result rendering to the injected
+ * [ResultRendererRegistry]** — what a result looks like belongs to its type, not to this class and not
+ * to the command, so this class never names a concrete result type, which keeps the layering acyclic.
+ * Both the diagnostics and the delegated results write through one [TextStyle], so every line obeys the
+ * same palette (red 31 errors, green 32 success, yellow 33 warnings/advisories, cyan 36 headers, gray 90
+ * de-emphasis) and the whole-line color invariant: color wraps a whole line so any substring of the
+ * uncolored text stays contiguous for assertions and search.
  *
  * Everything the tests need to steer is injected: the two streams, the terminal probe, the `NO_COLOR`
- * reading, and the result renderer. Defaults wire the real environment; the default [results] errors
- * loud, so a command that renders a result without configuring a renderer fails rather than silently
- * dropping output, while diagnostics-only callers never touch it.
+ * reading, and the registry. Defaults wire the real environment; the default [results] is empty, so a
+ * command that renders a result without a table fails loud rather than silently dropping output, while
+ * diagnostics-only callers never touch it.
  */
 class TextRenderer(
     colorMode: ColorMode,
@@ -25,9 +26,7 @@ class TextRenderer(
     private val err: PrintStream = System.err,
     private val isTerminal: () -> Boolean = ::probeTerminal,
     noColor: Boolean = !System.getenv("NO_COLOR").isNullOrEmpty(),
-    private val results: ResultTextRenderer = ResultTextRenderer { r, _ ->
-        error("no result renderer configured for ${r::class.simpleName}")
-    },
+    private val results: ResultRendererRegistry = ResultRendererRegistry(),
 ) : Renderer {
 
     // Computed once: --color always wins outright; auto colors only on a real terminal with NO_COLOR
@@ -48,11 +47,14 @@ class TextRenderer(
             // A yellow stdout advisory with no prefix — distinct from Warning (stderr, prefixed).
             is Advisory -> out.println(style.yellow(event.text))
             is Error -> {
-                err.println(style.red("*** Error: ${event.text}"))
+                err.println(style.errorText(event.text))
                 // The hint is a verbatim, uncolored continuation line; it carries its own indentation.
                 if (event.hint != null) err.println(event.hint)
             }
-            is Warning -> err.println(style.yellow("*** Warning: ${event.text}"))
+            is Warning -> {
+                err.println(style.warningText(event.text))
+                if (event.hint != null) err.println(event.hint)
+            }
         }
     }
 
@@ -102,7 +104,7 @@ class TextRenderer(
 }
 
 /**
- * The palette plus the two streams a renderer and its injected [ResultTextRenderer] write through, so
+ * The palette plus the two streams a renderer and every [ResultTextRenderer] write through, so
  * all text shares one color and routing policy. Color wraps a whole line or a whole pre-padded table
  * cell — never a fragment — so escapes never split a substring an assertion pins, and cell padding done
  * before coloring never counts toward a column width. The ESC byte is built with `Char(27)` rather than
@@ -126,10 +128,19 @@ class TextStyle(
 
     fun cyan(s: String): String = paint("36", s)
 
-    // Gray de-emphasis (e.g. guessed values, secondary evidence lists). Not yet called: it is here so
-    // the consistency-check report can color whole cells through this same helper when it lands.
-    @Suppress("unused")
+    // Gray de-emphasis: guessed values and the check report's secondary evidence lists.
     fun gray(s: String): String = paint("90", s)
+
+    /**
+     * The `*** Error: ` and `*** Warning: ` forms, so the one place they are spelled is here.
+     *
+     * Mostly the diagnostics channel writes them, but not only: a result whose *answer* is a refusal —
+     * `rename` declining a batch, and naming the problems it found — has to look like every other error
+     * while its data still travels as a result rather than as a message.
+     */
+    fun errorText(message: String): String = red("*** Error: $message")
+
+    fun warningText(message: String): String = yellow("*** Warning: $message")
 }
 
 /**

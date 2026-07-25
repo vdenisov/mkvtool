@@ -4,7 +4,6 @@ import org.plukh.mkvtool.out.Advisory
 import org.plukh.mkvtool.out.CommandResult
 import org.plukh.mkvtool.out.Renderer
 import java.io.File
-import java.nio.charset.StandardCharsets
 
 /**
  * The `find-unused-fonts` engine: report every font in a `fonts/` subdirectory whose base name is never
@@ -29,10 +28,9 @@ fun unusedFonts(subtitleLines: List<String>, fontBaseNames: List<String>): List<
 /**
  * Scan [dir] for `.ass` subtitles and a `fonts/` subdirectory, and report the unreferenced fonts.
  *
- * v1 matched subtitles with `name.endsWith("ass")` (no dot) — reproduced verbatim. It read lines with
- * Groovy's charset auto-detection; this port reads explicit UTF-8 for now (the same asymmetry noted for
- * `fix-srt`, to be revisited with the task 2.1 detection utility). Font base names strip the last dot
- * segment, keeping dot-less names whole and (as in v1) listing any subdirectories of `fonts/` too.
+ * v1 matched subtitles with `name.endsWith("ass")` (no dot) — reproduced verbatim, as is its charset
+ * auto-detection on the subtitle read ([readLinesDetected]). Font base names strip the last dot segment,
+ * keeping dot-less names whole and (as in v1) listing any subdirectories of `fonts/` too.
  *
  * A missing `fonts/` directory made v1 crash (an NPE on `listFiles()` returning null). The Groovy test
  * oracle has no case for it, so this port fixes it: it reports the absence as an advisory and returns an
@@ -41,7 +39,7 @@ fun unusedFonts(subtitleLines: List<String>, fontBaseNames: List<String>): List<
 fun findUnusedFonts(dir: File, renderer: Renderer): FontUsageReport {
     val subtitleLines = (dir.listFiles() ?: emptyArray())
         .filter { it.name.endsWith("ass") }
-        .flatMap { it.readLines(StandardCharsets.UTF_8) }
+        .flatMap { readLinesDetected(it) }
         .map { it.lowercase() }
 
     val fontEntries = dir.resolve("fonts").listFiles()

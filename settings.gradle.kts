@@ -7,6 +7,8 @@ pluginManagement {
     plugins {
         kotlin("jvm") version kotlinVersion
         kotlin("kapt") version kotlinVersion
+        // Ships with the Kotlin distribution, so it is versioned with the compiler.
+        kotlin("plugin.serialization") version kotlinVersion
         id("com.gradleup.shadow") version shadowVersion
         id("org.graalvm.buildtools.native") version graalvmNativeVersion
     }

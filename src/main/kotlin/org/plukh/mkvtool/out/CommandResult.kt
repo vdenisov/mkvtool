@@ -7,7 +7,9 @@ package org.plukh.mkvtool.out
  *
  * Results are emitted as they complete (via [Renderer.render]) and the root is also the core function's
  * plain return value, so unit tests read the returned model rather than capturing emissions. The text
- * for a result is composed by a command-specific [ResultTextRenderer]; this package never names a
- * concrete result type, which keeps the layering acyclic (`out` ← `core` ← `cli`).
+ * for a result is composed by the [ResultTextRenderer] bound to its *type* in the
+ * [ResultRendererRegistry] — one binding for the whole application, so emitting a result is a command's
+ * choice while presenting it never is. This package never names a concrete result type, which keeps the
+ * layering acyclic (`out` ← `core` ← `cli`).
  */
 interface CommandResult

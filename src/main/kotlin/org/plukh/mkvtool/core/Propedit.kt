@@ -34,8 +34,8 @@ data class PropeditRun(val files: List<FileProped>, val total: Int, val failed: 
  *
  * v1 reconstructs the name as `baseName + ".mkv"` (via `FilenameUtils.getBaseName`), which lower-cases
  * the extension — reproduced here with [File.nameWithoutExtension]. For the ordinary `Show.mkv` this is
- * identical to the real name; the divergence on an upper-case `Show.MKV` is a latent v1 bug recorded
- * under Discovered work.
+ * identical to the real name; on an upper-case `Show.MKV` it names a file that does not exist, which is a
+ * latent v1 bug kept deliberately rather than fixed in passing.
  */
 fun buildPropeditCommand(exe: String, file: File, args: List<String>): List<String> =
     listOf(exe, "${file.nameWithoutExtension}.mkv") + args
