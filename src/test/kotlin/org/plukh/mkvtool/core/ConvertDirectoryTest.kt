@@ -6,10 +6,6 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
-import org.plukh.mkvtool.out.CommandResult
-import org.plukh.mkvtool.out.OutputEvent
-import org.plukh.mkvtool.out.ProgressHandle
-import org.plukh.mkvtool.out.Renderer
 import java.io.File
 
 /**
@@ -22,7 +18,7 @@ class ConvertDirectoryTest : FunSpec({
     val cp1251 = charset("windows-1251")
 
     fun run(dir: File, backup: Boolean = false, dryRun: Boolean = false) =
-        convertDirectory(dir, cp1251, backup, dryRun, NoopRenderer)
+        convertDirectory(dir, cp1251, backup, dryRun, SilentRenderer)
 
     test("converts in place and preserves CRLF") {
         val dir = tempdir()
@@ -62,7 +58,7 @@ class ConvertDirectoryTest : FunSpec({
         val bad = write(dir, "bad.srt", byteArrayOf(0x81.toByte(), 0x20, 0x41))
         val before = bad.readBytes().toList()
 
-        val result = convertDirectory(dir, charset("Shift_JIS"), backup = false, dryRun = false, NoopRenderer)
+        val result = convertDirectory(dir, charset("Shift_JIS"), backup = false, dryRun = false, SilentRenderer)
 
         result.failed shouldBe 1
         val outcome = result.files.single().outcome
@@ -134,14 +130,3 @@ class ConvertDirectoryTest : FunSpec({
 /** Writes raw bytes and returns the file. */
 private fun write(dir: File, name: String, bytes: ByteArray): File =
     File(dir, name).apply { writeBytes(bytes) }
-
-/** A renderer that discards everything: the model is the assertion surface, not the emissions. */
-private object NoopRenderer : Renderer {
-    override fun render(event: OutputEvent) {}
-    override fun render(result: CommandResult) {}
-    override fun progress(label: String, total: Int, interactive: Boolean?): ProgressHandle =
-        object : ProgressHandle {
-            override fun tick() {}
-            override fun finish() {}
-        }
-}

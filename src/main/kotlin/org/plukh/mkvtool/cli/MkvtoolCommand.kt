@@ -7,8 +7,8 @@ import java.util.concurrent.Callable
 /**
  * Root command. User-facing subcommands are added as they are built; alongside the hidden
  * `native-smoke` build probe, `to-utf8`, `fix-srt`, `propedit`, `filename-to-title`,
- * `find-unused-fonts` and `fetch-episodes` are the ported commands. `mixinStandardHelpOptions` supplies
- * `--help` and `--version`.
+ * `find-unused-fonts`, `fetch-episodes` and `rename` are the ported commands.
+ * `mixinStandardHelpOptions` supplies `--help` and `--version`.
  */
 @Command(
     name = "mkvtool",
@@ -23,6 +23,7 @@ import java.util.concurrent.Callable
         FilenameToTitleCommand::class,
         FindUnusedFontsCommand::class,
         FetchEpisodesCommand::class,
+        RenameCommand::class,
     ],
 )
 class MkvtoolCommand : Callable<Int> {

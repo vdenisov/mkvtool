@@ -7,10 +7,6 @@ import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
-import org.plukh.mkvtool.out.CommandResult
-import org.plukh.mkvtool.out.OutputEvent
-import org.plukh.mkvtool.out.ProgressHandle
-import org.plukh.mkvtool.out.Renderer
 import org.yaml.snakeyaml.Yaml
 import java.io.File
 
@@ -166,7 +162,7 @@ class FetchEpisodesTest : FunSpec({
                 """.trimIndent(),
             )
 
-            val result = fetchEpisodes(dir, fetcher, "2260", "1", null, NoRenderer)
+            val result = fetchEpisodes(dir, fetcher, "2260", "1", null, SilentRenderer)
 
             result.showName shouldBe "Stub Show"
             result.show.year shouldBe 2006
@@ -204,7 +200,7 @@ class FetchEpisodesTest : FunSpec({
                 "/3/tv/1920/season/1" to """{"name":"Сезон 1","episodes":[{"episode_number":1,"name":"Пилот"}]}""",
             )
 
-            fetchEpisodes(dir, fetcher, "1920", "1", "ru-RU", NoRenderer)
+            fetchEpisodes(dir, fetcher, "1920", "1", "ru-RU", SilentRenderer)
 
             val text = File(dir, "episodes.yaml").readText(Charsets.UTF_8)
             text shouldContain "Пилот"
@@ -220,7 +216,7 @@ class FetchEpisodesTest : FunSpec({
                 "/3/tv/1920/season/1" to """{"name":"Сезон 1","episodes":[{"episode_number":1,"name":"Пилот"}]}""",
             )
 
-            fetchEpisodes(dir, fetcher, "1920", "1", "ru-RU", NoRenderer)
+            fetchEpisodes(dir, fetcher, "1920", "1", "ru-RU", SilentRenderer)
 
             val yaml = Yaml().load<Map<String, Any>>(File(dir, "episodes.yaml").readText(Charsets.UTF_8))
             yaml["language"] shouldBe "ru-RU"
@@ -249,7 +245,7 @@ class FetchEpisodesTest : FunSpec({
                 }
             }
 
-            val result = fetchEpisodes(dir, fetcher, "1920", "1", "ru-RU", NoRenderer)
+            val result = fetchEpisodes(dir, fetcher, "1920", "1", "ru-RU", SilentRenderer)
 
             result.filledFromEnglish shouldBe true
             result.episodes shouldBe listOf(
@@ -270,7 +266,7 @@ class FetchEpisodesTest : FunSpec({
                 else """{"name":"Stub"}"""
             }
 
-            val result = fetchEpisodes(dir, fetcher, "1", "1", null, NoRenderer)
+            val result = fetchEpisodes(dir, fetcher, "1", "1", null, SilentRenderer)
 
             result.filledFromEnglish shouldBe false
             result.episodes shouldBe listOf(FetchedEpisode(1, ""))
@@ -284,7 +280,7 @@ class FetchEpisodesTest : FunSpec({
                 "/3/tv/1/season/1" to """{"episodes":[{"name":"First"},{"name":"Second"}]}""",
             )
 
-            fetchEpisodes(dir, fetcher, "1", "1", null, NoRenderer).episodes shouldBe
+            fetchEpisodes(dir, fetcher, "1", "1", null, SilentRenderer).episodes shouldBe
                 listOf(FetchedEpisode(1, "First"), FetchedEpisode(2, "Second"))
         }
 
@@ -296,7 +292,7 @@ class FetchEpisodesTest : FunSpec({
                     """{"episodes":[{"episode_number":11,"name":"Eleven"},{"episode_number":13,"name":"Thirteen"}]}""",
             )
 
-            fetchEpisodes(dir, fetcher, "1", "1", null, NoRenderer).episodes shouldBe
+            fetchEpisodes(dir, fetcher, "1", "1", null, SilentRenderer).episodes shouldBe
                 listOf(FetchedEpisode(11, "Eleven"), FetchedEpisode(13, "Thirteen"))
         }
 
@@ -307,7 +303,7 @@ class FetchEpisodesTest : FunSpec({
                 "/3/tv/1/season/9" to """{"episodes":[]}""",
             )
 
-            shouldThrow<TmdbException> { fetchEpisodes(dir, fetcher, "1", "9", null, NoRenderer) }
+            shouldThrow<TmdbException> { fetchEpisodes(dir, fetcher, "1", "9", null, SilentRenderer) }
                 .message shouldContain "No episodes returned for season 9"
             File(dir, "episodes.txt").exists() shouldBe false
             File(dir, "episodes.yaml").exists() shouldBe false
@@ -316,7 +312,7 @@ class FetchEpisodesTest : FunSpec({
         test("a body that is not the document it should be names the path it came from") {
             val dir = tempdir()
             shouldThrow<TmdbException> {
-                fetchEpisodes(dir, { _, _ -> "<html>nope</html>" }, "1", "1", null, NoRenderer)
+                fetchEpisodes(dir, { _, _ -> "<html>nope</html>" }, "1", "1", null, SilentRenderer)
             }.message shouldContain "non-JSON response for /3/tv/1"
         }
 
@@ -327,7 +323,7 @@ class FetchEpisodesTest : FunSpec({
                 "/3/tv/1/season/1" to """{"episodes":[{"episode_number":1,"name":"One"}]}""",
             )
 
-            fetchEpisodes(dir, fetcher, "1", "1", null, NoRenderer).show.year shouldBe null
+            fetchEpisodes(dir, fetcher, "1", "1", null, SilentRenderer).show.year shouldBe null
         }
     }
 })
@@ -336,15 +332,4 @@ class FetchEpisodesTest : FunSpec({
 private fun fakeFetcher(vararg routes: Pair<String, String>): TmdbFetcher {
     val byPath = routes.toMap()
     return TmdbFetcher { path, _ -> byPath[path] ?: error("no canned body for $path") }
-}
-
-/** The model is the assertion surface here; emissions are the renderer tier's business. */
-private object NoRenderer : Renderer {
-    override fun render(event: OutputEvent) {}
-    override fun render(result: CommandResult) {}
-    override fun progress(label: String, total: Int, interactive: Boolean?): ProgressHandle =
-        object : ProgressHandle {
-            override fun tick() {}
-            override fun finish() {}
-        }
 }

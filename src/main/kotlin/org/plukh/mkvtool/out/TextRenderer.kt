@@ -47,12 +47,12 @@ class TextRenderer(
             // A yellow stdout advisory with no prefix — distinct from Warning (stderr, prefixed).
             is Advisory -> out.println(style.yellow(event.text))
             is Error -> {
-                err.println(style.red("*** Error: ${event.text}"))
+                err.println(style.errorText(event.text))
                 // The hint is a verbatim, uncolored continuation line; it carries its own indentation.
                 if (event.hint != null) err.println(event.hint)
             }
             is Warning -> {
-                err.println(style.yellow("*** Warning: ${event.text}"))
+                err.println(style.warningText(event.text))
                 if (event.hint != null) err.println(event.hint)
             }
         }
@@ -130,6 +130,17 @@ class TextStyle(
 
     // Gray de-emphasis: guessed values and the check report's secondary evidence lists.
     fun gray(s: String): String = paint("90", s)
+
+    /**
+     * The `*** Error: ` and `*** Warning: ` forms, so the one place they are spelled is here.
+     *
+     * Mostly the diagnostics channel writes them, but not only: a result whose *answer* is a refusal —
+     * `rename` declining a batch, and naming the problems it found — has to look like every other error
+     * while its data still travels as a result rather than as a message.
+     */
+    fun errorText(message: String): String = red("*** Error: $message")
+
+    fun warningText(message: String): String = yellow("*** Warning: $message")
 }
 
 /**

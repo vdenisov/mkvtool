@@ -5,10 +5,6 @@ import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
-import org.plukh.mkvtool.out.CommandResult
-import org.plukh.mkvtool.out.OutputEvent
-import org.plukh.mkvtool.out.ProgressHandle
-import org.plukh.mkvtool.out.Renderer
 import java.io.File
 
 /**
@@ -80,14 +76,3 @@ class FixDirectoryTest : FunSpec({
         second.fixed shouldBe 1
     }
 })
-
-/** A renderer that discards everything: the model is the assertion surface, not the emissions. */
-private object SilentRenderer : Renderer {
-    override fun render(event: OutputEvent) {}
-    override fun render(result: CommandResult) {}
-    override fun progress(label: String, total: Int, interactive: Boolean?): ProgressHandle =
-        object : ProgressHandle {
-            override fun tick() {}
-            override fun finish() {}
-        }
-}

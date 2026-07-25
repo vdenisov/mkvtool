@@ -6,11 +6,15 @@ import org.plukh.mkvtool.core.EpisodeFetch
 import org.plukh.mkvtool.core.FileConversion
 import org.plukh.mkvtool.core.FileFix
 import org.plukh.mkvtool.core.FileProped
+import org.plukh.mkvtool.core.FileRenamed
 import org.plukh.mkvtool.core.FileTitled
 import org.plukh.mkvtool.core.FixRun
 import org.plukh.mkvtool.core.FontUsageReport
 import org.plukh.mkvtool.core.PropeditRun
+import org.plukh.mkvtool.core.RenamePlan
+import org.plukh.mkvtool.core.RenameRun
 import org.plukh.mkvtool.core.ShowFetched
+import org.plukh.mkvtool.core.ShowNameResolved
 import org.plukh.mkvtool.core.TitleRun
 import org.plukh.mkvtool.core.TranslationFallback
 import org.plukh.mkvtool.out.RenderHints
@@ -40,4 +44,8 @@ fun textResultRenderers(hints: RenderHints = RenderHints()): ResultRendererRegis
         .register(ShowFetched::class, ShowFetchedRenderer)
         .register(TranslationFallback::class, TranslationFallbackRenderer)
         .register(EpisodeFetch::class, EpisodeFetchRenderer)
+        .register(ShowNameResolved::class, ShowNameResolvedRenderer)
+        .register(RenamePlan::class, RenamePlanRenderer)
+        .register(FileRenamed::class, FileRenamedRenderer)
+        .register(RenameRun::class, RenameRunRenderer)
         .register(CheckReport::class, CheckReportRenderer(hints.verboseFileLists))
