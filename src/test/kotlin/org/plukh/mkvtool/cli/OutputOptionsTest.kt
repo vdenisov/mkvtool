@@ -25,12 +25,13 @@ class OutputOptionsTest : FunSpec({
             is FixSrtCommand -> sub.output
             is FindUnusedFontsCommand -> sub.output
             is FilenameToTitleCommand -> sub.output
+            is InspectCommand -> sub.output
             else -> error("$name does not mix in OutputOptions")
         }
     }
 
     context("every command carrying the mixin binds it identically") {
-        withData("to-utf8", "fix-srt", "find-unused-fonts", "filename-to-title") { name ->
+        withData("to-utf8", "fix-srt", "find-unused-fonts", "filename-to-title", "inspect") { name ->
             optionsOf(name).color shouldBe "auto"
             optionsOf(name, "--color", "never").color shouldBe "never"
             optionsOf(name, "--color", "always").color shouldBe "always"

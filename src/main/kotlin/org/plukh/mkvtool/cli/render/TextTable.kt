@@ -1,6 +1,5 @@
 package org.plukh.mkvtool.cli.render
 
-import org.plukh.mkvtool.core.ExternalSlot
 import org.plukh.mkvtool.core.Slot
 import org.plukh.mkvtool.out.TextStyle
 
@@ -42,17 +41,24 @@ internal fun cell(value: Any?, width: Int, differing: Boolean, style: TextStyle)
 }
 
 /**
- * The LANG cell, which grays a guessed value (`rus?`) — a language inferred from a folder name rather
- * than read from the file. A differing value still wins the cell: the yellow diff-highlight is this
- * table's whole job, and a guess that also varied would be better shown as varying. In practice a guess
- * never varies within its slot, since every file there shares one extension and one folder guess, but
- * the precedence is the correct one to state.
+ * The LANG cell, which marks a guessed value — a language inferred from a folder name rather than read
+ * from the file — with a trailing `?` and gray.
+ *
+ * Both the marker and the colour are composed here, because provenance is something said *about* the
+ * language rather than part of it: a guessed `rus` and a tagged `rus` are the same language and must
+ * group together, which they cannot do if the marker rides in the value the grouping compares.
+ *
+ * A differing value still wins the cell: the yellow diff-highlight is this table's whole job, and a guess
+ * that also varied would be better shown as varying. In practice a guess never varies within its slot,
+ * since every file there shares one extension and one folder guess, but the precedence is the correct
+ * one to state.
  */
 internal fun langCell(slot: Slot, differing: Boolean, style: TextStyle): String {
-    val padded = pad(slot.signature.language, 5)
+    val guessed = slot.guessed
+    val padded = pad(if (guessed) "${slot.signature.language}?" else slot.signature.language, 5)
     return when {
         differing -> style.yellow(padded)
-        slot is ExternalSlot && slot.guessed -> style.gray(padded)
+        guessed -> style.gray(padded)
         else -> padded
     }
 }

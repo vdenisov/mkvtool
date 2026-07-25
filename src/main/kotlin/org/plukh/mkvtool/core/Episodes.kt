@@ -1,5 +1,6 @@
 package org.plukh.mkvtool.core
 
+import java.io.File
 import java.util.Locale
 
 /**
@@ -244,6 +245,60 @@ fun membershipLabels(baseNames: Collection<String>): List<String>? {
     val labels = batchLabels(baseNames)
     if (labels.isEmpty()) return null
     return baseNames.map { labels[it].toString() }.distinct()
+}
+
+/**
+ * What a directory's episode metadata turned out to be. Classify-don't-decide, the same division
+ * [loadMapping] draws: what to *do* about each outcome is the caller's policy, and the three commands
+ * genuinely disagree — `rename` cannot work without metadata, `mux` refuses a file it could not read, and
+ * `inspect` warns and carries on because metadata only decorates what it prints.
+ */
+sealed interface EpisodeMetadata {
+    /** [name] is the file it came from, which is what a "no title for episode 12" problem names. */
+    data class Loaded(val data: EpisodeData, val name: String) : EpisodeMetadata
+
+    /** The file is there and unusable. [message] is [loadMapping]'s bare classified fragment, which the
+     *  caller finishes in its own words; [name] is the file it refers to. */
+    data class Unusable(val message: String, val name: String) : EpisodeMetadata
+
+    /** Neither file exists. Not a problem in itself — only in the light of what the caller wanted it for. */
+    data object Absent : EpisodeMetadata
+}
+
+/**
+ * Read `episodes.yaml`, else `episodes.txt`, from [dir].
+ *
+ * The yaml wins when present: it carries real episode numbers, so a season with a gap stays aligned, and
+ * it supplies the show name. [offset] applies to the text file **alone** — that file has no numbers in it,
+ * so the offset is part of how it is read, while the yaml needs no shifting and must not get one.
+ *
+ * Charsets differ by design: the yaml is machine-written and read back as explicit UTF-8, while the text
+ * file is auto-detected because it is the format a human types (Notepad on a Cyrillic Windows writes
+ * cp1251). Forcing UTF-8 there would mangle exactly that case and gain nothing.
+ *
+ * The yaml is read through [loadMapping] with [normalizeYaml] as the transform, so a hand-edited
+ * `episode: "one"` is a classified [EpisodeMetadata.Unusable] rather than the stack trace v1's `rename`
+ * met.
+ */
+fun loadEpisodeMetadata(dir: File, offset: Int): EpisodeMetadata {
+    val yamlFile = File(dir, "episodes.yaml")
+    val textFile = File(dir, "episodes.txt")
+
+    if (yamlFile.isFile) {
+        return when (val load = loadMapping(yamlFile, Charsets.UTF_8, ::normalizeYaml)) {
+            is MappingLoad.Loaded -> EpisodeMetadata.Loaded(load.value, yamlFile.name)
+            is MappingLoad.Problem -> EpisodeMetadata.Unusable(load.message, yamlFile.name)
+        }
+    }
+
+    if (textFile.isFile) {
+        return EpisodeMetadata.Loaded(
+            EpisodeData(byEpisode = indexFromLines(readLinesDetected(textFile), offset)),
+            textFile.name,
+        )
+    }
+
+    return EpisodeMetadata.Absent
 }
 
 /** Two-digit zero padding, in the root locale: an episode number is a key and part of a file name, so it

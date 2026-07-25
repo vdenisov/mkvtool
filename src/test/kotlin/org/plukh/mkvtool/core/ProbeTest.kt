@@ -305,6 +305,40 @@ class ProbeTest : FunSpec({
         }
     }
 
+    context("who speaks for a group") {
+        test("a value that some file actually read is never reported as inferred") {
+            // A dub directory tagged only from a certain episode onwards: every file says rus, some of
+            // them because the file says so and the rest because the folder does. One group, and the
+            // member that *read* the value represents it.
+            val tagged = probed("e01.mkv", track(0, "video"))
+            val guessed = probed("e02.mkv", track(0, "video"))
+            val slots = mapOf(
+                "e01.mkv" to mapOf("A/audio/mka" to external("A/audio/mka", "A", guessed = false)),
+                "e02.mkv" to mapOf("A/audio/mka" to external("A/audio/mka", "A", guessed = true)),
+            )
+
+            fun representative(order: List<ProbeResult.Probed>) =
+                groupExternals(order) { slots.getValue(it.file.name) }
+                    .single().groups.single().slot!!.guessed
+
+            // Either way round: the answer must not depend on which episode sorts first.
+            representative(listOf(tagged, guessed)) shouldBe false
+            representative(listOf(guessed, tagged)) shouldBe false
+        }
+
+        test("with nothing but inferences, the group says so") {
+            val a = probed("e01.mkv", track(0, "video"))
+            val b = probed("e02.mkv", track(0, "video"))
+            val slots = mapOf(
+                "e01.mkv" to mapOf("A/audio/mka" to external("A/audio/mka", "A", guessed = true)),
+                "e02.mkv" to mapOf("A/audio/mka" to external("A/audio/mka", "A", guessed = true)),
+            )
+
+            groupExternals(listOf(a, b)) { slots.getValue(it.file.name) }
+                .single().groups.single().slot!!.guessed shouldBe true
+        }
+    }
+
     context("findDuplicates") {
         test("flags only tracks alike in type, language, codec and name") {
             val info = probed(
@@ -423,6 +457,5 @@ private fun external(
     key = key,
     signature = TrackSignature(type, "Matroska", language, "", default = false, forced = false),
     guessed = guessed,
-    label = label,
-    variantName = "[Group$label]",
+    variant = VariantIdentity(label, leaf = "[Group$label]", suffix = null, dirRel = "Rus sound/[Group$label]", collision = false),
 )

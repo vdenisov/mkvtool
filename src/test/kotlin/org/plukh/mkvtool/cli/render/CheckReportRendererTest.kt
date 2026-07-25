@@ -298,8 +298,9 @@ class CheckReportRendererTest : FunSpec({
 
             val output = render(infos, externals = externals, colour = true)
 
-            // Whole pre-padded cell, so the escapes never count toward the column width.
-            output shouldContain "${ESC}[90mrus  ${ESC}[0m"
+            // Whole pre-padded cell, so the escapes never count toward the column width — and the '?'
+            // is composed here rather than carried, so the value the grouping compared was a bare "rus".
+            output shouldContain "${ESC}[90mrus? ${ESC}[0m"
         }
 
         test("a differing cell wins over a guess, since varying is what the table is for") {
@@ -311,8 +312,8 @@ class CheckReportRendererTest : FunSpec({
 
             val output = render(infos, externals = externals, colour = true)
 
-            output shouldContain "${ESC}[33mrus  ${ESC}[0m"
-            output shouldNotContain "${ESC}[90mrus  ${ESC}[0m"
+            output shouldContain "${ESC}[33mrus? ${ESC}[0m"
+            output shouldNotContain "${ESC}[90mrus? ${ESC}[0m"
         }
 
         test("piped output carries no escapes at all, which is what the harness asserts against") {

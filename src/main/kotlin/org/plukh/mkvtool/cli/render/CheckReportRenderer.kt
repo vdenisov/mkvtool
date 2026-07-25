@@ -305,7 +305,8 @@ class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRend
                 "across ${finding.groupCount} groups"
         }
         is ExternalValueFinding ->
-            "external ${finding.label} ${finding.variantName} (${finding.type}) - " +
+            "external ${finding.variant.label} ${variantDisplayName(finding.variant)} " +
+                "(${finding.type}) - " +
                 "${differs(finding.varying)} across ${finding.groupCount} groups"
         is AmbiguousTracksFinding -> {
             val selects = if (finding.selectedIds.isNotEmpty()) {

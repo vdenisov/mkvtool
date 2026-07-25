@@ -3,8 +3,11 @@ package org.plukh.mkvtool.cli.render
 import org.plukh.mkvtool.core.CheckReport
 import org.plukh.mkvtool.core.ConversionRun
 import org.plukh.mkvtool.core.EpisodeFetch
+import org.plukh.mkvtool.core.ExternalLeftovers
+import org.plukh.mkvtool.core.ExternalLegend
 import org.plukh.mkvtool.core.FileConversion
 import org.plukh.mkvtool.core.FileFix
+import org.plukh.mkvtool.core.FileIdentification
 import org.plukh.mkvtool.core.FileProped
 import org.plukh.mkvtool.core.FileRenamed
 import org.plukh.mkvtool.core.FileTitled
@@ -15,6 +18,7 @@ import org.plukh.mkvtool.core.RenamePlan
 import org.plukh.mkvtool.core.RenameRun
 import org.plukh.mkvtool.core.ShowFetched
 import org.plukh.mkvtool.core.ShowNameResolved
+import org.plukh.mkvtool.core.StrictVerdict
 import org.plukh.mkvtool.core.TitleRun
 import org.plukh.mkvtool.core.TranslationFallback
 import org.plukh.mkvtool.out.RenderHints
@@ -49,3 +53,7 @@ fun textResultRenderers(hints: RenderHints = RenderHints()): ResultRendererRegis
         .register(FileRenamed::class, FileRenamedRenderer)
         .register(RenameRun::class, RenameRunRenderer)
         .register(CheckReport::class, CheckReportRenderer(hints.verboseFileLists))
+        .register(FileIdentification::class, FileIdentificationRenderer)
+        .register(ExternalLegend::class, ExternalLegendRenderer)
+        .register(ExternalLeftovers::class, ExternalLeftoversRenderer)
+        .register(StrictVerdict::class, StrictVerdictRenderer)

@@ -5,7 +5,8 @@ import java.io.IOException
 
 /**
  * External-file discovery: finding the audio and subtitle files that belong to a main media file but do
- * not sit next to it. A port of `src/lib/discovery.groovy`, minus the language guesser (task 2.4).
+ * not sit next to it. A port of `src/lib/discovery.groovy`; the language guesser it leans on to name a
+ * variant's language lives beside it in `LanguageGuess.kt`.
  *
  * Two layouts are in the wild and both are supported, including combined:
  *
@@ -21,7 +22,7 @@ import java.io.IOException
  * share. [PROBE_EXTENSIONS] only says which formats would repay a probe if a caller wants one.
  *
  * The engine returns data, never prose: a variant's display name and a section's path pattern are
- * composed by the renderer from the fields here, the same split task 2.2 made for membership labels.
+ * composed by the renderer from the fields here, the same split the episode-membership labels use.
  */
 
 /**
@@ -140,7 +141,7 @@ fun walkTree(root: File, excluded: Set<String> = emptySet()): List<TreeEntry> {
                     dirRel = prefix,
                     leaf = if (prefix.isEmpty()) null else prefix.substringAfterLast('/'),
                     base = baseNameOf(child.name),
-                    ext = extensionOf(child.name).lowercase(),
+                    ext = extensionOf(child.name),
                 )
             }
         }
@@ -232,6 +233,34 @@ data class Variant(
     val dirs: List<String> = directoriesOf(entries)
     val type: CompanionType = typeOf(entries)
     val extensions: List<String> = extensionsOf(entries)
+}
+
+/**
+ * How a variant identifies itself.
+ *
+ * Carried instead of the whole [Variant] so that an episode holding one of its files does not drag every
+ * other episode's entries along with it. The display name itself is composed by the renderer from these
+ * fields — the discovery engine returns ingredients, never prose.
+ *
+ * The three descriptive fields come from [Variant.first] — the first entry in **discovery** order — not
+ * from the variant's own identity, which is what `src/inspect.groovy` names a variant after. The two
+ * disagree in one case: a variant whose path-sorted first entry is not its discovery-first one displays
+ * without the suffix its identity carries.
+ */
+data class VariantIdentity(
+    val label: String,
+    val leaf: String?,
+    val suffix: String?,
+    val dirRel: String,
+    val collision: Boolean,
+) {
+    constructor(variant: Variant) : this(
+        label = variant.label,
+        leaf = variant.first.entry.leaf,
+        suffix = variant.first.suffix,
+        dirRel = variant.first.entry.dirRel,
+        collision = variant.collision,
+    )
 }
 
 /**
@@ -453,10 +482,4 @@ private fun canonicalOrNull(file: File): String? =
 private fun baseNameOf(name: String): String {
     val dot = name.lastIndexOf('.')
     return if (dot < 0) name else name.substring(0, dot)
-}
-
-/** Everything after the last dot, or the empty string when there is none. */
-private fun extensionOf(name: String): String {
-    val dot = name.lastIndexOf('.')
-    return if (dot < 0) "" else name.substring(dot + 1)
 }

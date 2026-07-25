@@ -57,6 +57,15 @@ data class TrackSignature(
 /** Something the check can group: a track inside a file, or an external file attached to an episode. */
 sealed interface Slot {
     val signature: TrackSignature
+
+    /**
+     * Whether this slot's values were **inferred** rather than read out of the file — a language taken
+     * from the folder a companion sits in. Outside [signature] on purpose: how a value was arrived at
+     * changes how it is shown, never what it groups with.
+     *
+     * It does decide which member of a group speaks for it: see [groupSlots].
+     */
+    val guessed: Boolean get() = false
 }
 
 /**
@@ -76,15 +85,19 @@ data class TrackSlot(
  * Keyed by identity rather than by an index: external files have no order, and what a reader tracks
  * through a season is "does this episode have the [Омикрон] dub", not "what is at position 2".
  * [guessed] rides outside [signature] exactly as [TrackSlot.videoName] does — a language inferred from a
- * folder is presented differently but must not change what groups with what.
+ * folder is presented differently but must not change what groups with what. [variant] carries the
+ * ingredients of the variant's display name rather than the name itself, so the one place that phrase is
+ * composed stays with the renderer.
  */
 data class ExternalSlot(
     val key: String,
     override val signature: TrackSignature,
-    val guessed: Boolean,
-    val label: String,
-    val variantName: String,
-) : Slot
+    override val guessed: Boolean,
+    val variant: VariantIdentity,
+) : Slot {
+    /** `A`, `B`, … — what the legend files this variant under, and what the report's ID column shows. */
+    val label: String get() = variant.label
+}
 
 /** One track exactly as mkvmerge describes it, with nothing defaulted. Defaults belong to whoever
  *  displays or compares it: [signatureOf] fills them for the check, identify fills them differently. */
@@ -287,6 +300,12 @@ fun <K : Comparable<K>, S : Slot> groupSlots(
             val key = slot?.signature
             if (!filesByValue.containsKey(key)) {
                 filesByValue[key] = ArrayList()
+                slotByValue[key] = slot
+            } else if (slot != null && slotByValue[key]?.guessed == true && !slot.guessed) {
+                // Several files agreed on this value; the one that *read* it speaks for them. Otherwise
+                // the row would say "inferred" or not depending on which episode happened to sort first,
+                // and a dub directory tagged only from episode 6 onwards would report differently from the
+                // same directory tagged only up to episode 5.
                 slotByValue[key] = slot
             }
             filesByValue.getValue(key) += info.file.name

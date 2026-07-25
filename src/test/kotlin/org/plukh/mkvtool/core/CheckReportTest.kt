@@ -173,7 +173,7 @@ class CheckReportTest : FunSpec({
             val report = buildCheckReport(listOf(a, b), { externals.getValue(it.file.name) }, withConfig)
 
             val finding = report.findings.single().shouldBeInstanceOf<ExternalValueFinding>()
-            finding.label shouldBe "A"
+            finding.variant.label shouldBe "A"
             finding.varying shouldContainExactly listOf(SignatureField.LANGUAGE)
             finding.blocking shouldBe false
         }
@@ -290,6 +290,5 @@ private fun ex(label: String, language: String = "rus", guessed: Boolean = false
     key = "$label/audio/mka",
     signature = TrackSignature("audio", "Matroska", language, "", default = false, forced = false),
     guessed = guessed,
-    label = label,
-    variantName = "[Group$label]",
+    variant = VariantIdentity(label, leaf = "[Group$label]", suffix = null, dirRel = "Rus sound/[Group$label]", collision = false),
 )
