@@ -169,6 +169,27 @@ class MediaFilesTest : FunSpec({
             selectMedia(dir, setOf("mp4")).selected.map { it.name } shouldContainExactly listOf("b.mp4")
         }
 
+        test("`matched` is the masks' answer before the extension rule") {
+            val dir = tempdir()
+            listOf("a.mkv", "notes.txt", "cover.jpg").forEach { File(dir, it).writeText("x") }
+
+            // `mux` walks this rather than `selected`, because it reports what it passes over. It is also
+            // what tells the two empty batches apart: nothing matched at all (a typo'd pattern) against
+            // matched something that is not media.
+            selectMedia(dir, DEFAULT_ALLOWED_EXTENSIONS).matched.map { it.name } shouldContainExactly
+                listOf("a.mkv", "cover.jpg", "notes.txt")
+        }
+
+        test("`matched` narrows with the masks, and can hold nothing at all") {
+            val dir = tempdir()
+            listOf("a.mkv", "notes.txt").forEach { File(dir, it).writeText("x") }
+
+            selectMedia(dir, DEFAULT_ALLOWED_EXTENSIONS, fileMasks = listOf("notes.txt"))
+                .matched.map { it.name } shouldContainExactly listOf("notes.txt")
+            selectMedia(dir, DEFAULT_ALLOWED_EXTENSIONS, fileMasks = listOf("Nope.*"))
+                .matched.shouldBeEmpty()
+        }
+
         test("an empty directory selects nothing") {
             selectMedia(tempdir(), DEFAULT_ALLOWED_EXTENSIONS).let {
                 it.all.shouldBeEmpty()

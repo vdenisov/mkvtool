@@ -56,7 +56,7 @@ fun compileMasks(patterns: List<String>, dir: File): List<FileMask> =
     }
 
 /**
- * The media files of one directory, before and after the masks.
+ * The files of one directory, before and after the masks.
  *
  * [all] is every media file there, name-sorted. [selected] is what the masks left — a subset of [all],
  * in the same order.
@@ -64,8 +64,14 @@ fun compileMasks(patterns: List<String>, dir: File): List<FileMask> =
  * The split is load-bearing for `inspect`: external-file discovery runs against [all], because matching
  * against the masked list would dump the rest of the season's dubs into "unmatched", which is the exact
  * opposite of what narrowing to one episode asks for. What a mask narrows is what gets *reported*.
+ *
+ * [matched] is the masks' answer *before* the extension rule — every file they left, media or not, and
+ * therefore a superset of [selected]. `mux` walks it rather than [selected] because it reports what it
+ * passes over (`*** Skipping notes.txt`), and it tells the two empty batches apart: a mask that matched no
+ * file at all is a typo, while a mask that matched only a `.txt` found something that is simply not media.
+ * `inspect` has no use for it.
  */
-data class MediaSelection(val all: List<File>, val selected: List<File>)
+data class MediaSelection(val all: List<File>, val selected: List<File>, val matched: List<File>)
 
 /**
  * The media files directly in [dir] — top level only, never recursive — split by [fileMasks] and
@@ -91,8 +97,45 @@ fun selectMedia(
     if (includes.isNotEmpty()) masked = masked.filter { file -> includes.any { it(file) } }
     if (excludes.isNotEmpty()) masked = masked.filter { file -> excludes.none { it(file) } }
 
-    return MediaSelection(all = files.filter(isMedia), selected = masked.filter(isMedia))
+    return MediaSelection(
+        all = files.filter(isMedia),
+        selected = masked.filter(isMedia),
+        matched = masked,
+    )
 }
+
+/**
+ * What a command says when the masks left it no media to work on — the same sentence in `inspect` and in
+ * `mux`, which is why it is composed once here.
+ *
+ * With no masks the batch is simply empty and the extensions it looked for are the useful thing to name;
+ * with masks the patterns are, since a typo is the likely cause. Sorted so the list reads the same way
+ * twice.
+ */
+fun noMediaMessage(
+    allowedExtensions: Set<String>,
+    fileMasks: List<String> = emptyList(),
+    excludeMasks: List<String> = emptyList(),
+): String =
+    if (fileMasks.isEmpty() && excludeMasks.isEmpty()) {
+        "*** No media files (${allowedExtensions.sorted().joinToString(", ")}) in the current directory"
+    } else {
+        "*** No media files match: ${maskDescription(fileMasks, excludeMasks)}"
+    }
+
+/** The masks as the reports name them: the positional patterns, then each exclusion with its own flag. */
+fun maskDescription(fileMasks: List<String>, excludeMasks: List<String>): String =
+    (fileMasks + excludeMasks.map { "--exclude $it" }).joinToString(", ")
+
+/**
+ * A path as the config wrote it, anchored on the working directory unless it is already absolute.
+ *
+ * Every path a config carries — `destinationDir`, a resolved `additionalSources` entry — is relative to
+ * the media directory, which is the directory these commands are pointed at rather than the one the JVM
+ * happens to have started in.
+ */
+internal fun resolveAgainst(dir: File, path: String): File =
+    File(path).let { if (it.isAbsolute) it else File(dir, path) }
 
 /**
  * [name]'s extension, lower-cased, without the dot; empty when it has none.

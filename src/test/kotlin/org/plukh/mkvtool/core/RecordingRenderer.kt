@@ -16,6 +16,10 @@ import org.plukh.mkvtool.out.Renderer
 internal class RecordingRenderer : Renderer {
     val events = mutableListOf<OutputEvent>()
 
+    /** Results in emission order, for the specs that care *when* a child was emitted rather than what it
+     *  says — a per-file result arriving after its header, and before the next file's. */
+    val results = mutableListOf<CommandResult>()
+
     /** What the meter was told to expect, or -1 when no meter was ever started. */
     var progressTotal: Int = -1
         private set
@@ -27,7 +31,9 @@ internal class RecordingRenderer : Renderer {
         events += event
     }
 
-    override fun render(result: CommandResult) {}
+    override fun render(result: CommandResult) {
+        results += result
+    }
 
     override fun progress(label: String, total: Int, interactive: Boolean?): ProgressHandle {
         progressTotal = total
