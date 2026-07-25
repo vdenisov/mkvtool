@@ -6,6 +6,7 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.plukh.mkvtool.core.CheckReport
 import org.plukh.mkvtool.core.ConversionRun
+import org.plukh.mkvtool.core.EpisodeFetch
 import org.plukh.mkvtool.core.FileConversion
 import org.plukh.mkvtool.core.FileFix
 import org.plukh.mkvtool.core.FileProped
@@ -13,7 +14,9 @@ import org.plukh.mkvtool.core.FileTitled
 import org.plukh.mkvtool.core.FixRun
 import org.plukh.mkvtool.core.FontUsageReport
 import org.plukh.mkvtool.core.PropeditRun
+import org.plukh.mkvtool.core.ShowFetched
 import org.plukh.mkvtool.core.TitleRun
+import org.plukh.mkvtool.core.TranslationFallback
 import org.plukh.mkvtool.core.TrackSelection
 import org.plukh.mkvtool.core.buildCheckReport
 import org.plukh.mkvtool.out.RenderHints
@@ -39,6 +42,9 @@ class TextResultRenderersTest : FunSpec({
             FileTitled::class,
             TitleRun::class,
             FontUsageReport::class,
+            ShowFetched::class,
+            TranslationFallback::class,
+            EpisodeFetch::class,
             CheckReport::class,
         )
     }

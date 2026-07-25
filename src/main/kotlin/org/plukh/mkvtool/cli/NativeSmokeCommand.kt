@@ -1,9 +1,11 @@
 package org.plukh.mkvtool.cli
 
 import org.plukh.mkvtool.core.decodeWindows1251Strict
+import org.plukh.mkvtool.core.httpsProbeValue
 import org.plukh.mkvtool.core.jsonProbeValue
 import org.plukh.mkvtool.core.languageGuessProbeValue
 import org.plukh.mkvtool.core.nativeLanguageName
+import org.plukh.mkvtool.core.yamlDumpProbeValue
 import org.plukh.mkvtool.core.yamlProbeValue
 import picocli.CommandLine.Command
 import java.io.PrintStream
@@ -39,6 +41,7 @@ class NativeSmokeCommand : Callable<Int> {
         )
         val expected = "Русский"
         val expectedGuess = "rus"
+        val expectedScheme = "https"
 
         // Print diagnostics as explicit UTF-8: a native binary on a legacy Windows
         // console codepage would otherwise mangle the Cyrillic and hide the real result.
@@ -49,19 +52,25 @@ class NativeSmokeCommand : Callable<Int> {
         val languageGuess = languageGuessProbeValue()
         val jsonValue = jsonProbeValue()
         val yamlValue = yamlProbeValue()
+        val yamlDumpValue = yamlDumpProbeValue()
+        val httpsValue = httpsProbeValue()
 
         utf8Out.println("charset (windows-1251 decode): $decoded")
         utf8Out.println("locale (ru native name):       $nativeName")
         utf8Out.println("language (guess for Русский):  $languageGuess")
         utf8Out.println("json (parsed track name):      $jsonValue")
         utf8Out.println("yaml (round-tripped value):    $yamlValue")
+        utf8Out.println("yaml (dumped show name):       $yamlDumpValue")
+        utf8Out.println("https (scheme reached):        $httpsValue")
 
         val charsetOk = decoded == expected
         val localeOk = nativeName == expected
         val languageOk = languageGuess == expectedGuess
         val jsonOk = jsonValue == expected
         val yamlOk = yamlValue == expected
-        if (charsetOk && localeOk && languageOk && jsonOk && yamlOk) {
+        val yamlDumpOk = yamlDumpValue == expected
+        val httpsOk = httpsValue == expectedScheme
+        if (charsetOk && localeOk && languageOk && jsonOk && yamlOk && yamlDumpOk && httpsOk) {
             utf8Out.println("native-smoke: OK")
             return 0
         }
@@ -73,6 +82,12 @@ class NativeSmokeCommand : Callable<Int> {
         }
         if (!jsonOk) utf8Out.println("native-smoke: FAIL json - expected '$expected', got '$jsonValue'")
         if (!yamlOk) utf8Out.println("native-smoke: FAIL yaml - expected '$expected', got '$yamlValue'")
+        if (!yamlDumpOk) {
+            utf8Out.println("native-smoke: FAIL yaml dump - expected '$expected', got '$yamlDumpValue'")
+        }
+        if (!httpsOk) {
+            utf8Out.println("native-smoke: FAIL https - expected '$expectedScheme', got '$httpsValue'")
+        }
         return 1
     }
 }

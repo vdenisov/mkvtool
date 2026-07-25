@@ -6,6 +6,7 @@ import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import javax.net.ssl.SSLContext
 
 /**
  * Probe logic for the native-image failure modes that fail *silently*: a native binary
@@ -96,3 +97,52 @@ fun yamlProbeValue(): String? {
         file.delete()
     }
 }
+
+/**
+ * Writes a one-episode `episodes.yaml` through the real [writeEpisodesYaml] and reads the name back out
+ * of the text.
+ *
+ * The load side is not the whole of snakeyaml: dumping walks a different half of the library, and it is
+ * the half `fetch-episodes` depends on. A build where it fails writes an unusable `episodes.yaml` — or,
+ * with the `allowUnicode` path broken, one where every Cyrillic title has become an escape sequence,
+ * which is why this asserts on the raw text rather than on a re-parse.
+ */
+fun yamlDumpProbeValue(): String? {
+    val file = File.createTempFile("mkvtool-smoke-dump", ".yaml")
+    return try {
+        writeEpisodesYaml(file, "Русский", 2006, "1", "", null, listOf(FetchedEpisode(1, "Русский")))
+        file.readText(StandardCharsets.UTF_8)
+            .lineSequence()
+            .firstOrNull { it.startsWith("show:") }
+            ?.substringAfter("show:")
+            ?.trim()
+    } catch (_: Exception) {
+        null
+    } finally {
+        file.delete()
+    }
+}
+
+/**
+ * Runs a real request through the real [HttpTmdbFetcher], at a loopback port nothing listens on.
+ *
+ * What it proves: the TLS stack is in the image (without the security services `SSLContext.getDefault()`
+ * throws), the HTTP client builds, and a request over `https` gets as far as the network before failing.
+ * What it cannot prove offline is a completed handshake — that needs a server with a certificate, which
+ * is more machinery than a build probe should carry. The remaining risk is covered by the live contract
+ * test in the Groovy suite.
+ *
+ * Returns the scheme it got through on, so the expected value reads like the other probes.
+ */
+fun httpsProbeValue(): String? =
+    try {
+        SSLContext.getDefault().socketFactory
+        // Nothing can answer on port 1, so a *transport* failure is the success case: it means the
+        // request was built and run rather than refused by a missing protocol or provider.
+        HttpTmdbFetcher("https://127.0.0.1:1", "smoke").get("/3/tv/0", "en-US")
+        null
+    } catch (e: TmdbException) {
+        if (e.message?.contains("failed") == true) "https" else null
+    } catch (_: Exception) {
+        null
+    }
