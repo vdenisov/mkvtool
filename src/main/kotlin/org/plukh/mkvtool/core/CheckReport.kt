@@ -48,13 +48,16 @@ data class TrackValueFinding(
 ) : Finding
 
 /**
- * One external slot whose value varies — the same dub tagged Russian for half a season and untagged for
- * the rest. Never blocking, since nothing selects an external file by id, but the same class of surprise
- * as an internal split and worth saying.
+ * One external slot whose value varies — a dub group that switched format mid-season, or whose files are
+ * tagged with two different languages. Never blocking, since nothing selects an external file by id, but
+ * the same class of surprise as an internal split and worth saying.
+ *
+ * A language merely *inferred* from the folder for some of the files is not such a difference: the
+ * inference produces the language itself, and where it came from rides outside the signature. A dub
+ * directory tagged only from episode 6 onwards is one consistent slot, which is the point.
  */
 data class ExternalValueFinding(
-    val label: String,
-    val variantName: String,
+    val variant: VariantIdentity,
     val type: String,
     val varying: List<SignatureField>,
     val groupCount: Int,
@@ -184,8 +187,7 @@ fun buildCheckReport(
                 // always exists here.
                 val slot = slotGroup.groups.firstNotNullOf { it.slot }
                 findings += ExternalValueFinding(
-                    label = slot.label,
-                    variantName = slot.variantName,
+                    variant = slot.variant,
                     type = slotGroup.type,
                     varying = slotGroup.varying,
                     groupCount = slotGroup.groups.size,

@@ -129,34 +129,6 @@ data class ExternalTrack(
 )
 
 /**
- * How a variant identifies itself.
- *
- * Carried instead of the whole [Variant] so that an episode holding one of its files does not drag every
- * other episode's entries along with it. The display name itself is composed by the renderer from these
- * fields — the discovery engine returns ingredients, never prose.
- *
- * The three descriptive fields come from [Variant.first] — the first entry in **discovery** order — not
- * from the variant's own identity, which is what `src/inspect.groovy` names a variant after. The two
- * disagree in one case: a variant whose path-sorted first entry is not its discovery-first one displays
- * without the suffix its identity carries.
- */
-data class VariantIdentity(
-    val label: String,
-    val leaf: String?,
-    val suffix: String?,
-    val dirRel: String,
-    val collision: Boolean,
-) {
-    constructor(variant: Variant) : this(
-        label = variant.label,
-        leaf = variant.first.entry.leaf,
-        suffix = variant.first.suffix,
-        dirRel = variant.first.entry.dirRel,
-        collision = variant.collision,
-    )
-}
-
-/**
  * The legend printed once above the per-file tables: which label means which variant, where its files
  * live and how many there are.
  *
@@ -314,6 +286,21 @@ fun inspectDirectory(
     val legend = ExternalLegend(legendRowsOf(discovered))
     renderer.render(legend)
 
+    // Precomputed, because the report asks for a file's externals once per grouping, once per layout for
+    // the labels and the findings, and once per file *per slot id* while grouping — a closure that
+    // rebuilt them each time would be the hot path.
+    val check = if (options.check) {
+        val slotsByFile = externalsByFile.mapValues { (_, externals) -> externalSlotsFor(externals) }
+        buildCheckReport(
+            infos = selection.selected.map { infos.getValue(it) },
+            externalsOf = { slotsByFile[it.file].orEmpty() },
+            selection = trackSelectionOf(options.config),
+            headerLabel = "Consistency check",
+        ).also(renderer::render)
+    } else {
+        null
+    }
+
     val files = if (options.identify) {
         selection.selected.map { file ->
             FileIdentification(
@@ -338,7 +325,7 @@ fun inspectDirectory(
         files = files,
         legend = legend,
         leftovers = leftovers,
-        check = null,
+        check = check,
         configProblems = options.configProblems,
     )
 }
@@ -391,6 +378,49 @@ fun externalRowsOf(ext: String, languageGuess: String?, probed: ProbeResult?): E
             )
         },
     )
+}
+
+/**
+ * One episode's external files as slots the consistency check can group by, exactly as it groups the
+ * tracks inside a container.
+ *
+ * The key is the variant, the kind of file and its **extension** — never an index, since external files
+ * have no order and what a reader follows through a season is "does this episode have the [Омикрон] dub".
+ * The extension is in it because one variant can hand a single episode two files of the same kind (a group
+ * shipping both `.ass` and `.srt` for one episode and only `.ass` for the next): keyed on the kind alone
+ * they collide, the second silently overwrites the first, and two episodes come out looking like one pass.
+ * It also separates a variant that switched format mid-season, which is a real second pass — mkvmerge is
+ * being handed a different file.
+ *
+ * A file mkvmerge could not read still occupies its slot. The episode has it, and pretending otherwise
+ * would move that episode into a different muxing group over a defect reported elsewhere.
+ */
+fun externalSlotsFor(externals: List<VariantExternals>): Map<String, ExternalSlot> {
+    val slots = LinkedHashMap<String, ExternalSlot>()
+
+    for (variant in externals) {
+        for (file in variant.files) {
+            val type = typeClassOf(file.extension)
+            val row = (file.listing as? ExternalListing.Tracks)?.tracks?.firstOrNull()
+            slots["${variant.variant.label}/${type.label}/${file.extension}"] = ExternalSlot(
+                key = "${variant.variant.label}/${type.label}/${file.extension}",
+                signature = TrackSignature(
+                    // The kind comes from the extension, not from the row: an unreadable file has no row
+                    // and still belongs to the audio or the subtitle side of its variant.
+                    type = type.label,
+                    codec = row?.codec ?: codecOf(file.extension),
+                    language = row?.language ?: "-",
+                    name = row?.name.orEmpty(),
+                    default = row?.default == true,
+                    forced = row?.forced == true,
+                ),
+                guessed = row?.guessed ?: false,
+                variant = variant.variant,
+            )
+        }
+    }
+
+    return slots
 }
 
 /** The legend's rows: one per variant, per kind of file it holds. */

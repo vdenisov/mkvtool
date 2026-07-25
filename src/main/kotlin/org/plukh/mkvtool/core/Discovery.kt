@@ -236,6 +236,34 @@ data class Variant(
 }
 
 /**
+ * How a variant identifies itself.
+ *
+ * Carried instead of the whole [Variant] so that an episode holding one of its files does not drag every
+ * other episode's entries along with it. The display name itself is composed by the renderer from these
+ * fields — the discovery engine returns ingredients, never prose.
+ *
+ * The three descriptive fields come from [Variant.first] — the first entry in **discovery** order — not
+ * from the variant's own identity, which is what `src/inspect.groovy` names a variant after. The two
+ * disagree in one case: a variant whose path-sorted first entry is not its discovery-first one displays
+ * without the suffix its identity carries.
+ */
+data class VariantIdentity(
+    val label: String,
+    val leaf: String?,
+    val suffix: String?,
+    val dirRel: String,
+    val collision: Boolean,
+) {
+    constructor(variant: Variant) : this(
+        label = variant.label,
+        leaf = variant.first.entry.leaf,
+        suffix = variant.first.suffix,
+        dirRel = variant.first.entry.dirRel,
+        collision = variant.collision,
+    )
+}
+
+/**
  * Everything one walk found: the [variants], the companion-extension files that belong to no main file,
  * and the main-type files sitting in subdirectories (BD menus, trailers, creditless openings), which are
  * reported so they are not a surprise but are never treated as sources.

@@ -5,6 +5,7 @@ import org.plukh.mkvtool.core.ProbeResult
 import org.plukh.mkvtool.core.ProbedTrack
 import org.plukh.mkvtool.core.TrackSignature
 import org.plukh.mkvtool.core.TrackSlot
+import org.plukh.mkvtool.core.VariantIdentity
 import org.plukh.mkvtool.core.signatureOf
 import java.io.File
 
@@ -37,6 +38,5 @@ internal fun ex(label: String, language: String = "rus", guessed: Boolean = fals
     key = "$label/audio/mka",
     signature = TrackSignature("audio", "Matroska", language, "", default = false, forced = false),
     guessed = guessed,
-    label = label,
-    variantName = "[Group$label]",
+    variant = VariantIdentity(label, leaf = "[Group$label]", suffix = null, dirRel = "Rus sound/[Group$label]", collision = false),
 )

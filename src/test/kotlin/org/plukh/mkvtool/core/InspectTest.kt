@@ -7,6 +7,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.plukh.mkvtool.out.Advisory
 import java.io.File
@@ -364,6 +365,55 @@ class InspectTest : FunSpec({
         }
     }
 
+    context("external slots") {
+        test("a half-tagged dub directory is one consistent slot, not two values") {
+            // Ten files in `Rus sound`, five tagged `rus` and five `und` — a group that started tagging
+            // mid-season. The guess is per variant and the tag per file, so this mixture is ordinary, and
+            // every one of the files is Russian. Reporting it as `language differs` would point the reader
+            // at a non-problem.
+            val tagged = variantExternals(language = "rus", guessed = false)
+            val untagged = variantExternals(language = "rus", guessed = true)
+
+            val a = externalSlotsFor(listOf(tagged)).getValue("A/audio/mka")
+            val b = externalSlotsFor(listOf(untagged)).getValue("A/audio/mka")
+
+            a.signature shouldBe b.signature
+            a.guessed shouldBe false
+            b.guessed shouldBe true
+        }
+
+        test("a genuine mis-tag still differs, because the languages themselves do") {
+            val russian = externalSlotsFor(listOf(variantExternals(language = "rus", guessed = true)))
+            val japanese = externalSlotsFor(listOf(variantExternals(language = "jpn", guessed = false)))
+
+            russian.getValue("A/audio/mka").signature shouldNotBe japanese.getValue("A/audio/mka").signature
+        }
+
+        test("the key carries the extension, so one variant's .ass and .srt do not collide") {
+            // A group shipping both for one episode and only the .ass for the next is two slots, which is
+            // what keeps the two episodes in different muxing groups.
+            val variant = VariantExternals(
+                identityA,
+                listOf(externalFile("ass", "rus", guessed = true), externalFile("srt", "rus", guessed = true)),
+            )
+
+            externalSlotsFor(listOf(variant)).keys.toList() shouldContainExactly
+                listOf("A/subtitles/ass", "A/subtitles/srt")
+        }
+
+        test("an unreadable file still occupies its slot, described by its extension") {
+            val variant = VariantExternals(
+                identityA,
+                listOf(ExternalFile("Rus/01.mka", "mka", MatchTier.NAME, ExternalListing.Unreadable("bad"))),
+            )
+
+            val slot = externalSlotsFor(listOf(variant)).getValue("A/audio/mka")
+            slot.signature.type shouldBe "audio"
+            slot.signature.codec shouldBe "Matroska"
+            slot.signature.language shouldBe "-"
+        }
+    }
+
     context("probe caching") {
         test("nothing is probed twice, and nothing is probed after the meter says it has finished") {
             val dir = tempdir()
@@ -405,6 +455,26 @@ class InspectTest : FunSpec({
         }
     }
 })
+
+private val identityA =
+    VariantIdentity("A", leaf = "[GroupA]", suffix = null, dirRel = "Rus sound/[GroupA]", collision = false)
+
+private fun externalFile(ext: String, language: String?, guessed: Boolean) = ExternalFile(
+    relPath = "Rus sound/[GroupA]/01.$ext",
+    extension = ext,
+    tier = MatchTier.NAME,
+    listing = ExternalListing.Tracks(
+        listOf(
+            ExternalTrack(
+                0, typeClassOf(ext).label, CODEC_BY_EXTENSION.getValue(ext), language, guessed,
+                default = false, forced = false, name = "",
+            ),
+        ),
+    ),
+)
+
+private fun variantExternals(language: String, guessed: Boolean) =
+    VariantExternals(identityA, listOf(externalFile("mka", language, guessed)))
 
 private fun options(
     identify: Boolean = false,
