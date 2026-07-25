@@ -110,7 +110,7 @@ data class ConversionRun(
  * Convert every subtitle file in [dir] to UTF-8 in place, emitting each file's result live and the root
  * at the end, and returning the root (the exit code derives from `root.failed`). Narration — the banner,
  * the dry-run notice, the leading blank, the no-files advisory — goes over the diagnostics channel; the
- * per-file lines and the summary are results, rendered by the caller's [ResultTextRenderer].
+ * per-file lines and the summary are results, drawn by whatever renderer is bound to each result type.
  *
  * [dir] is passed explicitly rather than read from `File(".")` so the engine is unit-testable in-process
  * (the process CWD is global and cannot be set per test).

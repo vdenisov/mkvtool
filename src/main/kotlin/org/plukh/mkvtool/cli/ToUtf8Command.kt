@@ -2,9 +2,9 @@ package org.plukh.mkvtool.cli
 
 import org.plukh.mkvtool.core.convertDirectory
 import org.plukh.mkvtool.out.Error
-import org.plukh.mkvtool.out.TextRenderer
-import org.plukh.mkvtool.out.colorModeOf
+import org.plukh.mkvtool.out.Renderer
 import picocli.CommandLine.Command
+import picocli.CommandLine.Mixin
 import picocli.CommandLine.Option
 import java.io.File
 import java.nio.charset.Charset
@@ -14,10 +14,10 @@ import java.util.concurrent.Callable
 
 /**
  * `mkvtool to-utf8` — convert `.srt/.ass/.ssa/.vtt` files in the current directory to UTF-8 in place.
- * A verbatim port of `src/to_utf8.groovy`. Thin by design: it resolves the charset, wires the renderer
- * (diagnostics + [ToUtf8ResultRenderer]), and delegates to [convertDirectory], deriving the exit code from the
- * returned model — 2 on an unusable charset name (before any file is touched), 1 if any file failed,
- * else 0. Exit codes flow through picocli's `Callable<Int>` return.
+ * A verbatim port of `src/to_utf8.groovy`. Thin by design: it resolves the charset, takes its renderer
+ * from [OutputOptions], and delegates to [convertDirectory], deriving the exit code from the returned
+ * model — 2 on an unusable charset name (before any file is touched), 1 if any file failed, else 0.
+ * Exit codes flow through picocli's `Callable<Int>` return.
  */
 @Command(
     name = "to-utf8",
@@ -39,15 +39,11 @@ class ToUtf8Command : Callable<Int> {
     @Option(names = ["-n", "--dry-run"], description = ["Report what would be converted without writing anything"])
     var dryRun: Boolean = false
 
-    @Option(
-        names = ["--color"],
-        paramLabel = "WHEN",
-        description = ["Colorize output: auto (default, only on a terminal and not under NO_COLOR), always, or never"],
-    )
-    var color: String = "auto"
+    @Mixin
+    var output: OutputOptions = OutputOptions()
 
     override fun call(): Int {
-        val renderer = TextRenderer(colorModeOf(color), results = ToUtf8ResultRenderer)
+        val renderer = output.renderer()
 
         // Fail on an unusable charset name before touching any file, not partway through a batch.
         val charset: Charset = try {
@@ -63,7 +59,7 @@ class ToUtf8Command : Callable<Int> {
         return if (run.failed > 0) 1 else 0
     }
 
-    private fun unknownEncoding(renderer: TextRenderer, e: RuntimeException): Int {
+    private fun unknownEncoding(renderer: Renderer, e: RuntimeException): Int {
         renderer.render(
             Error(
                 "Unknown source encoding '$encoding': ${e.javaClass.simpleName}",

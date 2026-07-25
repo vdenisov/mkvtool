@@ -19,11 +19,11 @@ class FilenameToTitleCommandTest : FunSpec({
     }
 
     test("the subcommand is registered and colors automatically by default") {
-        parse("filename-to-title").color shouldBe "auto"
+        parse("filename-to-title").output.color shouldBe "auto"
     }
 
     test("--color binds") {
-        parse("filename-to-title", "--color", "never").color shouldBe "never"
+        parse("filename-to-title", "--color", "never").output.color shouldBe "never"
     }
 
     test("a stray argument is a usage error (v1 ignored anything passed)") {

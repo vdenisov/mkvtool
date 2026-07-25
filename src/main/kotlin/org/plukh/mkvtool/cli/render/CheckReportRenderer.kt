@@ -1,4 +1,4 @@
-package org.plukh.mkvtool.cli
+package org.plukh.mkvtool.cli.render
 
 import org.plukh.mkvtool.core.AmbiguousTracksFinding
 import org.plukh.mkvtool.core.ChapterFinding
@@ -13,27 +13,26 @@ import org.plukh.mkvtool.core.Slot
 import org.plukh.mkvtool.core.SlotGroup
 import org.plukh.mkvtool.core.TrackValueFinding
 import org.plukh.mkvtool.core.formatRanges
-import org.plukh.mkvtool.out.CommandResult
 import org.plukh.mkvtool.out.ResultTextRenderer
 import org.plukh.mkvtool.out.TextStyle
 import org.plukh.mkvtool.out.plural
 import org.plukh.mkvtool.out.pluralize
 
 /**
- * The consistency check's text form. Shared verbatim by `inspect` and by `mux`'s pre-flight — the same
- * report must render identically in both, so this is one renderer rather than one per command, and the
- * only thing that differs is the header label carried on the model.
+ * The consistency check's text form. Bound to [CheckReport] once, so `inspect` and `mux`'s pre-flight
+ * render the same report identically by construction — the only thing that differs between them is the
+ * header label, which the model carries.
  *
  * Everything here is presentation: the column grid, the differing-cell highlight, the file-evidence
  * lists, and every phrase v1 composed inside the check itself. The model composes no text at all.
  *
- * [verbose] is the `--check-verbose` modifier. It changes only how much of each file list is shown, never
- * what the report says, which is why it is a renderer setting and not a field on the model.
+ * [verbose] is the `--check-verbose` modifier, reaching here as a render hint. It changes only how much
+ * of each file list is shown, never what the report says, which is why it is a renderer setting and not
+ * a field on the model.
  */
-class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRenderer {
+class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRenderer<CheckReport> {
 
-    override fun render(result: CommandResult, style: TextStyle) {
-        if (result !is CheckReport) return
+    override fun render(result: CheckReport, style: TextStyle) {
         val out = style.out
         val limit = if (verbose) Int.MAX_VALUE else DEFAULT_FILE_LIST_LIMIT
 

@@ -1,4 +1,4 @@
-package org.plukh.mkvtool.cli
+package org.plukh.mkvtool.cli.render
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.string.shouldBeEmpty
@@ -7,33 +7,22 @@ import io.kotest.matchers.string.shouldNotContain
 import org.plukh.mkvtool.core.FileTitled
 import org.plukh.mkvtool.core.TitleOutcome
 import org.plukh.mkvtool.core.TitleRun
-import org.plukh.mkvtool.out.CommandResult
-import org.plukh.mkvtool.out.TextStyle
-import java.io.ByteArrayOutputStream
-import java.io.PrintStream
-import java.nio.charset.StandardCharsets
 
 /**
- * Pins the v1 text of every `filename-to-title` result line, rendered through a [TextStyle] wired to
- * captured streams. The per-file failure carries the `*** Error:` prefix the harness pins (case 86); the
- * summary reads `<succeeded> processed, <failed> failed`, matching v1's `total - failed` arithmetic
- * (case 85 pins the clean form).
+ * Pins the v1 text of every `filename-to-title` result line, rendered over captured streams. The per-file
+ * failure carries the `*** Error:` prefix the harness pins (case 86); the summary reads
+ * `<succeeded> processed, <failed> failed`, matching v1's `total - failed` arithmetic (case 85 pins the
+ * clean form).
  */
-class FilenameToTitleResultRendererTest : FunSpec({
+class TitleRendererTest : FunSpec({
 
     val esc = Char(27).toString()
 
-    fun render(colorEnabled: Boolean, result: CommandResult): Pair<String, String> {
-        val outBytes = ByteArrayOutputStream()
-        val errBytes = ByteArrayOutputStream()
-        val style = TextStyle(
-            colorEnabled = colorEnabled,
-            out = PrintStream(outBytes, true, StandardCharsets.UTF_8),
-            err = PrintStream(errBytes, true, StandardCharsets.UTF_8),
-        )
-        FilenameToTitleResultRenderer.render(result, style)
-        return outBytes.toString(StandardCharsets.UTF_8) to errBytes.toString(StandardCharsets.UTF_8)
-    }
+    fun render(colorEnabled: Boolean, result: FileTitled) =
+        renderResult(FileTitledRenderer, result, colorEnabled)
+
+    fun render(colorEnabled: Boolean, result: TitleRun) =
+        renderResult(TitleRunRenderer, result, colorEnabled)
 
     test("a succeeded file prints nothing (its header is a diagnostics event)") {
         val (out, err) = render(colorEnabled = true, FileTitled("ep.mkv", "ep", TitleOutcome.Succeeded))

@@ -1,4 +1,4 @@
-package org.plukh.mkvtool.cli
+package org.plukh.mkvtool.cli.render
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.string.shouldBeEmpty
@@ -7,32 +7,22 @@ import io.kotest.matchers.string.shouldNotContain
 import org.plukh.mkvtool.core.ConversionRun
 import org.plukh.mkvtool.core.FileConversion
 import org.plukh.mkvtool.core.FileOutcome
-import org.plukh.mkvtool.out.CommandResult
-import org.plukh.mkvtool.out.TextStyle
-import java.io.ByteArrayOutputStream
-import java.io.PrintStream
-import java.nio.charset.StandardCharsets
 
 /**
- * Pins the v1 text of every `to-utf8` result line, rendered through a [TextStyle] wired to captured
- * streams. This is the renderer tier — the text lives in [ToUtf8ResultRenderer], not in command logic
- * or the generic `TextRenderer`.
+ * Pins the v1 text of every `to-utf8` result line, rendered over captured streams. This is the renderer
+ * tier — the text lives in [FileConversionRenderer] and [ConversionRunRenderer], not in command logic or
+ * the generic `TextRenderer`. The two overloads below are the type-to-renderer binding under test: each
+ * result goes to the renderer registered for its own type.
  */
-class ToUtf8ResultRendererTest : FunSpec({
+class ConversionRendererTest : FunSpec({
 
     val esc = Char(27).toString()
 
-    fun render(colorEnabled: Boolean, result: CommandResult): Pair<String, String> {
-        val outBytes = ByteArrayOutputStream()
-        val errBytes = ByteArrayOutputStream()
-        val style = TextStyle(
-            colorEnabled = colorEnabled,
-            out = PrintStream(outBytes, true, StandardCharsets.UTF_8),
-            err = PrintStream(errBytes, true, StandardCharsets.UTF_8),
-        )
-        ToUtf8ResultRenderer.render(result, style)
-        return outBytes.toString(StandardCharsets.UTF_8) to errBytes.toString(StandardCharsets.UTF_8)
-    }
+    fun render(colorEnabled: Boolean, result: FileConversion) =
+        renderResult(FileConversionRenderer, result, colorEnabled)
+
+    fun render(colorEnabled: Boolean, result: ConversionRun) =
+        renderResult(ConversionRunRenderer, result, colorEnabled)
 
     test("UTF-16 skip line is uncolored on stdout") {
         val (out, err) = render(colorEnabled = true, FileConversion("wide.ssa", FileOutcome.Utf16Bom))

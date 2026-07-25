@@ -1,4 +1,4 @@
-package org.plukh.mkvtool.cli
+package org.plukh.mkvtool.cli.render
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -362,30 +362,3 @@ private fun render(
     return buffer.toString(Charsets.UTF_8)
 }
 
-private fun t(
-    id: Int,
-    type: String,
-    codec: String = "AAC",
-    language: String = "eng",
-    name: String = "",
-    default: Boolean = false,
-    forced: Boolean = false,
-): ProbedTrack = ProbedTrack(id, type, codec, "ID", language, name, default, forced)
-
-private fun probed(fileName: String, vararg tracks: ProbedTrack, chapters: Int = 0): ProbeResult.Probed =
-    ProbeResult.Probed(
-        file = File(fileName),
-        allTracks = tracks.toList(),
-        tracks = tracks.associate {
-            it.id to TrackSlot(it.id, signatureOf(it), if (it.type == "video") (it.trackName ?: "") else null)
-        },
-        chapters = chapters,
-    )
-
-private fun ex(label: String, language: String = "rus", guessed: Boolean = false): ExternalSlot = ExternalSlot(
-    key = "$label/audio/mka",
-    signature = TrackSignature("audio", "Matroska", language, "", default = false, forced = false),
-    guessed = guessed,
-    label = label,
-    variantName = "[Group$label]",
-)

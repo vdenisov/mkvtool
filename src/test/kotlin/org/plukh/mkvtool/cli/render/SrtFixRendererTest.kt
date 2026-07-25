@@ -1,4 +1,4 @@
-package org.plukh.mkvtool.cli
+package org.plukh.mkvtool.cli.render
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.string.shouldBeEmpty
@@ -7,31 +7,20 @@ import io.kotest.matchers.string.shouldNotContain
 import org.plukh.mkvtool.core.FileFix
 import org.plukh.mkvtool.core.FixOutcome
 import org.plukh.mkvtool.core.FixRun
-import org.plukh.mkvtool.out.CommandResult
-import org.plukh.mkvtool.out.TextStyle
-import java.io.ByteArrayOutputStream
-import java.io.PrintStream
-import java.nio.charset.StandardCharsets
 
 /**
- * Pins the v1 text of every `fix-srt` result line, rendered through a [TextStyle] wired to captured
- * streams. This is the renderer tier — the text lives in [FixSrtResultRenderer], not in command logic.
+ * Pins the v1 text of every `fix-srt` result line, rendered over captured streams. This is the renderer
+ * tier — the text lives in [FileFixRenderer] and [FixRunRenderer], not in command logic.
  */
-class FixSrtResultRendererTest : FunSpec({
+class SrtFixRendererTest : FunSpec({
 
     val esc = Char(27).toString()
 
-    fun render(colorEnabled: Boolean, result: CommandResult): Pair<String, String> {
-        val outBytes = ByteArrayOutputStream()
-        val errBytes = ByteArrayOutputStream()
-        val style = TextStyle(
-            colorEnabled = colorEnabled,
-            out = PrintStream(outBytes, true, StandardCharsets.UTF_8),
-            err = PrintStream(errBytes, true, StandardCharsets.UTF_8),
-        )
-        FixSrtResultRenderer.render(result, style)
-        return outBytes.toString(StandardCharsets.UTF_8) to errBytes.toString(StandardCharsets.UTF_8)
-    }
+    fun render(colorEnabled: Boolean, result: FileFix) =
+        renderResult(FileFixRenderer, result, colorEnabled)
+
+    fun render(colorEnabled: Boolean, result: FixRun) =
+        renderResult(FixRunRenderer, result, colorEnabled)
 
     test("a fixed file prints nothing (its header is a diagnostics event)") {
         val (out, err) = render(colorEnabled = true, FileFix("ep.srt", FixOutcome.Fixed))

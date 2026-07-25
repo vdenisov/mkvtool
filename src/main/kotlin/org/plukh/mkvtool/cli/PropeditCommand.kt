@@ -3,10 +3,8 @@ package org.plukh.mkvtool.cli
 import org.plukh.mkvtool.core.MkvToolNotFoundException
 import org.plukh.mkvtool.core.findMkvTool
 import org.plukh.mkvtool.core.propeditDirectory
-import org.plukh.mkvtool.out.ColorMode
 import org.plukh.mkvtool.out.Error
 import org.plukh.mkvtool.out.Notice
-import org.plukh.mkvtool.out.TextRenderer
 import picocli.CommandLine.Command
 import picocli.CommandLine.Parameters
 import java.io.File
@@ -43,7 +41,10 @@ class PropeditCommand : Callable<Int> {
     var passthrough: MutableList<String> = mutableListOf()
 
     override fun call(): Int {
-        val renderer = TextRenderer(ColorMode.AUTO, results = PropeditResultRenderer)
+        // The same factory every command uses, at its default (auto) mode: this command cannot declare
+        // the option itself without eating a pass-through flag, so it takes the defaults rather than
+        // building a renderer of its own.
+        val renderer = OutputOptions().renderer()
 
         // Help is intercepted only as the sole argument, so every other combination reaches mkvpropedit.
         if (passthrough.isEmpty() || (passthrough.size == 1 && passthrough[0] in listOf("-h", "--help"))) {
