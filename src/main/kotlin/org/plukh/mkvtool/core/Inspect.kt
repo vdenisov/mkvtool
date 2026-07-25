@@ -220,7 +220,9 @@ fun inspectDirectory(
     val selection = selectMedia(dir, options.allowedExtensions, options.fileMasks, options.excludeMasks)
 
     if (selection.selected.isEmpty()) {
-        renderer.render(Advisory(noMediaMessage(options)))
+        renderer.render(
+            Advisory(noMediaMessage(options.allowedExtensions, options.fileMasks, options.excludeMasks)),
+        )
         renderer.render(Notice(""))
         return InspectReport(
             mediaFiles = emptyList(),
@@ -516,19 +518,6 @@ private fun excludedPaths(dir: File, config: Config?): Set<String> {
     val resolved = resolveAgainst(dir, destination)
     return if (resolved.isDirectory) setOf(canonicalOrAbsolute(resolved)) else emptySet()
 }
-
-private fun noMediaMessage(options: InspectOptions): String =
-    if (options.fileMasks.isEmpty() && options.excludeMasks.isEmpty()) {
-        "*** No media files (${options.allowedExtensions.sorted().joinToString(", ")}) " +
-            "in the current directory"
-    } else {
-        val named = options.fileMasks + options.excludeMasks.map { "--exclude $it" }
-        "*** No media files match: ${named.joinToString(", ")}"
-    }
-
-/** A path as the caller wrote it, anchored on the inspected directory unless it is absolute. */
-private fun resolveAgainst(dir: File, path: String): File =
-    File(path).let { if (it.isAbsolute) it else File(dir, path) }
 
 /** The identity two references to one file share. Canonical, so `x` and `./x` are the same file — which
  *  is what stops a configured source that is also a discovered companion being read twice. */

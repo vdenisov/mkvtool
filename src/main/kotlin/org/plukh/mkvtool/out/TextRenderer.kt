@@ -49,14 +49,23 @@ class TextRenderer(
             is Error -> {
                 err.println(style.errorText(event.text))
                 // The hint is a verbatim, uncolored continuation line; it carries its own indentation.
-                if (event.hint != null) err.println(event.hint)
+                if (event.hint != null) printHint(event.hint)
             }
             is Warning -> {
                 err.println(style.warningText(event.text))
-                if (event.hint != null) err.println(event.hint)
+                if (event.hint != null) printHint(event.hint)
             }
         }
     }
+
+    /**
+     * A hint's continuation lines, each printed on its own.
+     *
+     * A multi-line hint is a *block* of lines, and printing it as one string would leave every line but
+     * the last ending in a bare `\n` while the last got the platform separator — visibly mixed endings in
+     * a redirected log on Windows, where v1 printed each line separately and got CRLF throughout.
+     */
+    private fun printHint(hint: String) = hint.lineSequence().forEach { err.println(it) }
 
     override fun render(result: CommandResult) = results.render(result, style)
 

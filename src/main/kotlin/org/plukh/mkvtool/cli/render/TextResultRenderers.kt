@@ -1,6 +1,7 @@
 package org.plukh.mkvtool.cli.render
 
 import org.plukh.mkvtool.core.CheckReport
+import org.plukh.mkvtool.core.CompanionDrops
 import org.plukh.mkvtool.core.ConversionRun
 import org.plukh.mkvtool.core.EpisodeFetch
 import org.plukh.mkvtool.core.ExternalLeftovers
@@ -12,14 +13,18 @@ import org.plukh.mkvtool.core.FileProped
 import org.plukh.mkvtool.core.FileRenamed
 import org.plukh.mkvtool.core.FileTitled
 import org.plukh.mkvtool.core.FixRun
+import org.plukh.mkvtool.core.FileMux
 import org.plukh.mkvtool.core.FontUsageReport
+import org.plukh.mkvtool.core.MuxAbort
 import org.plukh.mkvtool.core.PropeditRun
 import org.plukh.mkvtool.core.RenamePlan
 import org.plukh.mkvtool.core.RenameRun
 import org.plukh.mkvtool.core.ShowFetched
 import org.plukh.mkvtool.core.ShowNameResolved
+import org.plukh.mkvtool.core.SubstitutionDrops
 import org.plukh.mkvtool.core.StrictVerdict
 import org.plukh.mkvtool.core.TitleRun
+import org.plukh.mkvtool.core.TrackOrder
 import org.plukh.mkvtool.core.TranslationFallback
 import org.plukh.mkvtool.out.RenderHints
 import org.plukh.mkvtool.out.ResultRendererRegistry
@@ -57,3 +62,10 @@ fun textResultRenderers(hints: RenderHints = RenderHints()): ResultRendererRegis
         .register(ExternalLegend::class, ExternalLegendRenderer)
         .register(ExternalLeftovers::class, ExternalLeftoversRenderer)
         .register(StrictVerdict::class, StrictVerdictRenderer)
+        .register(TrackOrder.Derived::class, TrackOrderDerivedRenderer)
+        .register(TrackOrder.Configured::class, TrackOrderConfiguredRenderer)
+        .register(SubstitutionDrops::class, SubstitutionDropsRenderer)
+        .register(CompanionDrops::class, CompanionDropsRenderer)
+        .register(MuxAbort.UnresolvedVariables::class, UnresolvedVariablesAbortRenderer)
+        .register(MuxAbort.BlockingDiscrepancies::class, BlockingDiscrepanciesAbortRenderer)
+        .register(FileMux::class, FileMuxRenderer)

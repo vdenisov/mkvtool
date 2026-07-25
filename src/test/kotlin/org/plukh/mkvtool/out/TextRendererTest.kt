@@ -1,6 +1,7 @@
 package org.plukh.mkvtool.out
 
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.string.shouldBeEmpty
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -61,8 +62,13 @@ class TextRendererTest : FunSpec({
         // to carry the same detail lines and print them identically.
         val (_, err) = render(ColorMode.ALWAYS, Warning("two problems:", "  a: bad\n  b: worse"))
         err shouldContain "${esc}[33m*** Warning: two problems:${esc}[0m"
-        err shouldContain "\n  a: bad\n  b: worse"
         err shouldNotContain "${esc}[33m  a: bad"
+
+        // Each continuation line is printed on its own, so all of them end with the platform separator
+        // rather than the last one alone — a multi-line hint is a block of lines, not one long string,
+        // and mixing the two endings is visible in any redirected log on Windows.
+        err.lines().map { it.trimEnd('\r') }.filter { it.startsWith("  ") } shouldContainExactly
+            listOf("  a: bad", "  b: worse")
     }
 
     test("never mode emits plain text with no escapes") {

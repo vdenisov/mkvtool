@@ -13,11 +13,16 @@ import org.plukh.mkvtool.core.ExternalLegend
 import org.plukh.mkvtool.core.FileConversion
 import org.plukh.mkvtool.core.FileFix
 import org.plukh.mkvtool.core.FileIdentification
+import org.plukh.mkvtool.core.CompanionDrops
+import org.plukh.mkvtool.core.FileMux
+import org.plukh.mkvtool.core.MuxAbort
+import org.plukh.mkvtool.core.SubstitutionDrops
 import org.plukh.mkvtool.core.FileProped
 import org.plukh.mkvtool.core.FileRenamed
 import org.plukh.mkvtool.core.FileTitled
 import org.plukh.mkvtool.core.InspectReport
 import org.plukh.mkvtool.core.FixRun
+import org.plukh.mkvtool.core.MuxRun
 import org.plukh.mkvtool.core.FontUsageReport
 import org.plukh.mkvtool.core.PropeditRun
 import org.plukh.mkvtool.core.RenamePlan
@@ -26,6 +31,7 @@ import org.plukh.mkvtool.core.ShowFetched
 import org.plukh.mkvtool.core.ShowNameResolved
 import org.plukh.mkvtool.core.StrictVerdict
 import org.plukh.mkvtool.core.TitleRun
+import org.plukh.mkvtool.core.TrackOrder
 import org.plukh.mkvtool.core.TranslationFallback
 import org.plukh.mkvtool.core.TrackSelection
 import org.plukh.mkvtool.core.buildCheckReport
@@ -64,15 +70,24 @@ class TextResultRenderersTest : FunSpec({
             ExternalLegend::class,
             ExternalLeftovers::class,
             StrictVerdict::class,
+            TrackOrder.Derived::class,
+            TrackOrder.Configured::class,
+            SubstitutionDrops::class,
+            CompanionDrops::class,
+            MuxAbort.UnresolvedVariables::class,
+            MuxAbort.BlockingDiscrepancies::class,
+            FileMux::class,
         )
     }
 
-    test("the inspect root is deliberately unbound, because nothing emits it") {
-        // InspectReport is the core's return value and the future --json document, not something the text
-        // side draws: its children *are* the output, so emitting it too would print them twice. The
-        // registry is consulted on emission only, so an unbound type that is never emitted is legal — and
-        // this is the one such type, pinned here so nobody "completes" the table by adding it.
+    test("the inspect and mux roots are deliberately unbound, because nothing emits them") {
+        // Both are their core's return value and the future --json document, not something the text side
+        // draws: their children *are* the output, so emitting them too would print those twice (and a mux
+        // ends on a bare "*** Done", with no summary to print at all). The registry is consulted on
+        // emission only, so an unbound type nothing emits is legal — these are the two, pinned here so
+        // nobody "completes" the table by adding them.
         textResultRenderers().registeredTypes shouldNotContain InspectReport::class
+        textResultRenderers().registeredTypes shouldNotContain MuxRun::class
     }
 
     test("a render hint reaches the renderer it is meant for") {
