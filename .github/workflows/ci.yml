@@ -18,19 +18,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Minimum supported environment
-          - groovy: "3.0.25"
+          # min — the minimum supported environment
+          - label: min
+            groovy: "3.0.25"
             java: "11"
             mkvtoolnix: distro
-          # Current environment
-          - groovy: "5.0.6"
+          # current — what development actually runs on
+          - label: current
+            groovy: "5.0.6"
             java: "21"
             mkvtoolnix: distro
-          # Newest MKVToolNix from the upstream apt repo — regression canary
-          - groovy: "5.0.6"
+          # upstream — current Groovy/JDK against the newest MKVToolNix from the
+          # upstream apt repo; a regression canary for mkvmerge's own output
+          - label: upstream
+            groovy: "5.0.6"
             java: "21"
             mkvtoolnix: upstream
-    name: Groovy ${{ matrix.groovy }} / JDK ${{ matrix.java }} / mkvtoolnix ${{ matrix.mkvtoolnix }}
+    # Named for the label rather than the versions, because a required status check is
+    # matched by its name: spelling the versions here means bumping Groovy renames the
+    # check and it silently drops out of branch protection, leaving the PR green with
+    # nothing enforced. The versions are one click away in the matrix above.
+    name: Scripts (${{ matrix.label }})
     steps:
       - uses: actions/checkout@v7
 
