@@ -11,6 +11,7 @@ import org.plukh.mkvtool.core.LayoutGroup
 import org.plukh.mkvtool.core.SignatureField
 import org.plukh.mkvtool.core.Slot
 import org.plukh.mkvtool.core.SlotGroup
+import org.plukh.mkvtool.core.TrackSlot
 import org.plukh.mkvtool.core.TrackValueFinding
 import org.plukh.mkvtool.core.formatRanges
 import org.plukh.mkvtool.out.ResultTextRenderer
@@ -110,11 +111,31 @@ class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRend
             )
         )
 
-        val slotGroups: List<SlotGroup<*, *>> = layout.trackGroups + layout.externalGroups
+        // Internal tracks then external files: two loops rather than one over their union, because their
+        // ids are different types (a track number, a slot key) and only the tracks' ids index anything.
+        renderSlotGroups(layout.trackGroups, isLargest, limit, style) { id, slot, differing ->
+            trackRow(id, slot, differing, layout, nameWidth, style)
+        }
+        renderSlotGroups(layout.externalGroups, isLargest, limit, style) { _, slot, differing ->
+            externalRow(slot, differing, nameWidth, style)
+        }
+    }
+
+    /**
+     * Which rows one kind of slot contributes, and which of them name their files. Identical for tracks
+     * and for external files — only the row itself differs, which is what [row] supplies.
+     */
+    private fun <K, S : Slot> renderSlotGroups(
+        slotGroups: List<SlotGroup<K, S>>,
+        isLargest: Boolean,
+        limit: Int,
+        style: TextStyle,
+        row: (K, S, Set<SignatureField>) -> String,
+    ) {
         for (slotGroup in slotGroups) {
             if (slotGroup.consistent) {
                 val slot = slotGroup.groups[0].slot ?: continue
-                out.println(row(slotGroup.id, slot, emptySet(), layout, nameWidth, style))
+                style.out.println(row(slotGroup.id, slot, emptySet()))
                 continue
             }
             val varying = slotGroup.varying.toSet()
@@ -130,38 +151,50 @@ class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRend
                 // A slot absent from some files cannot occur inside a layout group, which is defined by
                 // having the same slots; the guard keeps a malformed model from throwing.
                 val slot = group.slot ?: return@forEachIndexed
-                out.println(
-                    row(slotGroup.id, slot, if (isReference) emptySet() else varying, layout, nameWidth, style)
-                )
+                style.out.println(row(slotGroup.id, slot, if (isReference) emptySet() else varying))
             }
         }
     }
 
-    /**
-     * One table row. The NAME column is last and therefore unpadded (no trailing whitespace), and it is
-     * the only cell that can be highlighted on its own here.
-     *
-     * An external row is identified by its label in the ID column, and its NAME is its own track name
-     * exactly like an internal track's — which variant it belongs to is already said by that label and
-     * spelled out in the legend, so composing the two would invent "[Studio] - [Studio]".
-     */
-    private fun row(
-        id: Any?,
-        slot: Slot,
+    /** One internal track's row, identified by its track id — the only id the video titles are keyed by. */
+    private fun trackRow(
+        id: Int,
+        slot: TrackSlot,
         differing: Set<SignatureField>,
         layout: LayoutGroup,
         nameWidth: Int,
         style: TextStyle,
     ): String {
+        val name = if (slot.signature.type == "video") videoNameFor(layout, id) else displayName(slot)
+        return row(id, slot, differing, fitName(name, nameWidth), style)
+    }
+
+    /**
+     * One external file's row, identified by its label in the ID column — which variant it belongs to is
+     * already said by that label and spelled out in the legend, so composing the two would invent
+     * "[Studio] - [Studio]". Its NAME is its own track name exactly like an internal track's; an external
+     * file has no group-wide video title to stand in for, and [displayName] answers "-" for a video slot
+     * either way.
+     */
+    private fun externalRow(
+        slot: ExternalSlot,
+        differing: Set<SignatureField>,
+        nameWidth: Int,
+        style: TextStyle,
+    ): String = row(slot.label, slot, differing, fitName(displayName(slot), nameWidth), style)
+
+    /**
+     * One table row, given its already-resolved NAME cell. The NAME column is last and therefore unpadded
+     * (no trailing whitespace), and it is the only cell that can be highlighted on its own here.
+     */
+    private fun row(
+        idCell: Any,
+        slot: Slot,
+        differing: Set<SignatureField>,
+        name: String,
+        style: TextStyle,
+    ): String {
         val signature = slot.signature
-        val idCell = if (slot is ExternalSlot) slot.label else id
-        // displayName, not `name ?: "-"`: an *empty* track name reads as "-" too, which is what makes an
-        // empty-vs-set split highlight visibly instead of flashing a blank cell.
-        val name = if (signature.type == "video") {
-            fitName(videoNameFor(layout, id), nameWidth)
-        } else {
-            fitName(displayName(slot), nameWidth)
-        }
         return "    ${pad(idCell, 4)} " +
             "${cell(shortType(signature.type), 6, SignatureField.TYPE in differing, style)} " +
             "${cell(signature.codec, 20, SignatureField.CODEC in differing, style)} " +
@@ -176,7 +209,7 @@ class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRend
      * name is not compared. So show the title when they all agree, and say that it varies when they do
      * not, rather than picking one file's arbitrarily or hiding it entirely.
      */
-    private fun videoNameFor(layout: LayoutGroup, id: Any?): String {
+    private fun videoNameFor(layout: LayoutGroup, id: Int): String {
         val names = layout.videoNamesById[id] ?: emptyList()
         if (names.size != 1) return if (names.isNotEmpty()) "(per file)" else "-"
         return names[0].ifEmpty { "-" }
@@ -356,52 +389,5 @@ class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRend
     private companion object {
         const val DEFAULT_FILE_LIST_LIMIT = 8
         const val HANGING_INDENT = "              "
-    }
-}
-
-/**
- * One indented file name per line, truncating past [limit]. File names are long and comma-joining several
- * per line runs them together; a plain column is far easier to skim and to count. ASCII only ("..." not
- * "…"), since this output lands on Windows consoles running a legacy codepage.
- *
- * [limit] may be `Int.MAX_VALUE` under `--check-verbose`, so it is clamped against the list size before
- * anything is taken from it.
- */
-internal fun formatFileList(names: List<String>, indent: String, limit: Int = 8): List<String> {
-    val show = minOf(limit, names.size)
-    val lines = names.take(show).map { indent + it }.toMutableList()
-    if (names.size > show) lines += "$indent... and ${names.size - show} more"
-    return lines
-}
-
-/** A short type name for the table and the layout descriptions. */
-internal fun shortType(type: String): String = if (type == "subtitles") "subs" else type
-
-/** Truncate an over-long track name so it cannot break the table's alignment. ASCII "..." rather than an
- *  ellipsis, for the same Windows-console reason as [formatFileList]. */
-internal fun fitName(name: String, width: Int): String =
-    if (name.length > width) name.substring(0, width - 3) + "..." else name
-
-/** A fixed-width cell, padded *before* any color is applied so escapes never count toward the width. */
-private fun pad(value: Any?, width: Int): String = (value?.toString() ?: "").padEnd(width)
-
-private fun cell(value: Any?, width: Int, differing: Boolean, style: TextStyle): String {
-    val padded = pad(value, width)
-    return if (differing) style.yellow(padded) else padded
-}
-
-/**
- * The LANG cell, which grays a guessed value (`rus?`) — a language inferred from a folder name rather
- * than read from the file. A differing value still wins the cell: the yellow diff-highlight is this
- * table's whole job, and a guess that also varied would be better shown as varying. In practice a guess
- * never varies within its slot, since every file there shares one extension and one folder guess, but
- * the precedence is the correct one to state.
- */
-private fun langCell(slot: Slot, differing: Boolean, style: TextStyle): String {
-    val padded = pad(slot.signature.language, 5)
-    return when {
-        differing -> style.yellow(padded)
-        slot is ExternalSlot && slot.guessed -> style.gray(padded)
-        else -> padded
     }
 }

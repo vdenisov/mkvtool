@@ -146,7 +146,7 @@ data class FileVars(val vars: Map<String, String?>, val missing: Set<String>)
  * variable sources with `?:`, where an empty show name defers to the next source; Kotlin's `?:` would
  * keep the empty string and report the variable as present.
  */
-private infix fun String?.or(fallback: String?): String? =
+private infix fun String?.orIfEmpty(fallback: String?): String? =
     if (this.isNullOrEmpty()) fallback else this
 
 /**
@@ -177,15 +177,15 @@ class SubstitutionEngine(private val episodeData: EpisodeData? = null) {
         }
         val fromData = parsed?.episode?.let { metadata?.byEpisode?.get(it) }
 
-        // `or` throughout, not `?:`: v1's Groovy elvis fell through on an *empty* value too, so an empty
-        // show name in the metadata still defers to the one parsed out of the file name.
+        // `orIfEmpty` throughout, not `?:`: v1's Groovy elvis fell through on an *empty* value too, so an
+        // empty show name in the metadata still defers to the one parsed out of the file name.
         val vars = linkedMapOf<String, String?>(
             "fileName" to base,
             "extension" to file.name.substringAfterLast('.', ""),
-            "seasonNum" to (parsed?.season or metadata?.season),
+            "seasonNum" to (parsed?.season orIfEmpty metadata?.season),
             "episodeNum" to parsed?.episode,
-            "episodeName" to (fromData or canonical?.title),
-            "showName" to (metadata?.show or canonical?.showName),
+            "episodeName" to (fromData orIfEmpty canonical?.title),
+            "showName" to (metadata?.show orIfEmpty canonical?.showName),
             "seasonName" to metadata?.seasonName,
             "showYear" to metadata?.year,
         )

@@ -183,15 +183,21 @@ data class CompanionEntry(
  * top level) and [suffix] is the first non-null suffix among the files **in discovery order**; together
  * with [extensions] they are what a renderer composes `Rus sound/[GroupA]/<name>.mka` from. A null
  * [suffix] means the section holds nothing but episode-number matches, which have no name to extend.
+ *
+ * Only what cannot be derived is stored: the aggregates below are computed from [entries] once, so they
+ * cannot come to disagree with the files they describe. They are order-independent (distinct and sorted),
+ * which is why reading the sorted [entries] gives the same answer as the discovery-order list they were
+ * built from.
  */
 data class VariantSection(
     val type: CompanionType,
-    val dirs: List<String>,
-    val dir: String?,
-    val extensions: List<String>,
     val suffix: String?,
     val entries: List<CompanionEntry>,
-)
+) {
+    val dirs: List<String> = directoriesOf(entries)
+    val dir: String? = dirs.firstOrNull()
+    val extensions: List<String> = extensionsOf(entries)
+}
 
 /**
  * A set of companion files that travel together — a dub group, or one release's suffixed siblings.
@@ -200,29 +206,33 @@ data class VariantSection(
  * and `Rus subs/[MC-Ent]`) are **one** dub group with two kinds of file, which is what makes the report
  * read the way the directory was meant to. [collision] marks the exception — see [discoverCompanions].
  *
- * [firstSuffix] and [firstDir] come from the first entry in **discovery** order, which is what v1 builds
- * a variant's display name from, while [entries] is sorted by relative path. The two disagree only when
- * an episode-number match sorts first inside a leaf that adopted a suffix; that is reproduced rather than
- * quietly repaired, since the report is the specification until the port is done.
+ * [first] is the first entry in **discovery** order, which is what v1 builds a variant's display name and
+ * its language guess from, while [entries] is sorted by relative path — so it is deliberately not
+ * `entries.first()`. The two disagree only when an episode-number match sorts first inside a leaf that
+ * adopted a suffix; that is reproduced rather than quietly repaired, since the report is the
+ * specification until the port is done.
  *
  * [languageGuess] is what the variant's own words say its language is, or null when they say nothing. It
  * is a *guess* and must be presented as one — the files it describes carry no tag, which is the only
  * reason it exists.
+ *
+ * As in [VariantSection], only independent state is stored: [dirs], [type] and [extensions] are computed
+ * from [entries] once and so cannot disagree with them.
  */
 data class Variant(
     val label: String,
     val leaf: String?,
     val suffix: String?,
-    val firstSuffix: String?,
-    val firstDir: String,
+    val first: CompanionEntry,
     val collision: Boolean,
-    val dirs: List<String>,
-    val type: CompanionType,
-    val extensions: List<String>,
     val languageGuess: String?,
     val sections: List<VariantSection>,
     val entries: List<CompanionEntry>,
-)
+) {
+    val dirs: List<String> = directoriesOf(entries)
+    val type: CompanionType = typeOf(entries)
+    val extensions: List<String> = extensionsOf(entries)
+}
 
 /**
  * Everything one walk found: the [variants], the companion-extension files that belong to no main file,
@@ -365,17 +375,12 @@ private fun groupIntoVariants(matched: List<CompanionEntry>): List<Variant> {
 
     return ordered.mapIndexed { index, group ->
         val first = group.entries[0]
-        val types = group.entries.map { typeClassOf(it.entry.ext) }.distinct().sorted()
         Variant(
             label = labelFor(index),
             leaf = group.leaf,
             suffix = group.suffix,
-            firstSuffix = first.suffix,
-            firstDir = first.entry.dirRel,
+            first = first,
             collision = group.collision,
-            dirs = directoriesOf(group.entries),
-            type = if (types.size > 1) CompanionType.MIXED else types.firstOrNull() ?: CompanionType.SUBTITLES,
-            extensions = group.entries.map { it.entry.ext }.distinct().sorted(),
             languageGuess = guessLanguage(languageTokensOf(first)),
             sections = sectionsOf(group.entries),
             entries = group.entries.sortedBy { it.entry.relPath },
@@ -383,23 +388,30 @@ private fun groupIntoVariants(matched: List<CompanionEntry>): List<Variant> {
     }
 }
 
-/** One section per kind of file, audio first. The aggregates read the entries in discovery order — the
- *  pattern's suffix is the first one found, not the first alphabetically — and only [VariantSection.entries]
- *  is sorted, that being the order the files are listed in. */
+/** One section per kind of file, audio first. The pattern's suffix is the first one found in **discovery**
+ *  order, not the first alphabetically, so it is read before [VariantSection.entries] is sorted — that
+ *  being the order the files are listed in. */
 private fun sectionsOf(entries: List<CompanionEntry>): List<VariantSection> =
     entries.groupBy { typeClassOf(it.entry.ext) }
         .map { (type, items) ->
-            val dirs = directoriesOf(items)
             VariantSection(
                 type = type,
-                dirs = dirs,
-                dir = dirs.firstOrNull(),
-                extensions = items.map { it.entry.ext }.distinct().sorted(),
                 suffix = items.firstOrNull { it.suffix != null }?.suffix,
                 entries = items.sortedBy { it.entry.relPath },
             )
         }
         .sortedBy { it.type }
+
+/** A set of companions is audio, subtitles, or — when it holds both — mixed. */
+private fun typeOf(entries: List<CompanionEntry>): CompanionType {
+    val types = entries.map { typeClassOf(it.entry.ext) }.distinct().sorted()
+    return if (types.size > 1) CompanionType.MIXED else types.firstOrNull() ?: CompanionType.SUBTITLES
+}
+
+/** The distinct extensions these files carry, sorted — order-independent, so a caller may pass either
+ *  the discovery-order list or the sorted one. */
+private fun extensionsOf(entries: List<CompanionEntry>): List<String> =
+    entries.map { it.entry.ext }.distinct().sorted()
 
 /**
  * The texts that describe a variant, most specific first: its own suffix, then its directories from the

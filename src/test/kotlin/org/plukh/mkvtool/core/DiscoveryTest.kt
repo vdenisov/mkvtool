@@ -219,8 +219,8 @@ class DiscoveryTest : FunSpec({
             val sibling = result.variants[0]
             sibling.leaf shouldBe null
             sibling.suffix shouldBe ".rus"
-            sibling.firstSuffix shouldBe ".rus"
-            sibling.firstDir shouldBe ""
+            sibling.first.suffix shouldBe ".rus"
+            sibling.first.entry.dirRel shouldBe ""
             sibling.collision shouldBe false
             sibling.type shouldBe CompanionType.SUBTITLES
             sibling.dirs.shouldBeEmpty()
@@ -294,14 +294,14 @@ class DiscoveryTest : FunSpec({
             result.variants shouldHaveSize 2
             result.variants.all { it.collision } shouldBe true
             result.variants.all { it.leaf == "[G]" } shouldBe true
-            result.variants.map { it.firstDir } shouldContainExactly listOf("Jpn sound/[G]", "Rus sound/[G]")
+            result.variants.map { it.first.entry.dirRel } shouldContainExactly listOf("Jpn sound/[G]", "Rus sound/[G]")
         }
 
         test("an episode-number match adopts the leaf's only suffix, without renaming the variant") {
             // The looser tier exists for exactly this: one file in a set named differently from its
             // siblings. It joins their variant rather than forming a twin of it — but v1 builds the
             // display name from the first entry in *discovery* order, which here is the suffix-less one,
-            // so the adopted suffix is not reflected in firstSuffix. Reproduced, not repaired.
+            // so the adopted suffix is not reflected in the first entry. Reproduced, not repaired.
             val dir = tempdir()
             stageAll(
                 dir,
@@ -316,8 +316,8 @@ class DiscoveryTest : FunSpec({
             val variant = result.variants.single()
             variant.leaf shouldBe "Grp"
             variant.suffix shouldBe ".sfx"
-            variant.firstSuffix shouldBe null
-            variant.firstDir shouldBe "Grp"
+            variant.first.suffix shouldBe null
+            variant.first.entry.dirRel shouldBe "Grp"
             variant.entries.map { it.tier } shouldContainExactly listOf(MatchTier.EPISODE, MatchTier.NAME)
             // The section reads the first *non-null* suffix, so the pattern it feeds keeps the real one.
             variant.sections.single().suffix shouldBe ".sfx"
@@ -348,7 +348,7 @@ class DiscoveryTest : FunSpec({
             )
 
             val result = discover(dir, "Show - S01E01 - Title.mkv")
-            val byLeafOrSuffix = result.variants.associateBy { it.leaf ?: it.firstSuffix }
+            val byLeafOrSuffix = result.variants.associateBy { it.leaf ?: it.first.suffix }
 
             byLeafOrSuffix.getValue("[Омикрон]").languageGuess shouldBe "rus"
             byLeafOrSuffix.getValue(".jpn").languageGuess shouldBe "jpn"

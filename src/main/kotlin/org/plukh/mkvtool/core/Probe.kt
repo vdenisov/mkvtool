@@ -231,7 +231,10 @@ fun parseProbe(file: File, json: String): ProbeResult {
  */
 fun probeFile(file: File, mkvmergeExe: String): ProbeResult {
     val process = ProcessBuilder(mkvmergeExe, "-J", file.absolutePath)
-        .redirectErrorStream(false)
+        // stdout carries the JSON and is read below; stderr is discarded at the OS level rather than left
+        // as a pipe nobody drains, which a chatty mkvmerge could fill and then block on forever while this
+        // side waits in waitFor(). Nothing observable changes — that stream was never read.
+        .redirectError(ProcessBuilder.Redirect.DISCARD)
         .start()
     val json = process.inputStream.bufferedReader().use { it.readText() }
     val exit = process.waitFor()

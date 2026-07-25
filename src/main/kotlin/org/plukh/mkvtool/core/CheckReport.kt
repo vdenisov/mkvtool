@@ -171,7 +171,10 @@ data class CheckReport(
  *
  * [externalsOf] supplies the external files attached to each episode — `inspect` builds them from
  * discovery, `mux` supplies none, so every external path here is inert there and its pre-flight output is
- * unchanged by their existence.
+ * unchanged by their existence. It must be **cheap**: it is called once per file for the layout key, again
+ * per layout for the labels and the findings, and — the hot path — once per file *per slot id* inside
+ * [groupSlots]. Anything expensive behind it (a probe, a directory walk) belongs in a cache the caller
+ * fills before this runs.
  */
 fun buildCheckReport(
     infos: List<ProbeResult>,
