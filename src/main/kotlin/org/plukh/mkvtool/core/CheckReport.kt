@@ -18,51 +18,6 @@ import org.plukh.mkvtool.out.CommandResult
  * different ids and was unreadable.
  */
 
-/**
- * Which tracks a config selects, and therefore what a discrepancy costs.
- *
- * Built by the caller from its parsed config, so this file never learns the config's shape. [videoIds] is
- * `{0}` whenever there is a config at all, because `mux` hardcodes `0:` for video.
- *
- * Everything is empty when inspecting without a config: nothing is selected, so the check reports
- * structure only and skips the blocking/informational classification entirely.
- */
-data class TrackSelection(
-    val hasConfig: Boolean,
-    val videoIds: Set<Int> = emptySet(),
-    val audioIds: Set<Int> = emptySet(),
-    val subtitleIds: Set<Int> = emptySet(),
-    val titleById: Map<Int, String> = emptyMap(),
-) {
-    val selectedIds: Set<Int> = videoIds + audioIds + subtitleIds
-
-    /**
-     * Whether every track of [type] present anywhere in [infos] is being copied. When it is, ids cannot
-     * select the wrong thing however they shift, so a difference there is informational.
-     */
-    fun copiesAllOfType(type: String, infos: List<ProbeResult.Probed>): Boolean {
-        val selected = when (type) {
-            "audio" -> audioIds
-            "subtitles" -> subtitleIds
-            else -> videoIds
-        }
-        val seen = infos.flatMapTo(HashSet()) { info ->
-            info.tracks.values.filter { it.signature.type == type }.map { it.id }
-        }
-        return seen.isNotEmpty() && selected.containsAll(seen)
-    }
-
-    /** A discrepancy only corrupts output when it lands on a track the config picks by id *and* that
-     *  type is not being copied wholesale. */
-    fun isBlocking(trackId: Int, type: String, infos: List<ProbeResult.Probed>): Boolean =
-        trackId in selectedIds && !copiesAllOfType(type, infos)
-
-    companion object {
-        /** Inspecting without a config: nothing is selected and nothing can block. */
-        val NONE = TrackSelection(hasConfig = false)
-    }
-}
-
 /** Something the check found. [blocking] means it can change what gets muxed; everything else is worth
  *  saying but cannot corrupt output. */
 sealed interface Finding {

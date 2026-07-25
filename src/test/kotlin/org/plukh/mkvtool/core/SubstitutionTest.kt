@@ -226,7 +226,7 @@ class SubstitutionTest : FunSpec({
                 ),
             )
 
-            val fields = collectTemplateFields(config)
+            val fields = fieldsOf(config)
 
             fields.map { it.path } shouldContainExactly listOf(
                 "general.title",
@@ -244,11 +244,11 @@ class SubstitutionTest : FunSpec({
         }
 
         test("a declared but valueless title is still a field, so it is validated as an empty one") {
-            collectTemplateFields(mapOf("general" to mapOf("title" to null))).single().value shouldBe null
+            fieldsOf(mapOf("general" to mapOf("title" to null))).single().value shouldBe null
         }
 
         test("a source with no file is nothing to resolve") {
-            val fields = collectTemplateFields(
+            val fields = fieldsOf(
                 mapOf("additionalSources" to listOf(mapOf("file" to "")))
             )
 
@@ -257,13 +257,13 @@ class SubstitutionTest : FunSpec({
 
         test("no config means no fields") {
             collectTemplateFields(null).shouldBeEmpty()
-            collectTemplateFields(emptyMap<String, Any>()).shouldBeEmpty()
+            fieldsOf(emptyMap<String, Any>()).shouldBeEmpty()
         }
     }
 
     context("validateTemplates") {
         test("reports a misspelled variable with the names legal in that field") {
-            val fields = collectTemplateFields(mapOf("general" to mapOf("title" to "\${epsiodeName}")))
+            val fields = fieldsOf(mapOf("general" to mapOf("title" to "\${epsiodeName}")))
 
             val validation = validateTemplates(fields)
 
@@ -275,7 +275,7 @@ class SubstitutionTest : FunSpec({
 
         test("a track variable in a file-scope field is out of scope") {
             val validation = validateTemplates(
-                collectTemplateFields(mapOf("general" to mapOf("title" to "\${codec}")))
+                fieldsOf(mapOf("general" to mapOf("title" to "\${codec}")))
             )
 
             validation.offenses.single().token shouldBe "\${codec}"
@@ -285,7 +285,7 @@ class SubstitutionTest : FunSpec({
             // The scan is deliberately looser than the variable pattern, so a body that fails to look
             // like a variable at all is still seen.
             val validation = validateTemplates(
-                collectTemplateFields(mapOf("general" to mapOf("title" to "\${file name} \${a:b} \${}")))
+                fieldsOf(mapOf("general" to mapOf("title" to "\${file name} \${a:b} \${}")))
             )
 
             validation.offenses.map { it.token } shouldContainExactly
@@ -294,7 +294,7 @@ class SubstitutionTest : FunSpec({
 
         test("a language with no display name is a config-static problem, not a per-file one") {
             val validation = validateTemplates(
-                collectTemplateFields(
+                fieldsOf(
                     mapOf(
                         "mainSource" to mapOf(
                             "audioTracks" to listOf(mapOf("language" to "zz", "title" to "\${languageName}"))
@@ -309,7 +309,7 @@ class SubstitutionTest : FunSpec({
 
         test("a title asking for a language name on a track with no language at all") {
             val validation = validateTemplates(
-                collectTemplateFields(
+                fieldsOf(
                     mapOf(
                         "mainSource" to mapOf(
                             "audioTracks" to listOf(mapOf("title" to "\${languageNative}"))
@@ -323,7 +323,7 @@ class SubstitutionTest : FunSpec({
 
         test("reports which variables the config uses, so everything derived from them stays gated") {
             val validation = validateTemplates(
-                collectTemplateFields(
+                fieldsOf(
                     mapOf(
                         "general" to mapOf("title" to "\${showName} \${episodeName}"),
                         "mainSource" to mapOf(
@@ -340,7 +340,7 @@ class SubstitutionTest : FunSpec({
 
         test("a config with no codec variable costs no probe") {
             val validation = validateTemplates(
-                collectTemplateFields(mapOf("general" to mapOf("title" to "\${showName}")))
+                fieldsOf(mapOf("general" to mapOf("title" to "\${showName}")))
             )
 
             validation.usesCodec shouldBe false
@@ -351,7 +351,7 @@ class SubstitutionTest : FunSpec({
         test("is fatal for mux and a warning for inspect, wording identical either way") {
             // mux cannot mux against a config it did not understand; inspect reports on files and can
             // report on them just as well without one.
-            val fields = collectTemplateFields(mapOf("general" to mapOf("title" to "\${epsiodeName}")))
+            val fields = fieldsOf(mapOf("general" to mapOf("title" to "\${epsiodeName}")))
             val validation = validateTemplates(fields)
 
             val fatal = report(validation, fatal = true)
@@ -367,7 +367,7 @@ class SubstitutionTest : FunSpec({
 
         test("counts every problem and names an absent language explicitly") {
             val validation = validateTemplates(
-                collectTemplateFields(
+                fieldsOf(
                     mapOf(
                         "general" to mapOf("title" to "\${nope}"),
                         "mainSource" to mapOf(
@@ -395,3 +395,7 @@ private fun report(validation: TemplateValidation, fatal: Boolean): String {
     reportTemplateProblems(validation, TextRenderer(ColorMode.NEVER, stream, stream), fatal)
     return buffer.toString(Charsets.UTF_8)
 }
+
+/** The fields of a config written as a raw mapping, which is how these cases spell one: for a caller,
+ *  parsing and collecting are one step, and the reported paths have to survive both. */
+private fun fieldsOf(config: Map<*, *>): List<TemplateField> = collectTemplateFields(parseConfig(config))

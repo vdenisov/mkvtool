@@ -220,59 +220,48 @@ data class TemplateField(
  * Every templated value in [config], with its legal scope. Built once so validation, the pre-flight and
  * the command line all agree on exactly which fields are templates.
  *
- * Operates on the parsed mapping rather than a typed config, which does not exist yet; the paths it
- * reports are the config file's own, which is what a diagnostic has to name.
+ * The paths it reports are the config file's own — `mainSource.audioTracks[1].title` — because that is
+ * what a diagnostic has to name if the reader is to find the offending line.
  */
-fun collectTemplateFields(config: Map<*, *>?): List<TemplateField> {
+fun collectTemplateFields(config: Config?): List<TemplateField> {
     if (config == null) return emptyList()
     val fields = ArrayList<TemplateField>()
     val all = FILE_VARS + TRACK_VARS
 
-    val general = config["general"] as? Map<*, *>
-    // containsKey, not truthiness: `title:` with no value is still a declared template, and validating
-    // it as an empty one is what keeps the field list honest.
-    if (general != null && general.containsKey("title")) {
-        fields += TemplateField("general.title", general["title"]?.toString(), FILE_VARS)
-    }
+    // A declared template with no value is still a template, and validating it as an empty one is what
+    // keeps the field list honest; an absent key is no field at all.
+    config.general.title?.let { fields += TemplateField("general.title", it.text, FILE_VARS) }
 
-    val mainSource = config["mainSource"] as? Map<*, *>
-    val videoTrack = mainSource?.get("videoTrack") as? Map<*, *>
-    if (videoTrack != null && videoTrack.containsKey("title")) {
-        fields += TemplateField(
-            "mainSource.videoTrack.title", videoTrack["title"]?.toString(), all, languageOf(videoTrack)
-        )
+    config.mainSource.videoTrack?.let { video ->
+        video.title?.let {
+            fields += TemplateField("mainSource.videoTrack.title", it.text, all, video.language)
+        }
     }
-    for (key in listOf("audioTracks", "subtitleTracks")) {
-        (mainSource?.get(key) as? List<*>).orEmpty().forEachIndexed { i, entry ->
-            val track = entry as? Map<*, *> ?: return@forEachIndexed
-            if (track.containsKey("title")) {
-                fields += TemplateField(
-                    "mainSource.$key[$i].title", track["title"]?.toString(), all, languageOf(track)
-                )
+    for ((key, tracks) in listOf(
+        "audioTracks" to config.mainSource.audioTracks,
+        "subtitleTracks" to config.mainSource.subtitleTracks,
+    )) {
+        tracks.forEachIndexed { i, track ->
+            track.title?.let {
+                fields += TemplateField("mainSource.$key[$i].title", it.text, all, track.language)
             }
         }
     }
 
-    (config["additionalSources"] as? List<*>).orEmpty().forEachIndexed { i, entry ->
-        val source = entry as? Map<*, *> ?: return@forEachIndexed
-        val path = source["file"]?.toString()
+    config.additionalSources.forEachIndexed { i, source ->
         // Truthiness here, unlike the titles above: a source with no file is nothing to resolve.
-        if (!path.isNullOrEmpty()) {
-            fields += TemplateField("additionalSources[$i].file", path, FILE_VARS)
+        if (!source.file.isNullOrEmpty()) {
+            fields += TemplateField("additionalSources[$i].file", source.file, FILE_VARS)
         }
-        (source["tracks"] as? List<*>).orEmpty().forEachIndexed { j, trackEntry ->
-            val track = trackEntry as? Map<*, *> ?: return@forEachIndexed
-            if (track.containsKey("title")) {
-                fields += TemplateField(
-                    "additionalSources[$i].tracks[$j].title", track["title"]?.toString(), all, languageOf(track)
-                )
+        source.tracks.forEachIndexed { j, track ->
+            track.title?.let {
+                fields += TemplateField("additionalSources[$i].tracks[$j].title", it.text, all, track.language)
             }
         }
     }
+
     return fields
 }
-
-private fun languageOf(track: Map<*, *>): String? = track["language"]?.toString()
 
 /** A token in a template that is not a variable, or not one legal in that field. */
 data class TemplateOffense(val path: String, val token: String, val allowed: Set<String>)
