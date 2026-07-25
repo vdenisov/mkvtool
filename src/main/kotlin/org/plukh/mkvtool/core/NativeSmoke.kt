@@ -16,13 +16,9 @@ import java.util.Locale
  * the actual native binary catches a broken build - which is what the hidden
  * `native-smoke` command does.
  *
- * The first two functions are deliberately minimal and self-contained. They mirror the v1
- * idioms (`to_utf8.groovy`'s strict decoder and `subst.groovy`'s native-name lookup) and
- * exist only until the real utilities land: the `to-utf8` command will own strict
- * decoding and the `${'$'}{languageNative}` substitution will own in-locale upper-casing of a
- * language's own name. Once those exist the probe can point at them, or retire. Do not
- * grow shared abstractions here in the meantime. The last two already point at real
- * utilities, which is the shape the others should reach.
+ * Every probe but the first now runs a real utility, which is the shape they were meant to
+ * reach. [decodeWindows1251Strict] stays self-contained because `to-utf8`'s decoder takes a
+ * charset and a file, and a probe wants neither — do not grow a shared abstraction for it.
  */
 
 /**
@@ -40,18 +36,16 @@ fun decodeWindows1251Strict(bytes: ByteArray): String =
         .toString()
 
 /**
- * The native (self-referential) CLDR display name for a language [code], e.g. "ru"
- * -> "Русский". First letter upper-cased with the language's own rules, since many
- * languages spell their own name in lower case. Returns null when the JDK has no
- * display name and just echoes the code back - which is exactly the empty-locale-data
- * symptom on a misconfigured native binary.
+ * The native CLDR display name for a language [code], e.g. "ru" -> "Русский", through the
+ * real [languageNativeOf] that resolves `${'$'}{languageNative}`. Null when the JDK has no
+ * display name and echoes the code back instead — exactly the empty-locale-data symptom on a
+ * misconfigured native binary.
+ *
+ * Distinct from [languageGuessProbeValue] on purpose: that one proves the token table built
+ * from every curated locale survived the build, this one proves a display name and its
+ * in-locale upper-casing did. A build can lose either without the other.
  */
-fun nativeLanguageName(code: String): String? {
-    val locale = Locale.of(code)
-    val name = locale.getDisplayLanguage(locale)
-    if (name.isBlank() || name.equals(code, ignoreCase = true)) return null
-    return name.substring(0, 1).uppercase(locale) + name.substring(1)
-}
+fun nativeLanguageName(code: String): String? = languageNativeOf(code)
 
 /**
  * Runs a non-ASCII language guess through the real [guessLanguage], which answers "rus" for "Русский"

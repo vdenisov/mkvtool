@@ -52,7 +52,10 @@ class TextRenderer(
                 // The hint is a verbatim, uncolored continuation line; it carries its own indentation.
                 if (event.hint != null) err.println(event.hint)
             }
-            is Warning -> err.println(style.yellow("*** Warning: ${event.text}"))
+            is Warning -> {
+                err.println(style.yellow("*** Warning: ${event.text}"))
+                if (event.hint != null) err.println(event.hint)
+            }
         }
     }
 

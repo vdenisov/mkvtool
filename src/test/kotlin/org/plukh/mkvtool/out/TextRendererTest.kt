@@ -56,6 +56,15 @@ class TextRendererTest : FunSpec({
         out.shouldBeEmpty()
     }
 
+    test("a Warning's hint follows it verbatim and uncolored, as an Error's does") {
+        // The same diagnosis is fatal in mux and a warning in inspect, so both severities must be able
+        // to carry the same detail lines and print them identically.
+        val (_, err) = render(ColorMode.ALWAYS, Warning("two problems:", "  a: bad\n  b: worse"))
+        err shouldContain "${esc}[33m*** Warning: two problems:${esc}[0m"
+        err shouldContain "\n  a: bad\n  b: worse"
+        err shouldNotContain "${esc}[33m  a: bad"
+    }
+
     test("never mode emits plain text with no escapes") {
         val (out, _) = render(ColorMode.NEVER, Header("plain"))
         out shouldContain "plain"
