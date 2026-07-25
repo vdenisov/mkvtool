@@ -204,6 +204,10 @@ data class VariantSection(
  * a variant's display name from, while [entries] is sorted by relative path. The two disagree only when
  * an episode-number match sorts first inside a leaf that adopted a suffix; that is reproduced rather than
  * quietly repaired, since the report is the specification until the port is done.
+ *
+ * [languageGuess] is what the variant's own words say its language is, or null when they say nothing. It
+ * is a *guess* and must be presented as one — the files it describes carry no tag, which is the only
+ * reason it exists.
  */
 data class Variant(
     val label: String,
@@ -215,6 +219,7 @@ data class Variant(
     val dirs: List<String>,
     val type: CompanionType,
     val extensions: List<String>,
+    val languageGuess: String?,
     val sections: List<VariantSection>,
     val entries: List<CompanionEntry>,
 )
@@ -371,6 +376,7 @@ private fun groupIntoVariants(matched: List<CompanionEntry>): List<Variant> {
             dirs = directoriesOf(group.entries),
             type = if (types.size > 1) CompanionType.MIXED else types.firstOrNull() ?: CompanionType.SUBTITLES,
             extensions = group.entries.map { it.entry.ext }.distinct().sorted(),
+            languageGuess = guessLanguage(languageTokensOf(first)),
             sections = sectionsOf(group.entries),
             entries = group.entries.sortedBy { it.entry.relPath },
         )
@@ -394,6 +400,15 @@ private fun sectionsOf(entries: List<CompanionEntry>): List<VariantSection> =
             )
         }
         .sortedBy { it.type }
+
+/**
+ * The texts that describe a variant, most specific first: its own suffix, then its directories from the
+ * leaf upwards. The order is the precedence — a suffix or the file's own folder describes it better than
+ * a category directory three levels up, so `Rus subs/[Омикрон]` answers `[Омикрон]` before `Rus subs`.
+ */
+private fun languageTokensOf(first: CompanionEntry): List<String?> =
+    listOf(first.suffix) +
+        if (first.entry.dirRel.isEmpty()) emptyList() else first.entry.dirRel.split("/").reversed()
 
 /** The distinct directories these files sit in, top-level ones excluded (they have no path to show). */
 private fun directoriesOf(entries: List<CompanionEntry>): List<String> =

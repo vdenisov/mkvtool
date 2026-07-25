@@ -25,6 +25,10 @@ class NativeSmokeTest : FunSpec({
         nativeLanguageName("ru") shouldBe "Русский"
     }
 
+    test("a Cyrillic folder name guesses through the real language table") {
+        languageGuessProbeValue() shouldBe "rus"
+    }
+
     test("a YAML document round-trips through the real loader") {
         yamlProbeValue() shouldBe "Русский"
     }

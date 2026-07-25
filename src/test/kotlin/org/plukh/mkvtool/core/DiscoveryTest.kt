@@ -335,6 +335,26 @@ class DiscoveryTest : FunSpec({
             variant.sections.single().suffix shouldBe null
         }
 
+        test("a variant guesses its language from its suffix first, then its directories leaf-upwards") {
+            // The precedence is what makes a merged group readable: "[Омикрон]" says nothing, so the
+            // category directory above it answers. A suffix, when there is one, outranks both.
+            val dir = tempdir()
+            stageAll(
+                dir,
+                "Show - S01E01 - Title.mkv",
+                "Rus subs/[Омикрон]/Show - S01E01 - Title.ass",
+                "Show - S01E01 - Title.jpn.srt",
+                "Extras (to be done)/Show - S01E01 - Title.srt",
+            )
+
+            val result = discover(dir, "Show - S01E01 - Title.mkv")
+            val byLeafOrSuffix = result.variants.associateBy { it.leaf ?: it.firstSuffix }
+
+            byLeafOrSuffix.getValue("[Омикрон]").languageGuess shouldBe "rus"
+            byLeafOrSuffix.getValue(".jpn").languageGuess shouldBe "jpn"
+            byLeafOrSuffix.getValue("Extras (to be done)").languageGuess shouldBe null
+        }
+
         test("labels run past Z into AA") {
             val dir = tempdir()
             stage(dir, "Main.mkv")

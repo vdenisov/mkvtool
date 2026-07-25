@@ -19,10 +19,10 @@ import java.util.Locale
  * The first two functions are deliberately minimal and self-contained. They mirror the v1
  * idioms (`to_utf8.groovy`'s strict decoder and `subst.groovy`'s native-name lookup) and
  * exist only until the real utilities land: the `to-utf8` command will own strict
- * decoding and the external-track language guesser will own native language names. Once
- * those exist the probe can point at them, or retire. Do not grow shared abstractions
- * here in the meantime. The third one already points at the real utility, which is the
- * shape the others should reach.
+ * decoding and the `${'$'}{languageNative}` substitution will own in-locale upper-casing of a
+ * language's own name. Once those exist the probe can point at them, or retire. Do not
+ * grow shared abstractions here in the meantime. The last two already point at real
+ * utilities, which is the shape the others should reach.
  */
 
 /**
@@ -52,6 +52,17 @@ fun nativeLanguageName(code: String): String? {
     if (name.isBlank() || name.equals(code, ignoreCase = true)) return null
     return name.substring(0, 1).uppercase(locale) + name.substring(1)
 }
+
+/**
+ * Runs a non-ASCII language guess through the real [guessLanguage], which answers "rus" for "Русский"
+ * only if the CLDR display names it builds its token table from survived the native build.
+ *
+ * This is the locale probe with teeth: [nativeLanguageName] asks whether one display name comes back
+ * non-empty, while this exercises the production path — a table built at load time from every curated
+ * locale, then matched against a Cyrillic folder name. Empty locale data leaves that table with no
+ * native spellings in it and the guess comes back null.
+ */
+fun languageGuessProbeValue(): String? = guessLanguage(listOf("Русский"))
 
 /**
  * Round-trips a one-key UTF-8 YAML document through the real [loadMapping] and returns
