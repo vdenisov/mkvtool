@@ -2,13 +2,13 @@
 
 The details behind the [README](../README.md): output conventions, how to read
 the consistency check report, and the full `config.yaml` reference. This
-document is about *using* the tools; implementation internals (shared helpers,
-the test harness) live in the repo's `CLAUDE.md`.
+document is about *using* the tool; implementation internals (the output seam,
+the test tiers) live in the repo's `CLAUDE.md`.
 
 ## Console output
 
-All scripts share one output convention, implemented in `src/lib/output.groovy`.
-Every colour has a single meaning, the same in every script:
+Every command shares one output convention, and every colour has a single
+meaning, the same everywhere:
 
 | Colour | Meaning |
 |--------|---------|
@@ -18,22 +18,21 @@ Every colour has a single meaning, the same in every script:
 | cyan   | section, per-file and table column headers — for finding your place in long scrollback |
 | gray   | de-emphasis: the file-evidence lists in the check report, so the table rows stand out (the `<-` marker keeps the default colour); also a guessed language (`rus?`) and the name of an external file matched only by episode number |
 
-Probing a batch prints a progress meter: a bar that updates in place on a terminal, and appended dots when the output is redirected or piped, so a log stays readable. Colour is applied only when writing to a terminal. `mux.groovy`,
-`inspect.groovy`, `rename.groovy`, `fetch_episodes.groovy`, `to_utf8.groovy` and
-`fix_srt.groovy` take `--color auto|always|never` (default `auto`). The
+Probing a batch prints a progress meter: a bar that updates in place on a terminal, and appended dots when the output is redirected or piped, so a log stays readable. Colour is applied only when writing to a terminal. Every command
+takes `--color auto|always|never` (default `auto`). The
 [`NO_COLOR`](https://no-color.org/) environment variable disables
-auto-detection; an explicit `--color always` wins over it. `propedit.groovy`
-deliberately has no options of its own — every argument is passed through to
+auto-detection; an explicit `--color always` wins over it. `propedit` is the one
+exception and has no options of its own — every argument is passed through to
 `mkvpropedit` — so it follows auto-detection and `NO_COLOR` only.
-`find_unused_fonts.groovy` prints bare file names meant for piping and is never
+`find-unused-fonts` prints bare file names meant for piping and is never
 coloured.
 
 Errors and warnings go to **stderr**, progress and summaries to **stdout**, so
-either can be redirected without losing the other. Every batch script ends with
+either can be redirected without losing the other. Every batch command ends with
 a one-line summary (`*** 4 converted, 2 skipped, 1 failed`) and exits non-zero
-if anything failed. The exception is `mux.groovy`, which continues on errors
+if anything failed. The exception is `mux`, which continues on errors
 and always exits 0 — a partially-successful batch mux is a normal outcome —
-except under `--strict`, which exits 2 on a blocking discrepancy. `inspect.groovy`
+except under `--strict`, which exits 2 on a blocking discrepancy. `inspect`
 writes nothing at all and **exits 0 unless `--strict` is given**. A config that is
 missing, empty, malformed or otherwise unusable is reported as a warning and the
 run continues without it — inspection is the thing you reach for *because*
@@ -44,10 +43,10 @@ was supposed to supply.
 
 ## Reading the consistency check report
 
-This is what a bare `mkv-inspect` prints, and the same report `mux.groovy` runs
-as its pre-flight before muxing (`--no-check` skips it there). Under
-`mkv-inspect` the header reads `*** Consistency check`; run from `mux.groovy` it
-reads `*** Pre-flight check`. Everything below applies to both.
+This is what a bare `mkvtool inspect` prints, and the same report `mkvtool mux`
+runs as its pre-flight before muxing (`--no-check` skips it there). Under
+`inspect` the header reads `*** Consistency check: 5 files`; run from `mux` it
+reads `*** Pre-flight check: 5 files`. Everything below applies to both.
 
 The check works in two layers. First it groups files by **track layout** — the
 type at each ID. Files that share a layout are the same release and get one
@@ -60,42 +59,67 @@ default/forced flags — stacking a row per distinct value and naming the files
 that carry it:
 
 ```
-*** Layout 1 (20 files): video, audio, subs
-    ID   TYPE   CODEC                LANG  DEF  FOR  NAME
-    0    video  AVC/H.264/MPEG-4p10  eng   yes  no   -
-    1    audio  AC-3                 eng   yes  no   -
-    2    subs   SubRip/SRT           eng   yes  no   English (SDH)
-           <- Show.S01E16 - Episode Sixteen.mkv
-    2    subs   SubRip/SRT           eng   no   no   English (SDH)
+*** Consistency check: 5 files
 
-*** Layout 2 (2 files): subs, video, audio
-              Show.S01E18 - Episode Eighteen.mkv
-           <- Show.S01E20 - Episode Twenty.mkv
+*** Layout 1 (3 files - episodes 01-03): video, audio, subs
     ID   TYPE   CODEC                LANG  DEF  FOR  NAME
-    0    subs   SubRip/SRT           eng   yes  no   -
-    1    video  AVC/H.264/MPEG-4p10  eng   yes  no   -
-    2    audio  AC-3                 eng   yes  no   English (SDH)
+    0    video  AVC/H.264/MPEG-4p10  und   no   no   Video
+    1    audio  AAC                  jpn   yes  no   Audio A
+    2    subs   SubRip/SRT           eng   yes  no   Subtitle A
+
+*** Layout 2 (2 files - episodes 04-05): subs, video, audio
+    ID   TYPE   CODEC                LANG  DEF  FOR  NAME
+    0    subs   SubRip/SRT           eng   yes  no   Subtitle A
+    1    video  AVC/H.264/MPEG-4p10  und   no   no   Video
+    2    audio  AAC                  jpn   yes  no   Audio A
 
 *** 1 discrepancy affects a track that config.yaml selects:
       2 files use a different track layout, at selected tracks 0, 1, 2
-*** 1 informational (does not affect what gets muxed):
-      track 2 (subtitles, config title "Signs") - default differs across 2 groups
 ```
 
 How to read it:
 
 - **Structural groups, largest first.** Files with a different track order or a
-  missing track form their own group, listed once — not once per shifted ID.
+  missing track form their own group, listed once — not once per shifted ID. The
+  `*** Layout N` headers appear only when there is more than one layout: a batch
+  that agrees with itself is one table with no header above it.
+- **Every group says which files are in it**, the largest included, because the
+  groups *are* your muxing passes and an unnamed one is a missing answer. Where the
+  names carry an `SxxEyy` that rides in the header as **episode ranges**, as above,
+  so the whole plan reads off the `***` lines; a batch whose names yield no number
+  gets the file names listed under the header instead, in gray. External files
+  appear in the same header as their variant labels (`… video, audio, subs + A B`),
+  decoded by the legend `--identify` prints.
 - **One row per distinct value, not per file** — a 200-episode batch is as compact
   as a 3-episode one. Every track is listed, so the table doubles as the map you
   check `config.yaml`'s IDs against. The `DEF`/`FOR` columns make a flag-only
   difference legible, and on a terminal the differing cell is highlighted.
-- **The `<-` names only the files that deviate**, one per line; the majority is the
-  unnamed reference. The file lists are gray so the table rows stand out.
+- **Within a group, `<-` names the files that deviate.** Where one ID carries more
+  than one value, the majority row is printed unnamed and each further row is
+  preceded by the files that carry it, one per line, the last marked `<-`:
+
+  ```
+      1    audio  AAC                  jpn   yes  no   Audio A
+      2    audio  AAC                  eng   no   no   Audio B
+             <- Twin Peaks - S01E03 - Zen, or the Skill to Catch a Killer.mkv
+      2    audio  AAC                  eng   no   no   Other Studio
+  ```
+
+  So episode 3 is the one whose track 2 is named `Other Studio`, and the rest of
+  the batch calls it `Audio B`. The lists sit *above* the row they belong to, name
+  files rather than episode numbers — a value difference is about one file, not a
+  range — and are gray so the table rows stand out. Layout headers never carry the
+  marker: `<-` answers "these rows deviate", which is a different question from
+  "these files are here".
 - **Blocking vs informational.** A difference only corrupts output when it lands on
   a track the config selects by ID *and* not every track of that type is being
   copied. Everything else — unselected tracks, chapters, a type copied wholesale —
-  is reported as informational.
+  is reported as informational, under a second heading:
+
+  ```
+  *** 1 informational (does not affect what gets muxed):
+        track 2 (subtitles, config title "Signs") - default differs across 2 groups
+  ```
 
 What is compared: per layout, the type at each ID; then per ID, codec, language,
 name and default/forced flags, plus chapter presence and genuinely ambiguous
@@ -119,16 +143,16 @@ classification entirely — that is the mode you use to *write* the config.
 
 By default the check **warns and continues** — muxing the wrong tracks is
 recoverable, the source files survive. Pass `--strict` to exit 2 when any
-discrepancy affects a selected track (from `mux.groovy` that also means nothing
+discrepancy affects a selected track (from `mux` that also means nothing
 is muxed). File lists are truncated to a few names; `--check-verbose` prints them
 in full. Highlighting follows `--color` — see [Console output](#console-output).
 
 ## External file discovery
 
 External files — dubs, alternative subtitle tracks — often do not sit next to the
-main media file. `mkv-inspect` finds them by name, groups them into **variants**,
-and reports what each variant covers. Nothing here feeds muxing: `mux.groovy` is
-driven by `additionalSources` in the config and nothing else. Discovery is what
+main media file. `mkvtool inspect` finds them by name, groups them into
+**variants**, and reports what each variant covers. Nothing here feeds muxing:
+`mux` is driven by `additionalSources` in the config and nothing else. Discovery is what
 you read in order to *write* those entries.
 
 Two layouts are recognised, and they combine:
@@ -179,7 +203,7 @@ Each variant gets a short label (`A`, `B`, …) and one legend row per kind of f
 it holds:
 
 ```
-*** External files: 3 variant(s) discovered
+*** External files: 3 variants discovered
   LBL  TYPE       VARIANT       PATTERN                          FILES
   A    audio      [Studio]      Rus sound/[Studio]/<name>.mka    10
   A    subtitles  [Studio]      Rus subs/[Studio]/<name>.ass     4
@@ -187,7 +211,9 @@ it holds:
 ```
 
 The label is what the per-file tables use, so a long path is printed once here
-rather than under every episode.
+rather than under every episode. `<name>` stands for the main file's base name;
+where a section holds only episode-number matches the pattern reads
+`<episode number>` instead, since those names bear no relation to the main file's.
 
 ### What is probed, and what is guessed
 
@@ -299,7 +325,7 @@ Their values are compared exactly like a track's, so a dub tagged Russian for ha
 a season and untagged for the rest is reported the same way a flag flipping
 mid-season is. External differences are **never blocking**: nothing selects an
 external file by ID, so they cannot mux the wrong track — they mean another pass,
-which is what the grouping already says. (`mux.groovy`'s pre-flight is the part
+which is what the grouping already says. (`mux`'s pre-flight is the part
 that acts on missing files, and only on the *configured* `additionalSources` of an
 episode, which it drops.)
 
@@ -307,7 +333,7 @@ Because the grouping now covers both halves, so does the all-clear: `Track
 structure and external files are consistent across 23 files` means one config will
 do the whole season.
 
-## to_utf8.groovy safety
+## to-utf8 safety
 
 Three things make it safe to point at a directory more than once:
 
@@ -330,9 +356,9 @@ line by line, so CRLF subtitles stay CRLF.
 
 ## Configuration
 
-`mux.groovy` is driven by a YAML configuration file (`config.yaml` in the media
-directory, or `--config <path>`); copy the shipped template
-`src/config.example.yaml` as a starting point.
+`mux` is driven by a YAML configuration file (`config.yaml` in the media
+directory, or `--config <path>`); copy the template
+[`src/config.example.yaml`](../src/config.example.yaml) as a starting point.
 
 ### General settings
 
@@ -350,7 +376,8 @@ general:
 
 ### Main source settings
 
-Defines tracks from the primary source file. Track IDs come from `mkvmerge -i`;
+Defines tracks from the primary source file. The track IDs are the ones
+`mkvtool inspect --identify` lists (`mkvmerge -i` reports the same numbers);
 track 0 is always the video track.
 
 ```yaml
@@ -422,8 +449,8 @@ configured above, in the order you listed them:
 3. `mainSource.subtitleTracks`, in listed order,
 4. one entry per `additionalSources` file (`1:0`, `2:0`, …).
 
-For most configs that is exactly what you want, and the derived value is printed
-when the script runs. Set `trackOrder` explicitly only to override it:
+For most configs that is exactly what you want, and `mux` prints the derived value
+as it runs. Set `trackOrder` explicitly only to override it:
 
 ```yaml
 trackOrder: "0:0,0:2,0:1,0:6"
@@ -446,8 +473,8 @@ episode. `${fileName}` — the base name, no extension, of the current main sour
 way: `"Rus sound/[Studio]/${fileName}.mka"`. A track's `title` here also takes
 the track-scope variables, describing the companion's own language and codec.
 
-`mkv-inspect --identify` lists each configured source with the path its pattern
-resolved to for that episode, which is the quickest way to check one. It also
+`mkvtool inspect --identify` lists each configured source with the path its
+pattern resolved to for that episode, which is the quickest way to check one. It also
 finds external files that no config mentions — see
 [External file discovery](#external-file-discovery), which is how you work out
 what to put here in the first place.
@@ -542,9 +569,9 @@ trackOrder: "0:0,0:1,1:0"
 
 ### Key assumptions
 
-1. The first track in the main source is the video track (track ID 0). `mux.groovy`
+1. The first track in the main source is the video track (track ID 0). `mux`
    hardcodes `0:` for video everywhere, so a release that orders its tracks
-   differently needs its own config — and its own batch. `mkv-inspect` reports
+   differently needs its own config — and its own batch. `inspect` reports
    exactly that as a layout outlier, which is what the layout grouping in the
    check report is for.
 2. Each additional source contains exactly one track (audio or subtitle, never video).

@@ -4,18 +4,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
-import org.plukh.mkvtool.core.ExternalSlot
 import org.plukh.mkvtool.core.ProbeResult
-import org.plukh.mkvtool.core.ProbedTrack
 import org.plukh.mkvtool.core.TrackSelection
-import org.plukh.mkvtool.core.TrackSignature
-import org.plukh.mkvtool.core.TrackSlot
-import org.plukh.mkvtool.core.buildCheckReport
-import org.plukh.mkvtool.core.signatureOf
-import org.plukh.mkvtool.out.TextStyle
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.PrintStream
 
 /**
  * The check report's text form. These pin the substrings the Groovy harness asserts on, plus the layout
@@ -343,23 +334,5 @@ class CheckReportRendererTest : FunSpec({
 /** Built rather than typed, so no control character ever sits in the source. */
 private val ESC = Char(27).toString()
 
-private fun render(
-    infos: List<ProbeResult>,
-    externals: Map<String, Map<String, ExternalSlot>> = emptyMap(),
-    selection: TrackSelection = TrackSelection.NONE,
-    label: String = "Consistency check",
-    verbose: Boolean = false,
-    colour: Boolean = false,
-): String {
-    val report = buildCheckReport(
-        infos,
-        externalsOf = { externals[it.file.name] ?: emptyMap() },
-        selection = selection,
-        headerLabel = label,
-    )
-    val buffer = ByteArrayOutputStream()
-    val stream = PrintStream(buffer, true, Charsets.UTF_8)
-    CheckReportRenderer(verbose).render(report, TextStyle(colour, stream, stream))
-    return buffer.toString(Charsets.UTF_8)
-}
+// `render` lives in ProbeFixtures.kt, beside the probe records it consumes: three specs need it now.
 
