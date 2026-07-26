@@ -1,13 +1,15 @@
 name: Native
 
 # The v2 Kotlin app (mkvtool). Kept separate from ci.yml, which stays Groovy-only and
-# untouched during the port. Two jobs with different cadences:
-#   build  - fast Linux JVM build + unit tests, on every push-to-main and PR.
-#   native - the slow 3-OS GraalVM native-image build + smoke, only on merge (push to
-#            main), the weekly schedule, and manual dispatch. Native config rarely
-#            changes and each compile is minutes per OS, so it does not run per PR
-#            commit. Runner minutes are free (public repo), so this is about CI noise,
-#            not cost.
+# untouched during the port. Three jobs with different cadences:
+#   build       - fast Linux JVM build + unit tests, on every push-to-main and PR.
+#   harness-app - the Groovy oracle against the JVM launcher, on every push-to-main and PR.
+#   native      - the slow 3-OS GraalVM native-image build, its smoke probes and the
+#                 acceptance runs against the resulting binary, only on merge (push to
+#                 main), the weekly schedule, and manual dispatch. Native config rarely
+#                 changes and each compile is minutes per OS, so it does not run per PR
+#                 commit. Runner minutes are free (public repo), so this is about CI noise,
+#                 not cost. Verify a branch by dispatching this workflow against it.
 on:
   push:
     branches: [main]
@@ -100,7 +102,11 @@ jobs:
         run: groovy src/test/run_tests.groovy --target app
 
   native:
-    # Merge (push is main-only via the branch filter) + weekly schedule + manual.
+    # Merge (push is main-only via the branch filter) + weekly schedule + manual. This is
+    # the only leg that exercises the *native* binary — harness-app above covers the JVM
+    # launcher — so the acceptance runs live here rather than in a job of their own, next to
+    # the binary they need. The weekly canary therefore also re-checks acceptance, which is
+    # what would catch a GraalVM update changing behavior rather than just breaking the build.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     strategy:
       fail-fast: false
@@ -109,14 +115,20 @@ jobs:
           - os: ubuntu-latest
             label: linux-x64
             binary: build/native/nativeCompile/mkvtool
+            # mkvtoolnix is one apt package here, so this leg runs the whole oracle.
+            acceptance: full
           - os: windows-latest
             label: windows-x64
             binary: build/native/nativeCompile/mkvtool.exe
+            acceptance: smoke
           - os: macos-latest
             label: macos-arm64
             binary: build/native/nativeCompile/mkvtool
+            acceptance: smoke
     runs-on: ${{ matrix.os }}
     name: Native ${{ matrix.label }}
+    env:
+      GROOVY_VERSION: "5.0.6"
     defaults:
       run:
         # Git Bash is present on the Windows runner too, so one script runs everywhere.
@@ -143,3 +155,163 @@ jobs:
       - name: Smoke-test native binary
         run: |
           "${{ matrix.binary }}" native-smoke
+
+      # The acceptance tier below runs the Groovy oracle against the binary just built. The
+      # probes above cover what fails silently *inside* the image; these cover what the image
+      # does to real files, real mkvmerge invocations and real console output.
+
+      # The harness needs mkvmerge at startup and asserts output via mkvmerge -J; mkvpropedit
+      # is what keeps the propedit and filename-to-title cases from self-skipping.
+      - name: Install MKVToolNix
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get update
+              sudo apt-get install -y mkvtoolnix
+              ;;
+            macOS)
+              HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install mkvtoolnix
+              ;;
+            Windows)
+              choco install mkvtoolnix --yes --no-progress
+              # A choco install does not reach this job's already-started PATH, so add the
+              # installer's fixed location by hand: in Windows form for the later steps, whose
+              # PATH lookups happen inside the JVM and the native binary, and in POSIX form for
+              # the two proof lines below, which bash resolves. (Even without either, both
+              # findMkvTool implementations fall back to this very directory on Windows.)
+              echo "C:\Program Files\MKVToolNix" >> "$GITHUB_PATH"
+              export PATH="/c/Program Files/MKVToolNix:$PATH"
+              ;;
+          esac
+          mkvmerge --version
+          mkvpropedit --version
+
+      - name: Cache Groovy distribution
+        uses: actions/cache@v6
+        with:
+          path: ~/groovy
+          key: groovy-${{ env.GROOVY_VERSION }}-${{ runner.os }}
+
+      - name: Install Groovy
+        run: |
+          if [ ! -d "$HOME/groovy/groovy-$GROOVY_VERSION" ]; then
+            curl -fsSL -o /tmp/groovy.zip "https://archive.apache.org/dist/groovy/$GROOVY_VERSION/distribution/apache-groovy-binary-$GROOVY_VERSION.zip"
+            mkdir -p "$HOME/groovy"
+            # `jar` rather than `unzip`: Git Bash on the Windows runner ships no unzip, while
+            # setup-graalvm guarantees a JDK (and its bin on PATH) on every leg.
+            (cd "$HOME/groovy" && jar xf /tmp/groovy.zip)
+          fi
+          # Named rather than put on PATH: the launcher is invoked from bash on all three
+          # runners, and a bash-style path in GITHUB_PATH would mean nothing to another shell.
+          echo "GROOVY=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy" >> "$GITHUB_ENV"
+
+      - name: Cache Grapes
+        uses: actions/cache@v6
+        with:
+          path: ~/.groovy/grapes
+          key: grapes-${{ env.GROOVY_VERSION }}-${{ runner.os }}-${{ hashFiles('src/**/*.groovy') }}
+          restore-keys: |
+            grapes-${{ env.GROOVY_VERSION }}-${{ runner.os }}-
+
+      # The whole oracle against the native binary. `--app-bin` is the seam task 0.4 left for
+      # exactly this: a binary whose name does not end in .bat is launched directly, so the
+      # (frozen) harness needs no change to test a native build.
+      - name: Run the full acceptance harness against the native binary
+        if: matrix.acceptance == 'full'
+        run: |
+          "$GROOVY" src/test/run_tests.groovy --target app --app-bin "${{ matrix.binary }}"
+
+      # One representative case per command instead of the full suite: this leg exists to catch
+      # what differs *per OS* in the native image, and 132 cases here would triple the leg for
+      # coverage the Linux leg already has. `--filter` takes a single substring, so each case is
+      # its own harness run; all of them run before the step fails, because which command broke
+      # on which OS is the whole answer.
+      - name: Run the acceptance smoke subset against the native binary
+        if: matrix.acceptance == 'smoke'
+        run: |
+          cases=(
+            # to-utf8: a windows-1251 decode through the CLI, i.e. -H:+AddAllCharsets with teeth
+            50_to_utf8_converts_in_place
+            # fix-srt: the reformat state machine over a charset-detected read
+            87_fix_srt_fixes_valid_file
+            # propedit: real mkvpropedit argv passthrough (31 is a no-op, so it proves less)
+            32_propedit_passthrough
+            # filename-to-title: the second mkvpropedit command
+            85_filename_to_title_sets_title
+            # fetch-episodes: loopback HTTP, both metadata files written
+            35_fetch_episodes_stub
+            # rename: the episodes.yaml load, i.e. snakeyaml in the image
+            94_rename_prefers_yaml
+            # inspect: both modes off one mkvmerge -J scan
+            74_check_and_identify_combined
+            # mux: a real mkvmerge invocation end to end
+            01_one_audio_one_subtitle
+            # Cyrillic through fetch, rename and file names — where a native image's stdout and
+            # filesystem encodings would differ from the JVM's if they differ anywhere.
+            38_non_ascii_titles_round_trip
+          )
+          failed=""
+          for case_name in "${cases[@]}"; do
+            echo "::group::$case_name"
+            if ! "$GROOVY" src/test/run_tests.groovy --target app --app-bin "${{ matrix.binary }}" --filter "$case_name"; then
+              failed="$failed $case_name"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "*** Smoke cases failed:$failed"
+            exit 1
+          fi
+
+      # find-unused-fonts is the one command the Groovy oracle has no case for, on any tier, so
+      # the subset above cannot supply a representative for it. Asserted here instead: one font
+      # the subtitle references, one it does not, and the unreferenced base name — no extension,
+      # no prefix, no summary — is the whole of the output.
+      - name: Check find-unused-fonts against the native binary
+        run: |
+          bin="$PWD/${{ matrix.binary }}"
+          work="$(mktemp -d)"
+          mkdir -p "$work/fonts"
+          printf 'Style: Default,Cuprum,20\n' > "$work/subs.ass"
+          : > "$work/fonts/Cuprum.ttf"
+          : > "$work/fonts/Unused Font.otf"
+          # `tr -d` because the tool ends its lines with the platform separator: on Windows the
+          # captured value would otherwise carry a trailing CR and never equal the expected name.
+          out="$(cd "$work" && "$bin" find-unused-fonts | tr -d '\r')"
+          echo "$out"
+          test "$out" = "Unused Font"
+
+      # The point of native-image (V2-DIRECTION.md Decision 1). Not a cold start in the strict
+      # sense — native-smoke ran this binary a few steps ago, so it is page-cached; what is
+      # measured is the first --version run and the steady state over 50 of them. The ceiling is
+      # the one PORTING-TODO.md 6.1 set, and it is asserted so a regression cannot pass silently.
+      - name: Measure startup
+        run: |
+          # bash's `time` and awk both take the decimal separator from the locale. Scoped to this
+          # step: a job-wide LC_ALL=C would give the JVM an ASCII sun.jnu.encoding and break the
+          # non-ASCII file names the acceptance runs above depend on.
+          export LC_ALL=C
+          bin="$PWD/${{ matrix.binary }}"
+          TIMEFORMAT='%3R'
+          first="$( { time "$bin" --version > /dev/null ; } 2>&1 )"
+          loop="$( { time ( i=0; while [ "$i" -lt 50 ]; do "$bin" --version > /dev/null; i=$((i + 1)); done ) ; } 2>&1 )"
+          read -r first_ms mean_ms <<< "$(awk -v f="$first" -v l="$loop" 'BEGIN { printf "%.1f %.1f", f * 1000, l * 1000 / 50 }')"
+          echo "startup ${{ matrix.label }}: first --version ${first_ms} ms, mean of 50 ${mean_ms} ms"
+          # A `time` line this could not parse leaves the numbers empty, and an empty value
+          # compares as a string against the ceiling below and passes. Refuse instead.
+          case "$first_ms$mean_ms" in
+            "" | *[!0-9.]*)
+              echo "*** could not measure startup: time reported first=[$first] loop=[$loop]"
+              exit 1
+              ;;
+          esac
+          {
+            echo "### Startup: ${{ matrix.label }}"
+            echo
+            echo "- first \`--version\`: ${first_ms} ms"
+            echo "- mean of 50 runs: ${mean_ms} ms"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if ! awk -v m="$mean_ms" 'BEGIN { exit (m > 200) ? 1 : 0 }'; then
+            echo "*** startup ceiling exceeded: ${mean_ms} ms mean against a 200 ms ceiling"
+            exit 1
+          fi
