@@ -120,6 +120,14 @@ graalvmNative {
 
 tasks.test {
     useJUnitPlatform()
+    // Two specs assert against the user documentation — the config keys it names, and the sample reports
+    // it shows. Gradle cannot see that from the test classpath, so without declaring the files it treats
+    // the task as up to date after a documentation-only edit and the check silently does not run. It would
+    // still run in CI, where nothing is cached, which is the worst version of this: green locally, red on
+    // push.
+    inputs.files("docs/reference.md", "src/config.example.yaml")
+        .withPropertyName("documentationUnderTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 tasks.jar {

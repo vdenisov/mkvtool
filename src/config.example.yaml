@@ -9,7 +9,7 @@
 #                                 languageNative, codec
 #
 # Episode data comes from episodes.yaml (or episodes.txt) in this directory,
-# written by mkv-fetch-episodes; showName/episodeName also fall back to a
+# written by `mkvtool fetch-episodes`; showName/episodeName also fall back to a
 # canonical "Show - SxxEyy - Title" file name. A misspelled variable is an
 # error before anything is muxed, never a literal in the output.
 
