@@ -1,6 +1,6 @@
 # mkvtool
 
-[![Native](https://github.com/vdenisov/mkvtool/actions/workflows/native.yml/badge.svg)](https://github.com/vdenisov/mkvtool/actions/workflows/native.yml)
+[![Native and release](https://github.com/vdenisov/mkvtool/actions/workflows/native.yml/badge.svg)](https://github.com/vdenisov/mkvtool/actions/workflows/native.yml)
 [![CI](https://github.com/vdenisov/mkvtool/actions/workflows/ci.yml/badge.svg)](https://github.com/vdenisov/mkvtool/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
