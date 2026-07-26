@@ -41,10 +41,11 @@ to install alongside it, and the `.tar.gz` archives keep the executable bit, so 
 `mkvtool-<version>-checksums.txt` is attached to the same release in `sha256sum`
 format, covering every asset, so `sha256sum -c` verifies what you downloaded.
 
-The Windows binary is signed, but SmartScreen can still warn until the certificate
-accumulates reputation. On macOS, an archive downloaded in a browser carries the
-quarantine attribute; `xattr -d com.apple.quarantine mkvtool` clears it. Each
-archive's own readme repeats whichever of these applies to it.
+The Windows binary ships unsigned for now — a signature is in the works, and until
+then the checksums above are how to verify what you downloaded. On macOS, an
+archive downloaded in a browser carries the quarantine attribute;
+`xattr -d com.apple.quarantine mkvtool` clears it. Each archive's own readme
+repeats whichever of these applies to it.
 
 The same release carries a fat jar, `mkvtool-<version>.jar`, for platforms without
 a native build. It needs Java 21 or newer and runs as

@@ -213,9 +213,10 @@ val releaseReadme = tasks.register("releaseReadme") {
         // reader with, and the answer to it.
         val platformNote = when {
             platform.startsWith("windows") -> listOf(
-                "Windows may show a \"Windows protected your PC\" prompt the first few times you",
-                "run it: choose More info, then Run anyway. A new signing certificate needs",
-                "downloads to accumulate before SmartScreen stops asking.",
+                "This binary is not code-signed. Windows may therefore show a \"Windows protected",
+                "your PC\" prompt the first few times it is launched from Explorer - choose More",
+                "info, then Run anyway - and a browser may warn that it is not commonly",
+                "downloaded. The checksums file attached to the release is how to verify it.",
             )
             platform.startsWith("macos") -> listOf(
                 "macOS quarantines anything downloaded by a browser, and reports it as damaged or",

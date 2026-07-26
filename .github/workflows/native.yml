@@ -477,16 +477,16 @@ jobs:
             exit 1
           fi
 
-      # Windows signing happens before archiving, because the signature rides inside the exe
-      # and is what answers SmartScreen after Explorer extracts it. It is a human step for now,
-      # taken on a machine that can hold a signing session, so this leg builds an unsigned
-      # archive and says so. That is safe because no path here publishes: a tag produces a
-      # draft release, whose assets need a token to download, and the exe is signed and
-      # re-uploaded before a human publishes it.
+      # Releases ship an unsigned Windows binary for now, and the install instructions say so.
+      # When that changes, signing belongs here - before archiving, since the signature rides
+      # inside the exe and survives zipping - or as a step against the bare exe uploaded below,
+      # which is the same tested binary with a signature appended. Either way a published asset
+      # is never re-signed in place: the next version gets the signature, because anything that
+      # pinned the old checksum would start failing.
       - name: Note the unsigned Windows binary
         if: matrix.label == 'windows-x64'
         run: |
-          echo "::warning title=Unsigned Windows binary::The zip holds an unsigned mkvtool.exe. Sign it and re-upload before publishing a release, then regenerate the checksums file."
+          echo "::notice title=Unsigned Windows binary::The zip holds an unsigned mkvtool.exe, which is the current release policy. The install instructions say so, and the checksums file is the verification path."
 
       # Packaged in the leg that just tested this binary rather than centrally, so the archive
       # holds the exact file the smoke probes, the acceptance cases, the fonts check and the
@@ -656,7 +656,11 @@ jobs:
             echo "### Draft release $TAG"
             echo
             echo "Still owed before publishing:"
-            echo "- [ ] sign \`mkvtool.exe\`, rebuild the Windows zip around it, upload with \`--clobber\`"
-            echo "- [ ] regenerate \`mkvtool-$VERSION-checksums.txt\` over the final assets"
             echo "- [ ] write the release notes, with the codename"
+            echo "- [ ] check the assets against the install instructions"
+            echo
+            echo "The Windows exe ships unsigned by current policy. If that changes for this"
+            echo "release, sign the bare exe from this run, rebuild its zip with"
+            echo "\`releaseArchive -PnativeBinary=<signed exe>\`, upload with \`--clobber\`, and"
+            echo "regenerate \`mkvtool-$VERSION-checksums.txt\` over the final assets."
           } >> "$GITHUB_STEP_SUMMARY"

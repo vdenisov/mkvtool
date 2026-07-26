@@ -219,10 +219,12 @@ the schedule only, so network flakiness cannot redden the badge.
 **Releases never publish from CI.** A pushed `v*` tag collects the four archives, the jar and a
 `sha256sum` checksums file, asserts the asset set and each archive's shape against the naming contract,
 and creates a **draft**; a dispatch does everything except that last call and leaves the assets as a
-workflow artifact, which is how the path is rehearsed without spending a tag. The Windows binary is signed
-by hand — the certificate cannot sign unattended — so the Windows leg also uploads the bare exe on its
-own, and a draft's assets need a token to download, which is what stops an unsigned binary reaching
-anyone.
+workflow artifact, which is how the path is rehearsed without spending a tag. The Windows binary **ships
+unsigned** for now, and the install instructions say so rather than promising a signature. Two consequences
+worth knowing: the Windows leg uploads the bare exe on its own, so a signature can later be appended to the
+binary that was actually tested rather than to a local rebuild; and a published asset is never re-signed in
+place — the next version gets the signature, because anything that pinned the old checksum would start
+failing.
 
 ## The output seam
 
