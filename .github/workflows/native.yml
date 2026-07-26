@@ -201,6 +201,10 @@ jobs:
             # setup-graalvm guarantees a JDK (and its bin on PATH) on every leg.
             (cd "$HOME/groovy" && jar xf /tmp/groovy.zip)
           fi
+          # `jar` extracts without the zip entries' Unix modes, so the launchers come out
+          # non-executable and Linux/macOS fail with exit 126 (`unzip` would have kept them).
+          # Outside the guard above on purpose: the cache can hold a tree unpacked this way.
+          chmod +x "$HOME/groovy/groovy-$GROOVY_VERSION/bin"/*
           # Named rather than put on PATH: the launcher is invoked from bash on all three
           # runners, and a bash-style path in GITHUB_PATH would mean nothing to another shell.
           echo "GROOVY=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy" >> "$GITHUB_ENV"
