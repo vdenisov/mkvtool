@@ -2,13 +2,13 @@
 
 The details behind the [README](../README.md): output conventions, how to read
 the consistency check report, and the full `config.yaml` reference. This
-document is about *using* the tools; implementation internals (shared helpers,
-the test harness) live in the repo's `CLAUDE.md`.
+document is about *using* the tool; implementation internals (the output seam,
+the test tiers) live in the repo's `CLAUDE.md`.
 
 ## Console output
 
-All scripts share one output convention, implemented in `src/lib/output.groovy`.
-Every colour has a single meaning, the same in every script:
+Every command shares one output convention, and every colour has a single
+meaning, the same everywhere:
 
 | Colour | Meaning |
 |--------|---------|
@@ -18,22 +18,21 @@ Every colour has a single meaning, the same in every script:
 | cyan   | section, per-file and table column headers — for finding your place in long scrollback |
 | gray   | de-emphasis: the file-evidence lists in the check report, so the table rows stand out (the `<-` marker keeps the default colour); also a guessed language (`rus?`) and the name of an external file matched only by episode number |
 
-Probing a batch prints a progress meter: a bar that updates in place on a terminal, and appended dots when the output is redirected or piped, so a log stays readable. Colour is applied only when writing to a terminal. `mux.groovy`,
-`inspect.groovy`, `rename.groovy`, `fetch_episodes.groovy`, `to_utf8.groovy` and
-`fix_srt.groovy` take `--color auto|always|never` (default `auto`). The
+Probing a batch prints a progress meter: a bar that updates in place on a terminal, and appended dots when the output is redirected or piped, so a log stays readable. Colour is applied only when writing to a terminal. Every command
+takes `--color auto|always|never` (default `auto`). The
 [`NO_COLOR`](https://no-color.org/) environment variable disables
-auto-detection; an explicit `--color always` wins over it. `propedit.groovy`
-deliberately has no options of its own — every argument is passed through to
+auto-detection; an explicit `--color always` wins over it. `propedit` is the one
+exception and has no options of its own — every argument is passed through to
 `mkvpropedit` — so it follows auto-detection and `NO_COLOR` only.
-`find_unused_fonts.groovy` prints bare file names meant for piping and is never
+`find-unused-fonts` prints bare file names meant for piping and is never
 coloured.
 
 Errors and warnings go to **stderr**, progress and summaries to **stdout**, so
-either can be redirected without losing the other. Every batch script ends with
+either can be redirected without losing the other. Every batch command ends with
 a one-line summary (`*** 4 converted, 2 skipped, 1 failed`) and exits non-zero
-if anything failed. The exception is `mux.groovy`, which continues on errors
+if anything failed. The exception is `mux`, which continues on errors
 and always exits 0 — a partially-successful batch mux is a normal outcome —
-except under `--strict`, which exits 2 on a blocking discrepancy. `inspect.groovy`
+except under `--strict`, which exits 2 on a blocking discrepancy. `inspect`
 writes nothing at all and **exits 0 unless `--strict` is given**. A config that is
 missing, empty, malformed or otherwise unusable is reported as a warning and the
 run continues without it — inspection is the thing you reach for *because*
@@ -44,9 +43,9 @@ was supposed to supply.
 
 ## Reading the consistency check report
 
-This is what a bare `mkv-inspect` prints, and the same report `mux.groovy` runs
-as its pre-flight before muxing (`--no-check` skips it there). Under
-`mkv-inspect` the header reads `*** Consistency check`; run from `mux.groovy` it
+This is what a bare `mkvtool inspect` prints, and the same report `mkvtool mux`
+runs as its pre-flight before muxing (`--no-check` skips it there). Under
+`inspect` the header reads `*** Consistency check`; run from `mux` it
 reads `*** Pre-flight check`. Everything below applies to both.
 
 The check works in two layers. First it groups files by **track layout** — the
@@ -119,16 +118,16 @@ classification entirely — that is the mode you use to *write* the config.
 
 By default the check **warns and continues** — muxing the wrong tracks is
 recoverable, the source files survive. Pass `--strict` to exit 2 when any
-discrepancy affects a selected track (from `mux.groovy` that also means nothing
+discrepancy affects a selected track (from `mux` that also means nothing
 is muxed). File lists are truncated to a few names; `--check-verbose` prints them
 in full. Highlighting follows `--color` — see [Console output](#console-output).
 
 ## External file discovery
 
 External files — dubs, alternative subtitle tracks — often do not sit next to the
-main media file. `mkv-inspect` finds them by name, groups them into **variants**,
-and reports what each variant covers. Nothing here feeds muxing: `mux.groovy` is
-driven by `additionalSources` in the config and nothing else. Discovery is what
+main media file. `mkvtool inspect` finds them by name, groups them into
+**variants**, and reports what each variant covers. Nothing here feeds muxing:
+`mux` is driven by `additionalSources` in the config and nothing else. Discovery is what
 you read in order to *write* those entries.
 
 Two layouts are recognised, and they combine:
@@ -299,7 +298,7 @@ Their values are compared exactly like a track's, so a dub tagged Russian for ha
 a season and untagged for the rest is reported the same way a flag flipping
 mid-season is. External differences are **never blocking**: nothing selects an
 external file by ID, so they cannot mux the wrong track — they mean another pass,
-which is what the grouping already says. (`mux.groovy`'s pre-flight is the part
+which is what the grouping already says. (`mux`'s pre-flight is the part
 that acts on missing files, and only on the *configured* `additionalSources` of an
 episode, which it drops.)
 
@@ -307,7 +306,7 @@ Because the grouping now covers both halves, so does the all-clear: `Track
 structure and external files are consistent across 23 files` means one config will
 do the whole season.
 
-## to_utf8.groovy safety
+## to-utf8 safety
 
 Three things make it safe to point at a directory more than once:
 
@@ -330,9 +329,9 @@ line by line, so CRLF subtitles stay CRLF.
 
 ## Configuration
 
-`mux.groovy` is driven by a YAML configuration file (`config.yaml` in the media
-directory, or `--config <path>`); copy the shipped template
-`src/config.example.yaml` as a starting point.
+`mux` is driven by a YAML configuration file (`config.yaml` in the media
+directory, or `--config <path>`); copy the template
+[`src/config.example.yaml`](../src/config.example.yaml) as a starting point.
 
 ### General settings
 
@@ -446,8 +445,8 @@ episode. `${fileName}` — the base name, no extension, of the current main sour
 way: `"Rus sound/[Studio]/${fileName}.mka"`. A track's `title` here also takes
 the track-scope variables, describing the companion's own language and codec.
 
-`mkv-inspect --identify` lists each configured source with the path its pattern
-resolved to for that episode, which is the quickest way to check one. It also
+`mkvtool inspect --identify` lists each configured source with the path its
+pattern resolved to for that episode, which is the quickest way to check one. It also
 finds external files that no config mentions — see
 [External file discovery](#external-file-discovery), which is how you work out
 what to put here in the first place.
@@ -542,9 +541,9 @@ trackOrder: "0:0,0:1,1:0"
 
 ### Key assumptions
 
-1. The first track in the main source is the video track (track ID 0). `mux.groovy`
+1. The first track in the main source is the video track (track ID 0). `mux`
    hardcodes `0:` for video everywhere, so a release that orders its tracks
-   differently needs its own config — and its own batch. `mkv-inspect` reports
+   differently needs its own config — and its own batch. `inspect` reports
    exactly that as a layout outlier, which is what the layout grouping in the
    check report is for.
 2. Each additional source contains exactly one track (audio or subtitle, never video).
