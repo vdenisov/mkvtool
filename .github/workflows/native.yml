@@ -1,18 +1,32 @@
-name: Native
+name: Native and release
 
 # The v2 Kotlin app (mkvtool). Kept separate from ci.yml, which stays Groovy-only and
-# untouched during the port. Three jobs with different cadences:
-#   build       - fast Linux JVM build + unit tests, on every push-to-main and PR.
-#   harness-app - the Groovy oracle against the JVM launcher, on every push-to-main and PR.
-#   native      - the slow 4-OS GraalVM native-image build, its smoke probes and the
-#                 acceptance runs against the resulting binary, only on merge (push to
-#                 main), the weekly schedule, and manual dispatch. Native config rarely
-#                 changes and each compile is minutes per OS, so it does not run per PR
-#                 commit. Runner minutes are free (public repo), so this is about CI noise,
-#                 not cost. Verify a branch by dispatching this workflow against it.
+# untouched during the port. Four jobs with different cadences:
+#   build       - fast Linux JVM build + unit tests, on every push-to-main and PR. Also
+#                 reads the project version, which the release job consumes.
+#   harness-app - the Groovy oracle against the JVM launcher, plus a smaller pass over the
+#                 fat jar, on every push-to-main and PR.
+#   native      - the slow 4-OS GraalVM native-image build, its smoke probes, the acceptance
+#                 runs against the resulting binary, and the packaging of that binary into
+#                 its release archive; only on merge (push to main), a pushed v* tag, the
+#                 weekly schedule, and manual dispatch. Native config rarely changes and
+#                 each compile is minutes per OS, so it does not run per PR commit. Runner
+#                 minutes are free (public repo), so this is about CI noise, not cost.
+#                 Verify a branch by dispatching this workflow against it.
+#   release     - collects those archives, the jar and a checksums file. On a pushed v* tag
+#                 it creates a DRAFT release from them; on a dispatch it leaves them as a
+#                 workflow artifact and touches no release at all, which is how the whole
+#                 path is rehearsed without spending a tag.
+#
+# Nothing here ever publishes. A draft's assets need a token to download, so the Windows
+# binary is signed and re-uploaded by a human before anyone can reach it - which is also
+# why the Windows leg uploads the bare exe on its own.
 on:
   push:
     branches: [main]
+    # A v* tag is a release attempt. A tag push carries no branch, so the filter above does
+    # not apply to it.
+    tags: ["v*"]
   pull_request:
     branches: [main]
   schedule:
@@ -21,12 +35,18 @@ on:
     - cron: "0 7 * * 1"
   workflow_dispatch:
 
+# Read by default. Only the release job widens this, and only to attach assets to a draft.
+permissions:
+  contents: read
+
 jobs:
   build:
     # Everything except the weekly canary, which only needs the native leg.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     name: Build + unit tests (JDK 21)
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -43,15 +63,55 @@ jobs:
       - name: Build and test
         run: ./gradlew build
 
+      # Read from the build rather than parsed out of gradle.properties, so there is one
+      # implementation of "what version is this" — the one that also names every archive.
+      # Published as a job output, which is what lets the release job run with no JDK at all.
+      - name: Read the project version
+        id: version
+        run: |
+          version="$(./gradlew -q printVersion | tail -n1 | tr -d '\r')"
+          # An unparsable value would otherwise flow into asset names and compare as a string
+          # against the tag below, matching nothing and explaining nothing.
+          case "$version" in
+            "" | *[!0-9A-Za-z.-]*)
+              echo "*** could not read the project version: [$version]"
+              exit 1
+              ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "project version: $version"
+
+      # A tag push is a release attempt, and this refuses a mismatched one a minute in rather
+      # than after four native legs have spent twenty minutes building assets nobody can use.
+      # The release job asks again, because that is where the tag actually names a release.
+      - name: Check the tag against the project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          case "$version" in
+            *-SNAPSHOT)
+              echo "*** refusing to release $version: stamp the real version in gradle.properties first"
+              exit 1
+              ;;
+          esac
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "*** tag $GITHUB_REF_NAME does not match the project version $version"
+            exit 1
+          fi
+
   harness-app:
     # The Groovy acceptance harness (the port's oracle) run against the mkvtool binary
     # instead of the scripts. It was non-blocking while the port was under way and every
     # command was still missing; with `mux` landed it passes in full, so it is now a
     # blocking check — a case that goes red here is a behavior difference from the scripts,
     # which is exactly what must not merge. Add it to branch-protection required checks.
+    #
+    # It carries the fat jar's only coverage too, at the end: MKVToolNix, Groovy and the
+    # Grapes cache are already paid for here, and a job of its own would spend three minutes
+    # of setup to run bytecode this one already ran.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    name: Acceptance harness (--target app)
+    name: Acceptance harness (JVM launcher and fat jar)
     env:
       GROOVY_VERSION: "5.0.6"
     steps:
@@ -64,9 +124,10 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # The launcher the harness invokes: build/install/mkvtool/bin/mkvtool.
-      - name: Build installDist launcher
-        run: ./gradlew installDist
+      # The launcher the harness invokes (build/install/mkvtool/bin/mkvtool), and the one
+      # that runs the fat jar (build/jar-launcher/mkvtool), which also builds the jar.
+      - name: Build the JVM launcher and the fat-jar launcher
+        run: ./gradlew installDist jarLauncher
 
       # The harness needs mkvmerge at startup and asserts output via mkvmerge -J.
       - name: Install MKVToolNix
@@ -100,6 +161,56 @@ jobs:
 
       - name: Run acceptance harness against the app
         run: groovy src/test/run_tests.groovy --target app
+
+      # The fat jar is published as the JVM fallback and no tier ran it: the step above covers
+      # the same bytecode through the installDist launcher, and the native legs cover it
+      # compiled. What only the jar can break is its own packaging — the Main-Class manifest
+      # and the resources merged from several dependencies — so native-smoke does most of the
+      # work here (it decodes a charset, reads a CLDR name, parses JSON and round-trips YAML
+      # inside the process), and three cases put real files, a real mkvmerge call and
+      # non-ASCII names through the CLI. Run after the full suite, never beside it: the
+      # harness keys its work directories by case name and recreates them at case start, so
+      # two concurrent suites wipe each other's fixtures.
+      - name: Smoke-test the fat jar
+        run: |
+          launcher=build/jar-launcher/mkvtool
+          "$launcher" --version
+          "$launcher" native-smoke
+          cases=(
+            # a real mkvmerge invocation end to end
+            01_one_audio_one_subtitle
+            # a windows-1251 decode through the CLI, i.e. the charset resources survived shading
+            50_to_utf8_converts_in_place
+            # Cyrillic through fetch, rename and file names
+            38_non_ascii_titles_round_trip
+          )
+          failed=""
+          for case_name in "${cases[@]}"; do
+            echo "::group::$case_name"
+            if ! groovy src/test/run_tests.groovy --target app --app-bin "$launcher" --filter "$case_name"; then
+              failed="$failed $case_name"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "*** Fat-jar cases failed:$failed"
+            exit 1
+          fi
+
+      # The jar attached to a release is the one this job just tested, for the same reason
+      # each native archive is packaged in the leg that tested its binary.
+      - name: Package the release jar
+        run: ./gradlew releaseJar
+
+      # As on the native legs: packaged every run so the task cannot rot unnoticed, uploaded only
+      # when the release job will collect it.
+      - name: Upload the release jar
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-jar
+          path: build/release/
+          if-no-files-found: error
 
   native:
     # Merge (push is main-only via the branch filter) + weekly schedule + manual. This is
@@ -330,10 +441,11 @@ jobs:
           echo "$out"
           test "$out" = "Unused Font"
 
-      # The point of native-image (V2-DIRECTION.md Decision 1). Not a cold start in the strict
-      # sense — native-smoke ran this binary a few steps ago, so it is page-cached; what is
-      # measured is the first --version run and the steady state over 50 of them. The ceiling is
-      # the one PORTING-TODO.md 6.1 set, and it is asserted so a regression cannot pass silently.
+      # Why the tool is compiled at all: the Groovy scripts it replaces took about four seconds
+      # to print a help screen. Not a cold start in the strict sense — native-smoke ran this
+      # binary a few steps ago, so it is page-cached; what is measured is the first --version run
+      # and the steady state over 50 of them. The 200 ms ceiling is asserted rather than just
+      # recorded, so a regression cannot pass silently.
       - name: Measure startup
         run: |
           # bash's `time` and awk both take the decimal separator from the locale. Scoped to this
@@ -364,3 +476,187 @@ jobs:
             echo "*** startup ceiling exceeded: ${mean_ms} ms mean against a 200 ms ceiling"
             exit 1
           fi
+
+      # Windows signing happens before archiving, because the signature rides inside the exe
+      # and is what answers SmartScreen after Explorer extracts it. It is a human step for now,
+      # taken on a machine that can hold a signing session, so this leg builds an unsigned
+      # archive and says so. That is safe because no path here publishes: a tag produces a
+      # draft release, whose assets need a token to download, and the exe is signed and
+      # re-uploaded before a human publishes it.
+      - name: Note the unsigned Windows binary
+        if: matrix.label == 'windows-x64'
+        run: |
+          echo "::warning title=Unsigned Windows binary::The zip holds an unsigned mkvtool.exe. Sign it and re-upload before publishing a release, then regenerate the checksums file."
+
+      # Packaged in the leg that just tested this binary rather than centrally, so the archive
+      # holds the exact file the smoke probes, the acceptance cases, the fonts check and the
+      # startup measurement all ran. The Gradle task reads what is on disk and does not depend
+      # on nativeCompile, so nothing is rebuilt here.
+      - name: Package the release archive
+        run: |
+          ./gradlew releaseArchive
+          ls -l build/release
+          # Gradle derives the platform label from the machine it runs on. This is where that
+          # derivation is checked against what the leg claims to be building, so a toolchain
+          # mix-up fails here instead of reaching a release page as a mislabelled asset.
+          ls build/release | grep -q -- '-${{ matrix.label }}\.'
+
+      # Only when something downstream will consume it. The packaging step above runs on every
+      # native build regardless, so a broken archive task is caught by the weekly canary rather
+      # than discovered on release day.
+      - name: Upload the release archive
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v7
+        with:
+          # Unique per leg: an artifact is immutable, so two legs writing one name is an error.
+          name: release-${{ matrix.label }}
+          path: build/release/
+          if-no-files-found: error
+
+      # The bare exe as well, unarchived, because signing happens elsewhere: the signer needs
+      # this exact tested file. Signing appends to the PE rather than rebuilding it, so an
+      # archive rebuilt around the signed copy still holds the binary these steps ran.
+      - name: Upload the unsigned Windows binary
+        if: |
+          matrix.label == 'windows-x64' &&
+          (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v'))
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64-unsigned-exe
+          path: ${{ matrix.binary }}
+          archive: false
+          if-no-files-found: error
+
+  release:
+    # Collects the six release assets from the artifacts the jobs above uploaded, and on a
+    # pushed v* tag creates a DRAFT release from them. Nothing here publishes: --draft is
+    # unconditional, so a human sees every asset before any user can reach one. A dispatch runs
+    # everything except that one call and leaves the assets as a workflow artifact, which is how
+    # the whole path gets rehearsed without spending a tag. It needs no JDK: the version arrives
+    # as a job output and the archives arrive built.
+    needs: [build, harness-app, native]
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    name: Release assets
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Asked once already in `build`, and asked again here, where the tag actually names a
+      # release rather than merely accompanying a run.
+      - name: Check the tag against the project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          case "$VERSION" in
+            *-SNAPSHOT)
+              echo "*** refusing to release $VERSION"
+              exit 1
+              ;;
+          esac
+          test "$TAG" = "v$VERSION"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: assets
+
+      # The asset list is a contract — package manifests pin these URLs and their checksums —
+      # so it is asserted whole rather than spot-checked. A leg that stopped uploading, or a
+      # platform label that came out wrong, surfaces here instead of as a missing download link.
+      - name: Check the asset set
+        working-directory: assets
+        run: |
+          expected="$(printf '%s\n' \
+            "mkvtool-$VERSION-linux-x64.tar.gz" \
+            "mkvtool-$VERSION-macos-arm64.tar.gz" \
+            "mkvtool-$VERSION-macos-x64.tar.gz" \
+            "mkvtool-$VERSION-windows-x64.zip" \
+            "mkvtool-$VERSION.jar" | sort)"
+          actual="$(ls -1 | sort)"
+          if [ "$expected" != "$actual" ]; then
+            echo "*** the asset set does not match the release contract"
+            diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
+            exit 1
+          fi
+
+      # Flat archives holding an executable binary are two promises the install instructions
+      # make. Both are cheap to check here and expensive to learn from a bug report.
+      - name: Check the archive contents
+        working-directory: assets
+        run: |
+          for archive in mkvtool-"$VERSION"-linux-x64.tar.gz \
+                         mkvtool-"$VERSION"-macos-arm64.tar.gz \
+                         mkvtool-"$VERSION"-macos-x64.tar.gz; do
+            echo "::group::$archive"
+            tar -tzvf "$archive"
+            echo "::endgroup::"
+            test "$(tar -tzf "$archive" | sort | tr '\n' ' ')" = "LICENSE README.txt mkvtool "
+            tar -tzvf "$archive" | grep -qE '^-rwxr-xr-x .*[ /]mkvtool$'
+          done
+          # python3 rather than unzip: GNU tar cannot read a zip, and unzip is not part of a
+          # stock Ubuntu — it happens to be on this image, but python3 is guaranteed and lists
+          # the entries just as exactly.
+          zip="mkvtool-$VERSION-windows-x64.zip"
+          names="$(python3 -c 'import sys, zipfile; print(" ".join(sorted(zipfile.ZipFile(sys.argv[1]).namelist())))' "$zip")"
+          echo "$zip: $names"
+          test "$names" = "LICENSE README.txt mkvtool.exe"
+
+      # Generated once, here, and only on Linux: sha256sum does not exist on a macOS runner, and
+      # PowerShell's Get-FileHash prints a different format in a different encoding. Written
+      # outside the directory and moved in, because the shell creates a redirect target *before*
+      # the glob expands — written in place, the file would list itself. Bare names, so
+      # `sha256sum -c` works from whatever directory a user downloaded into.
+      - name: Write the checksums file
+        working-directory: assets
+        run: |
+          sums="mkvtool-$VERSION-checksums.txt"
+          sha256sum -- * > "$RUNNER_TEMP/$sums"
+          mv "$RUNNER_TEMP/$sums" .
+          sha256sum -c "$sums"
+          cat "$sums"
+
+      # Uploaded on every run of this job, rehearsal or not: on a dispatch it is the rehearsal's
+      # entire output, and on a tag it is where the signer takes the Windows zip from.
+      - name: Upload the asset set
+        uses: actions/upload-artifact@v7
+        with:
+          name: mkvtool-${{ needs.build.outputs.version }}-assets
+          path: assets/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create the draft release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        working-directory: assets
+        run: |
+          # --draft, always. --verify-tag so a wrong tag fails rather than being created as a
+          # side effect. Re-runnable: a second attempt uploads over the first instead of failing
+          # on an existing release. Re-cutting is safe only while the release is still a draft —
+          # once it is published, a bad build gets a new patch version, never a re-pushed tag,
+          # because anything that pinned the old checksum would start failing verification.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" --clobber -- *
+          else
+            gh release create "$TAG" --draft --verify-tag \
+              --title "mkvtool $VERSION" \
+              --notes "Draft. Release notes are written by hand before publishing." \
+              -- *
+          fi
+          {
+            echo "### Draft release $TAG"
+            echo
+            echo "Still owed before publishing:"
+            echo "- [ ] sign \`mkvtool.exe\`, rebuild the Windows zip around it, upload with \`--clobber\`"
+            echo "- [ ] regenerate \`mkvtool-$VERSION-checksums.txt\` over the final assets"
+            echo "- [ ] write the release notes, with the codename"
+          } >> "$GITHUB_STEP_SUMMARY"

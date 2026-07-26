@@ -31,6 +31,8 @@ files. The dev loop:
 ./gradlew shadowJar          # build/libs/mkvtool-<version>-all.jar
 ./gradlew nativeCompile      # build/native/nativeCompile/mkvtool[.exe]; needs a GraalVM JDK 21
 ./gradlew build              # compile + unit tests + the fat jar
+./gradlew jarLauncher        # build/jar-launcher/mkvtool[.bat] — runs the fat jar
+./gradlew releaseArchive     # build/release/mkvtool-<version>-<os>-<arch>.{zip,tar.gz}
 ```
 
 Subcommands: `mux`, `inspect`, `fetch-episodes`, `rename`, `filename-to-title`, `propedit`, `to-utf8`,
@@ -66,6 +68,27 @@ and those two personalities used to share a script; separate entry points are th
   `const`, so `--version` needs no classpath resource — one less thing to tell native-image about.
 - The shadow plugin produces the fat jar; the application plugin names the `installDist` launcher
   `mkvtool`.
+
+### Release packaging
+
+Four tasks, all in the build rather than in workflow shell — one task writes the same archive on three
+hosts (the Windows runner's Git Bash has no `zip`), the tar entry's executable bit is *set* rather than
+inherited from the filesystem, and the whole thing runs on a developer machine before it is pushed.
+
+- `releaseArchive` — the flat per-platform archive: the bare binary renamed to `mkvtool`/`mkvtool.exe`
+  (that inner name is what a Scoop `bin` and a Homebrew `bin.install` point at), `LICENSE`, and the
+  `README.txt` that `releaseReadme` renders from one template with a per-OS paragraph. Two properties are
+  load-bearing. The **platform label is derived from the host**, never passed in: a passed label can lie,
+  so a toolchain mix-up would mislabel an architecture, while a derived one makes two CI legs collide on
+  one file name and fail the asset check instead. And it **does not depend on `nativeCompile`** — it
+  archives the binary as it stands, which in CI is the one that was just smoke-tested; a fresh compile
+  would be an untested one. `-PnativeBinary=<path>` points it at a binary from elsewhere, which is how an
+  archive is rebuilt around a signed exe.
+- `releaseJar` — the shadow jar under its release name. A copy, not a reclassified `shadowJar`, because
+  the thin `jar` task already owns `build/libs/mkvtool-<version>.jar`.
+- `printVersion` — how CI learns the version, so nothing parses `gradle.properties` as a second
+  implementation of the single source of truth.
+- `jarLauncher` — see Testing: the fat jar's only way into the acceptance harness.
 
 ### Native image
 
@@ -176,11 +199,30 @@ against a dead loopback port — comparing values *inside* the runtime, so CI on
 code. Each one covers something that fails silently in a misconfigured native image. It needs no network
 and no external tool.
 
-CI runs the unit tier and the acceptance tier against the JVM launcher on every push and PR; a 3-OS native
-leg (compile, the smoke probes, the acceptance suite in full on Linux and a representative case per
-command elsewhere, plus a `--version` startup measurement asserted under 200 ms) on merge, a weekly
-schedule and manual dispatch; and the live TheMovieDB contract case on the schedule only, so network
-flakiness cannot redden the badge.
+**The fat jar** gets a fourth, smaller pass, in the same CI job as the JVM launcher: `--version`,
+`native-smoke`, and three harness cases through the launcher `jarLauncher` generates. It is the published
+JVM fallback, and what only *it* can break is its own packaging — the `Main-Class` manifest and the
+resources merged from several dependencies — which is most of what `native-smoke` probes anyway. The full
+132 would add minutes to re-run bytecode that job has already run through `installDist`. The launcher is
+generated rather than committed because it has to name the versioned jar, and because the harness needs an
+executable to point `--app-bin` at: hence a shebang and the executable bit on POSIX, a `.bat` on Windows
+(the harness routes those through `cmd /c` and launches anything else directly), argv forwarded, the exit
+code passed through, nothing of its own printed, and the jar addressed relative to the script, since each
+case runs in a fresh working directory.
+
+CI runs the unit tier and both JVM acceptance tiers on every push and PR; a 4-OS native leg (compile, the
+smoke probes, the acceptance suite in full on Linux and a representative case per command elsewhere, a
+`--version` startup measurement asserted under 200 ms, and the release archive for that platform) on
+merge, a pushed `v*` tag, a weekly schedule and manual dispatch; and the live TheMovieDB contract case on
+the schedule only, so network flakiness cannot redden the badge.
+
+**Releases never publish from CI.** A pushed `v*` tag collects the four archives, the jar and a
+`sha256sum` checksums file, asserts the asset set and each archive's shape against the naming contract,
+and creates a **draft**; a dispatch does everything except that last call and leaves the assets as a
+workflow artifact, which is how the path is rehearsed without spending a tag. The Windows binary is signed
+by hand — the certificate cannot sign unattended — so the Windows leg also uploads the bare exe on its
+own, and a draft's assets need a token to download, which is what stops an unsigned binary reaching
+anyone.
 
 ## The output seam
 
@@ -694,8 +736,11 @@ Windows install location (`C:\Program Files\MKVToolNix\`). The project originate
 in a few places: the sample `mkvmergeExe` value in the example config uses a Windows path, episode names
 are stripped of the characters invalid in Windows file names, and `to-utf8` defaults its source encoding
 to windows-1251 (though `--encoding` accepts any charset). File lists in reports are ASCII because that
-output reaches Windows consoles on legacy codepages. Native binaries are built for Windows x64, Linux x64
-and macOS arm64 — one CI leg each; CI runs the test suites on Linux.
+output reaches Windows consoles on legacy codepages. Native binaries are built for Windows x64, Linux x64,
+macOS arm64 and macOS x64 — one CI leg each; CI runs the test suites on Linux. The x64 macOS binary needs
+an Intel runner, because GraalVM does not cross-compile, and both macOS legs assert their architecture
+twice: on the toolchain before compiling and on the binary afterwards, since an arm64 build published
+under an x64 name is worse than a missing asset.
 
 ## The Groovy scripts (v1, frozen)
 

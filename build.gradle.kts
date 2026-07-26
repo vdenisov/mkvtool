@@ -134,3 +134,225 @@ tasks.shadowJar {
         attributes("Main-Class" to application.mainClass.get())
     }
 }
+
+// Release packaging.
+//
+// All of it lives here rather than as shell in the release workflow, for three reasons: one
+// task writes the same archive on Windows, Linux and macOS, where shell would need a
+// different zipper per host (Git Bash on the Windows runner has no `zip`); the tar entry's
+// executable bit is set explicitly instead of inherited from whatever is on disk; and it can
+// be run on a developer machine before anything is pushed, which is where the last round of
+// CI plumbing bugs would have been caught.
+
+// CI reads the version from here rather than parsing gradle.properties, so there is exactly
+// one implementation of "what version is this" - the same project.version that names every
+// archive and is compiled into BuildInfo.
+tasks.register("printVersion") {
+    group = "help"
+    description = "Prints the project version, for scripts and CI."
+    val version = project.version.toString()
+    doLast { println(version) }
+}
+
+val hostIsWindows = System.getProperty("os.name").lowercase().startsWith("windows")
+
+// The archive's platform label is *derived* from the machine running the build rather than
+// passed in on the command line, so an archive cannot claim an architecture its binary does
+// not have: a toolchain that handed this host the wrong JDK produces the wrong label here,
+// two release legs then write the same file name, and the asset-set check downstream fails
+// instead of an arm64 build shipping as x64. The vocabulary is fixed - windows/linux/macos
+// crossed with x64/arm64 - because published archive URLs are what package manifests pin.
+//
+// Lazy, so an unmappable host fails when a release task actually runs rather than breaking
+// every ordinary build on it.
+val releasePlatform: String by lazy {
+    val os = System.getProperty("os.name").lowercase()
+    val osLabel = when {
+        os.startsWith("windows") -> "windows"
+        os.startsWith("mac") -> "macos"
+        os.startsWith("linux") -> "linux"
+        else -> error("no release platform label for os.name=$os")
+    }
+    val arch = System.getProperty("os.arch")
+    val archLabel = when (arch) {
+        "amd64", "x86_64" -> "x64"
+        "aarch64", "arm64" -> "arm64"
+        else -> error("no release platform label for os.arch=$arch")
+    }
+    "$osLabel-$archLabel"
+}
+
+// Overridable so an archive can be rebuilt around a binary that was signed after the fact,
+// which happens on another machine; the default is what nativeCompile writes.
+val nativeBinaryPath: String = providers.gradleProperty("nativeBinary").orNull
+    ?: if (hostIsWindows) "build/native/nativeCompile/mkvtool.exe" else "build/native/nativeCompile/mkvtool"
+
+// The archive's own readme: one template rendering all three platforms, rather than three
+// near-identical files in the repository drifting apart. Deliberately not a copy of
+// README.md - that file is a living front page, and a snapshot of it is stale the moment the
+// branch moves past the release - while this one is nearly static.
+val releaseReadme = tasks.register("releaseReadme") {
+    group = "distribution"
+    description = "Renders the README.txt that ships inside this platform's release archive."
+    val version = project.version.toString()
+    val platform = releasePlatform
+    val outputDir = layout.buildDirectory.dir("release-readme")
+    inputs.property("version", version)
+    inputs.property("platform", platform)
+    outputs.dir(outputDir)
+    doLast {
+        // One paragraph differs per platform: what the operating system is about to stop the
+        // reader with, and the answer to it.
+        val platformNote = when {
+            platform.startsWith("windows") -> listOf(
+                "Windows may show a \"Windows protected your PC\" prompt the first few times you",
+                "run it: choose More info, then Run anyway. A new signing certificate needs",
+                "downloads to accumulate before SmartScreen stops asking.",
+            )
+            platform.startsWith("macos") -> listOf(
+                "macOS quarantines anything downloaded by a browser, and reports it as damaged or",
+                "from an unidentified developer. Clear the attribute once, after extracting:",
+                "",
+                "    xattr -d com.apple.quarantine mkvtool",
+            )
+            // Linux gets the shared text alone.
+            else -> emptyList()
+        }
+        val binaryName = if (platform.startsWith("windows")) "mkvtool.exe" else "mkvtool"
+        val lines = listOf(
+            "mkvtool $version",
+            "",
+            "Automates MKV workflows: muxing a season from its parts, inspecting track layouts,",
+            "renaming episodes from their metadata, and the post-processing around both.",
+            "",
+            "Put $binaryName anywhere on your PATH and run `mkvtool --version` to check it.",
+            "There is no runtime to install alongside it.",
+            "",
+            "MKVToolNix is required: mkvmerge is looked up on PATH, and mkvpropedit as well for",
+            "the propedit and filename-to-title commands. https://mkvtoolnix.download/",
+            "",
+            "Commands, options and the config.yaml reference:",
+            "https://github.com/vdenisov/mkvtool",
+        ) + (if (platformNote.isEmpty()) emptyList() else listOf("") + platformNote) + listOf(
+            "",
+            "MIT licensed - the full text is in LICENSE, next to this file.",
+        )
+        // CRLF in the Windows archive: current Notepad reads LF, but every other Windows text
+        // tool is happier with CRLF, and the choice costs one line here.
+        val eol = if (platform.startsWith("windows")) "\r\n" else "\n"
+        val dir = outputDir.get().asFile
+        dir.mkdirs()
+        dir.resolve("README.txt").writeText(lines.joinToString(eol) + eol, Charsets.UTF_8)
+    }
+}
+
+// One flat archive per platform: the bare binary, LICENSE, and the generated README.txt.
+//
+// This deliberately does *not* depend on nativeCompile. What gets archived is the binary as
+// it stands in build/native/nativeCompile, which in CI is the file the smoke probes and the
+// acceptance cases just ran - a fresh compile of the same sources would be an untested one.
+fun AbstractArchiveTask.configureReleaseArchive(extension: String) {
+    val platform = releasePlatform
+    val binary = file(nativeBinaryPath)
+    group = "distribution"
+    description = "Flat release archive for this platform: the native binary, LICENSE and README.txt."
+    destinationDirectory.set(layout.buildDirectory.dir("release"))
+    archiveFileName.set("mkvtool-${project.version}-$platform.$extension")
+    from(binary) {
+        // tar carries this through, which is why no install path - a manual download,
+        // Homebrew, the AUR - ever needs a chmod step.
+        filePermissions { unix("0755") }
+        // The inner name is the one thing outside this repository depends on: it is what a
+        // Scoop `bin` and a Homebrew `bin.install` point at, and what a manual installer puts
+        // on PATH. Renaming rather than trusting the source name is what lets the binary be
+        // taken from anywhere - a signed copy sitting in some other directory included -
+        // without the archive's contract changing.
+        rename { if (hostIsWindows) "mkvtool.exe" else "mkvtool" }
+    }
+    from(layout.projectDirectory.file("LICENSE"))
+    from(releaseReadme)
+    // No top-level directory: nothing is gained by nesting a single binary, and the wrapper
+    // would become a strip-components line in every package manifest pointing here.
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+    // A CopySpec skips a missing source silently, so the binary's presence is asserted rather
+    // than assumed - an archive without the tool in it would otherwise upload perfectly well.
+    doFirst {
+        require(binary.isFile) {
+            "no native binary at $binary - run nativeCompile first, or pass -PnativeBinary=<path>"
+        }
+    }
+}
+
+// zip on Windows (the native format there, and what Scoop and winget consume directly),
+// tar.gz elsewhere, since it preserves the executable bit.
+if (hostIsWindows) {
+    tasks.register<Zip>("releaseArchive") { configureReleaseArchive("zip") }
+} else {
+    tasks.register<Tar>("releaseArchive") {
+        compression = Compression.GZIP
+        configureReleaseArchive("tar.gz")
+    }
+}
+
+// The published jar is the shadow jar under the name the release promises. A copy rather than
+// clearing shadowJar's classifier, because the thin jar the `jar` task writes already owns
+// build/libs/mkvtool-<version>.jar.
+tasks.register<Copy>("releaseJar") {
+    group = "distribution"
+    description = "The shadow jar under its release name, in build/release."
+    // Read here rather than inside rename: that lambda runs at execution time, where reaching
+    // for the project is deprecated and stops working in Gradle 10.
+    val releaseJarName = "mkvtool-${project.version}.jar"
+    from(tasks.shadowJar)
+    into(layout.buildDirectory.dir("release"))
+    rename { releaseJarName }
+}
+
+// The fat jar is a published artifact that no test tier runs: the acceptance harness drives
+// the installDist launcher, and the native legs drive the binary. The harness needs an
+// *executable* to point --app-bin at, so this generates the smallest one that satisfies it -
+// every argument forwarded, the child's exit code passed through, nothing of its own printed,
+// and the jar addressed relative to the script, because the harness gives each case a fresh
+// working directory. JAVA_HOME is preferred because the harness pins it in the child
+// environment to the JVM running the suite.
+tasks.register("jarLauncher") {
+    group = "verification"
+    description = "A launcher that runs the shadow jar, for --app-bin in the acceptance harness."
+    dependsOn(tasks.shadowJar)
+    val jarName = "mkvtool-${project.version}-all.jar"
+    val outputDir = layout.buildDirectory.dir("jar-launcher")
+    inputs.property("jarName", jarName)
+    outputs.dir(outputDir)
+    doLast {
+        val dir = outputDir.get().asFile
+        dir.mkdirs()
+        val posix = dir.resolve("mkvtool")
+        posix.writeText(
+            listOf(
+                "#!/bin/sh",
+                "# Generated by the jarLauncher Gradle task.",
+                "# exec, so the jar's exit code is this script's exit code with no process between.",
+                "dir=\$(dirname \"\$0\")",
+                "if [ -n \"\$JAVA_HOME\" ]; then java=\"\$JAVA_HOME/bin/java\"; else java=java; fi",
+                "exec \"\$java\" -jar \"\$dir/../libs/$jarName\" \"\$@\"",
+            ).joinToString("\n") + "\n",
+            Charsets.UTF_8,
+        )
+        posix.setExecutable(true)
+        // Named .bat rather than .cmd on purpose: the harness routes a .bat through `cmd /c`
+        // and launches anything else directly, so this is the Windows spelling of the same
+        // seam - and it is what makes the fat-jar tier reproducible on a Windows machine.
+        dir.resolve("mkvtool.bat").writeText(
+            listOf(
+                "@echo off",
+                "rem Generated by the jarLauncher Gradle task.",
+                "setlocal",
+                "if defined JAVA_HOME (set \"JAVA=%JAVA_HOME%\\bin\\java\") else (set \"JAVA=java\")",
+                "\"%JAVA%\" -jar \"%~dp0..\\libs\\$jarName\" %*",
+                "exit /b %ERRORLEVEL%",
+            ).joinToString("\r\n") + "\r\n",
+            Charsets.UTF_8,
+        )
+    }
+}

@@ -48,7 +48,7 @@ archive's own readme repeats whichever of these applies to it.
 
 The same release carries a fat jar, `mkvtool-<version>.jar`, for platforms without
 a native build. It needs Java 21 or newer and runs as
-`java -jar mkvtool.jar inspect --identify`; everything below applies to it
+`java -jar mkvtool-<version>.jar inspect --identify`; everything below applies to it
 unchanged, except that each invocation needs the JVM to startup, and makes the
 invocations slightly clunkier.
 
@@ -618,8 +618,13 @@ binary, and both must answer identically:
 groovy src/test/run_tests.groovy --target app     # the binary (installDist by default)
 groovy src/test/run_tests.groovy                  # the v1 scripts
 groovy src/test/run_tests.groovy --target app --app-bin build/native/nativeCompile/mkvtool
+groovy src/test/run_tests.groovy --target app --app-bin build/jar-launcher/mkvtool
 groovy src/test/run_tests.groovy --filter 01 --keep
 ```
+
+`--app-bin` takes any executable, which is how one suite covers three packagings:
+the `installDist` launcher, the native binary, and the fat jar through the small
+launcher `./gradlew jarLauncher` writes for it.
 
 It needs `mkvmerge` (auto-detected from PATH, or `--mkvmerge-exe`) and Groovy 3
 or newer. Cases that need `mkvpropedit`, or a bare `groovy` on `PATH` for the
