@@ -4,7 +4,7 @@ name: Native
 # untouched during the port. Three jobs with different cadences:
 #   build       - fast Linux JVM build + unit tests, on every push-to-main and PR.
 #   harness-app - the Groovy oracle against the JVM launcher, on every push-to-main and PR.
-#   native      - the slow 3-OS GraalVM native-image build, its smoke probes and the
+#   native      - the slow 4-OS GraalVM native-image build, its smoke probes and the
 #                 acceptance runs against the resulting binary, only on merge (push to
 #                 main), the weekly schedule, and manual dispatch. Native config rarely
 #                 changes and each compile is minutes per OS, so it does not run per PR
@@ -125,8 +125,21 @@ jobs:
             label: macos-arm64
             binary: build/native/nativeCompile/mkvtool
             acceptance: smoke
+          # GraalVM does not cross-compile, so an Intel binary needs an Intel host. The
+          # -intel labels are the standard runner tier, free for public repositories; the
+          # -large and -xlarge variants are the billed one. This image line is the last
+          # x86_64 one GitHub has announced, scheduled to end around August 2027 — after
+          # that this asset needs another host or gets dropped.
+          - os: macos-15-intel
+            label: macos-x64
+            binary: build/native/nativeCompile/mkvtool
+            acceptance: smoke
     runs-on: ${{ matrix.os }}
     name: Native ${{ matrix.label }}
+    # A leg finishes well inside this. The ceiling is here because native-image can *hang*
+    # rather than fail on macOS x64, and the six-hour default would sit on a runner for the
+    # rest of the day before saying so.
+    timeout-minutes: 45
     env:
       GROOVY_VERSION: "5.0.6"
     defaults:
@@ -146,8 +159,38 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # An Intel runner and an Intel toolchain are two separate claims: setup-graalvm picks
+      # its download from the host architecture, and an arm64 JDK on an Intel host would
+      # produce a binary that runs under Rosetta and reports the wrong architecture. Checked
+      # on both macOS legs, so the mirror mistake is caught too, and checked *before* the
+      # compile so a wrong JDK costs a minute instead of twenty.
+      - name: Check the toolchain architecture
+        if: runner.os == 'macOS'
+        run: |
+          case "${{ matrix.label }}" in
+            *-x64)   want_uname=x86_64 ; want_arch=x86_64  ;;
+            *-arm64) want_uname=arm64  ; want_arch=aarch64 ;;
+          esac
+          uname -m
+          java -XshowSettings:properties -version 2>&1 | grep -E 'os\.arch|java\.vendor'
+          test "$(uname -m)" = "$want_uname"
+          java -XshowSettings:properties -version 2>&1 | grep -qE "os\.arch = $want_arch\$"
+
       - name: Build native image
         run: ./gradlew nativeCompile
+
+      # The same question asked of the artifact rather than of the toolchain. An arm64 build
+      # published under an x64 name is the one outcome worse than not publishing the asset,
+      # and nothing downstream can tell the difference by looking at the file name.
+      - name: Check the binary architecture
+        if: runner.os == 'macOS'
+        run: |
+          case "${{ matrix.label }}" in
+            *-x64)   want=x86_64 ;;
+            *-arm64) want=arm64  ;;
+          esac
+          file -b "${{ matrix.binary }}"
+          file -b "${{ matrix.binary }}" | grep -q "$want"
 
       # The probe self-asserts and exits non-zero on any mismatch, so running it IS the
       # assertion: proves -H:+AddAllCharsets (windows-1251 decode) and -H:+IncludeAllLocales
@@ -190,7 +233,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/groovy
-          key: groovy-${{ env.GROOVY_VERSION }}-${{ runner.os }}
+          # Keyed on the leg's label, not on runner.os: the two macOS legs would otherwise
+          # share one key and race each other for it.
+          key: groovy-${{ env.GROOVY_VERSION }}-${{ matrix.label }}
 
       - name: Install Groovy
         run: |
@@ -213,9 +258,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.groovy/grapes
-          key: grapes-${{ env.GROOVY_VERSION }}-${{ runner.os }}-${{ hashFiles('src/**/*.groovy') }}
+          key: grapes-${{ env.GROOVY_VERSION }}-${{ matrix.label }}-${{ hashFiles('src/**/*.groovy') }}
           restore-keys: |
-            grapes-${{ env.GROOVY_VERSION }}-${{ runner.os }}-
+            grapes-${{ env.GROOVY_VERSION }}-${{ matrix.label }}-
 
       # The whole oracle against the native binary. `--app-bin` is the seam task 0.4 left for
       # exactly this: a binary whose name does not end in .bat is launched directly, so the
