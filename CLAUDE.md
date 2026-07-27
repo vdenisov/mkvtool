@@ -33,6 +33,7 @@ files. The dev loop:
 ./gradlew build              # compile + unit tests + the fat jar
 ./gradlew jarLauncher        # build/jar-launcher/mkvtool[.bat] — runs the fat jar
 ./gradlew releaseArchive     # build/release/mkvtool-<version>-<os>-<arch>.{zip,tar.gz}
+./gradlew nativeLoop         # compile the native binary, then verify it; see Verifying a native binary
 ```
 
 Subcommands: `mux`, `inspect`, `fetch-episodes`, `rename`, `filename-to-title`, `propedit`, `to-utf8`,
@@ -89,6 +90,26 @@ inherited from the filesystem, and the whole thing runs on a developer machine b
 - `printVersion` — how CI learns the version, so nothing parses `gradle.properties` as a second
   implementation of the single source of truth.
 - `jarLauncher` — see Testing: the fat jar's only way into the acceptance harness.
+
+### Verifying a native binary
+
+`nativeSmoke`, `unusedFontsCheck`, `acceptanceTest`, `acceptanceSmoke` and `startupCheck`, gathered by
+`nativeCheck` (`-Pacceptance=full|smoke|none`), with `nativeLoop` chaining `nativeCompile` in front of
+it. They exist as tasks rather than as workflow shell for the reason the release packaging does: a
+developer can run them before pushing, and CI calling the same task means local and CI verification
+cannot drift into two answers.
+
+The rule they share, extending `releaseArchive`'s: **a task that inspects a binary reads what is on
+disk, and only `nativeCompile` produces one.** Each takes `-PnativeBinary` and none depends on the
+compile, so the verified binary is provably the one that gets archived, and a binary from elsewhere — a
+downloaded asset, a copy signed after the fact — is verifiable too. `nativeLoop` is the one place the
+two are chained. None of it is wired into `check` or `build`, which must stay green on a machine with
+no GraalVM, no Groovy and no MKVToolNix.
+
+Two things they assert that the workflow shell they replaced did not: that a `--filter` actually
+matched something (a filter matching nothing runs no cases and exits 0, so a renamed case left a green
+run that tested nothing), and that `--version` exits 0 during the startup measurement (a binary that
+had started failing would exit fast and beat the ceiling).
 
 ### Native image
 
@@ -191,7 +212,9 @@ Harness conventions worth knowing before touching anything it covers:
   offline through its hidden `--base-url`.
 - **Never run two suites at once**, a `--filter` run alongside a full one included: work directories are
   keyed by case name and recreated at case start, so a second run wipes the first one's fixtures mid-test
-  and the failure surfaces somewhere unrelated to what is being worked on.
+  and the failure surfaces somewhere unrelated to what is being worked on. Through `acceptanceTest` and
+  `acceptanceSmoke` this is enforced rather than remembered — they hold a lock on the work directory and
+  the second run refuses to start. Invoking the harness by hand still relies on discipline.
 
 **Native smoke (`mkvtool native-smoke`, hidden).** Seven self-asserting probes — a windows-1251 decode, a
 CLDR native name, a real language guess, a JSON parse, a snakeyaml load and a dump, and an HTTPS request

@@ -1,5 +1,11 @@
 // mkvtool v2 build. Versions come from gradle.properties (single source of truth).
 
+// Imported rather than written out where used: inside a build script `java` names the Java plugin's
+// extension, so a fully qualified `java.io.…` does not resolve to the package at all.
+import java.io.IOException
+import java.io.RandomAccessFile
+import java.util.Locale
+
 plugins {
     // Versions supplied by pluginManagement in settings.gradle.kts.
     kotlin("jvm")
@@ -32,6 +38,12 @@ val kotlinxSerializationVersion = providers.gradleProperty("kotlinxSerialization
 
 // JDK 21 (LTS) toolchain via Gradle toolchains — compilation and test execution use
 // JDK 21 regardless of the JDK that launched Gradle.
+//
+// Deliberately no vendor constraint. Adding one — to make this agree with the GraalVM that
+// nativeCompile needs — would require every developer to install GraalVM before they could build
+// the *jar*, and would stop the build outright on a Windows machine, which cannot build a native
+// image at all (native-image wants MSVC). GraalVM is supplied by the environment instead; see
+// docs/building.md.
 kotlin {
     jvmToolchain(21)
 }
@@ -364,4 +376,413 @@ tasks.register("jarLauncher") {
             Charsets.UTF_8,
         )
     }
+}
+
+// Native binary verification.
+//
+// Everything done to a freshly compiled binary — the self-asserting probes, the acceptance suite,
+// the one command with no oracle case behind it, the startup measurement — as tasks rather than as
+// workflow shell. That knowledge used to exist only as YAML, which cannot be run on a developer
+// machine, so local verification and CI verification were two implementations of one idea, free to
+// disagree. `nativeLoop` is the whole loop in one command; docs/building.md is how to run it.
+//
+// One rule holds all of it together: **a task that inspects a binary reads what is on disk, and
+// only nativeCompile produces one.** So every task below takes -PnativeBinary and none of them
+// depends on nativeCompile. In CI the binary that gets verified has to be the same file
+// releaseArchive then packages — not a fresh, therefore untested, compile of the same sources — and
+// a binary from somewhere else (a downloaded asset, a copy signed after the fact) has to be
+// verifiable too. nativeLoop is the single place the compile and the checks are chained.
+//
+// Equally deliberate: none of this is wired into `check` or `build`. Those must stay green on a
+// machine with no GraalVM, no Groovy and no MKVToolNix, which is every machine that only wants the
+// jar.
+
+// Process plumbing, in an object so a task action that reaches for it captures no build-script
+// state, and the four tasks share one implementation of "run this and tell me what it said".
+object NativeVerify {
+    /**
+     * Runs a command, echoing its merged output line by line as it arrives, and returns the exit
+     * code alongside those lines.
+     *
+     * Streaming is not a nicety: the acceptance suite runs for minutes, and `inheritIO()` would
+     * hand the child the Gradle daemon's own stdout, where nothing ever displays it.
+     */
+    fun run(
+        command: List<String>,
+        workingDir: File,
+        env: Map<String, String>,
+        echo: (String) -> Unit,
+    ): Pair<Int, List<String>> {
+        val builder = ProcessBuilder(command)
+            .directory(workingDir)
+            // One stream, drained on this thread. Two undrained streams is how a chatty child fills
+            // a pipe buffer and blocks forever.
+            .redirectErrorStream(true)
+        builder.environment().putAll(env)
+        val process = try {
+            builder.start()
+        } catch (e: IOException) {
+            throw GradleException("could not run ${command.first()}: ${e.message}")
+        }
+        val lines = mutableListOf<String>()
+        process.inputStream.bufferedReader().forEachLine { line ->
+            lines += line
+            echo(line)
+        }
+        return process.waitFor() to lines
+    }
+
+    /** Whether a command starts and exits 0 — i.e. the tool is present and runnable. */
+    fun isRunnable(command: List<String>): Boolean = try {
+        ProcessBuilder(command)
+            .redirectErrorStream(true)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .start()
+            .waitFor() == 0
+    } catch (e: IOException) {
+        false
+    }
+
+    /**
+     * One timed `--version`, in nanoseconds.
+     *
+     * The exit code is checked, unlike the shell version this replaces: a `--version` that had
+     * started failing would exit almost instantly and sail under any ceiling, so the measurement
+     * would report an improvement.
+     */
+    fun timeVersion(binary: File): Long {
+        val started = System.nanoTime()
+        val code = ProcessBuilder(binary.absolutePath, "--version")
+            .redirectErrorStream(true)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .start()
+            .waitFor()
+        val elapsed = System.nanoTime() - started
+        require(code == 0) { "`mkvtool --version` exited $code during the startup measurement" }
+        return elapsed
+    }
+
+    /** Formatted to one decimal under a fixed locale, so a comma never arrives where a point is expected. */
+    fun millis(nanos: Long): String = String.format(Locale.ROOT, "%.1f", nanos / 1_000_000.0)
+
+    fun meanMillis(nanos: List<Long>): Double = nanos.sum() / 1_000_000.0 / nanos.size
+}
+
+// The frozen harness resolves its own paths from its script location, so it can be launched from
+// anywhere; the binary and mkvmerge overrides, however, are resolved against the working directory,
+// which is why every invocation below runs in the project directory and passes absolute paths.
+val harnessScript = "src/test/run_tests.groovy"
+
+/**
+ * Windows cannot start a script directly — `CreateProcess` runs executables, so a `.bat` or an
+ * extension-less shell script needs an interpreter in front of it. Groovy ships as `groovy.bat`
+ * there, and the CI legs name a `bin/groovy` shell script, so both forms turn up. The harness solves
+ * the same problem the same way for the binary it launches.
+ */
+fun launcherFor(command: String): List<String> =
+    if (hostIsWindows && !command.lowercase().endsWith(".exe")) listOf("cmd", "/c", command) else listOf(command)
+
+// The acceptance suite keys its scratch directories by case name and recreates them at case start,
+// so two concurrent runs delete each other's fixtures mid-test and the failure surfaces somewhere
+// unrelated. That used to be a rule people remembered; it is now a lock, because the container makes
+// it easy to start a second run without noticing (two `docker compose run` invocations share the
+// scratch volume). The lock file lives in the scratch directory on purpose: that is the shared
+// storage, and it is a real filesystem rather than a bind mount, where advisory locks are unreliable.
+//
+// No in-build guard beside it: this is a single-project build with no intra-project task
+// parallelism, so Gradle cannot run two of these at once by itself.
+val acceptanceWorkDir = layout.projectDirectory.dir("src/test/work").asFile
+
+val projectDirFile: File = layout.projectDirectory.asFile
+
+// -PnativeBinary may name a path anywhere; the default is relative to the project.
+val nativeBinaryFile: File = File(nativeBinaryPath).let {
+    if (it.isAbsolute) it else File(projectDirFile, nativeBinaryPath)
+}
+
+// First hit wins. $GROOVY is what the native workflow already exports for its harness steps, so
+// pointing those legs at these tasks needs no change there.
+val groovyBin: String = providers.gradleProperty("groovyBin")
+    .orElse(providers.environmentVariable("GROOVY"))
+    .getOrElse("groovy")
+
+// Passed straight through to the harness, which also writes it into every config.yaml it generates.
+val mkvmergeExeOverride: String? = providers.gradleProperty("mkvmergeExe").orNull
+
+val acceptanceFilter: String? = providers.gradleProperty("filter").orNull
+
+val startupRuns: Int = providers.gradleProperty("startupRuns").map(String::toInt).getOrElse(50)
+val startupCeilingMs: Int = providers.gradleProperty("startupCeilingMs").map(String::toInt).getOrElse(200)
+
+// Which acceptance pass nativeCheck includes. The native workflow's matrix already carries exactly
+// this distinction per leg, so it maps onto one property rather than onto separate task names.
+val acceptanceMode: String = providers.gradleProperty("acceptance").getOrElse("full")
+require(acceptanceMode in setOf("full", "smoke", "none")) {
+    "-Pacceptance must be full, smoke or none (got '$acceptanceMode')"
+}
+
+// One representative case per command, rather than the whole suite. This subset exists to catch what
+// differs *per platform* in a native image, which is a different question from whether the tool is
+// correct — and the full suite on every platform would triple the cost for coverage one platform
+// already provides. Each case earns its place:
+val smokeCases = listOf(
+    // to-utf8: a windows-1251 decode through the CLI, i.e. -H:+AddAllCharsets with teeth.
+    "50_to_utf8_converts_in_place",
+    // fix-srt: the reformat state machine over a charset-detected read.
+    "87_fix_srt_fixes_valid_file",
+    // propedit: real mkvpropedit argv passthrough (31 is a no-op, so it proves less).
+    "32_propedit_passthrough",
+    // filename-to-title: the second mkvpropedit command.
+    "85_filename_to_title_sets_title",
+    // fetch-episodes: loopback HTTP, both metadata files written.
+    "35_fetch_episodes_stub",
+    // rename: the episodes.yaml load, i.e. snakeyaml in the image.
+    "94_rename_prefers_yaml",
+    // inspect: both modes off one mkvmerge -J scan.
+    "74_check_and_identify_combined",
+    // mux: a real mkvmerge invocation end to end.
+    "01_one_audio_one_subtitle",
+    // Cyrillic through fetch, rename and file names — where a native image's stdout and filesystem
+    // encodings would differ from the JVM's if they differ anywhere.
+    "38_non_ascii_titles_round_trip",
+)
+
+// Refuse rather than skip, and name the fix. The project's skip discipline is about individual
+// cases whose prerequisites are missing (mkvpropedit, a TheMovieDB key); a whole tier that quietly
+// did not run is the one outcome worse than a red one.
+fun requireHarnessTools(groovy: String) {
+    require(NativeVerify.isRunnable(launcherFor(groovy) + "--version")) {
+        "groovy not found at '$groovy' - tried -PgroovyBin, then \$GROOVY, then PATH. " +
+            "The acceptance suite cannot run without it; see docs/building.md."
+    }
+    val mkvmerge = mkvmergeExeOverride ?: "mkvmerge"
+    require(NativeVerify.isRunnable(launcherFor(mkvmerge) + "--version")) {
+        "mkvmerge not found at '$mkvmerge' - put MKVToolNix on PATH or pass -PmkvmergeExe=<path>. " +
+            "The acceptance suite needs it at startup and asserts through it; see docs/building.md."
+    }
+}
+
+// The wording is releaseArchive's, deliberately: the same mistake produces the same sentence
+// wherever it is made.
+fun requireNativeBinary(binary: File) {
+    require(binary.isFile) {
+        "no native binary at $binary - run nativeCompile first, or pass -PnativeBinary=<path>"
+    }
+}
+
+/** Holds the acceptance scratch directory for the duration of a suite run, or refuses to start. */
+fun <T> withAcceptanceLock(workDir: File, body: () -> T): T {
+    workDir.mkdirs()
+    val lockFile = File(workDir, ".lock")
+    RandomAccessFile(lockFile, "rw").use { file ->
+        val lock = file.channel.tryLock()
+            ?: throw GradleException(
+                "another acceptance run holds $workDir - the suite keys its scratch directories by " +
+                    "case name, so two runs would delete each other's fixtures mid-test",
+            )
+        lock.use { return body() }
+    }
+}
+
+/** Runs the harness once and returns its output lines, failing on a non-zero exit. */
+fun runHarness(
+    binary: File,
+    groovy: String,
+    filter: String?,
+    echo: (String) -> Unit,
+): Pair<Int, List<String>> {
+    val command = buildList {
+        addAll(launcherFor(groovy))
+        add(harnessScript)
+        add("--target")
+        add("app")
+        add("--app-bin")
+        add(binary.absolutePath)
+        mkvmergeExeOverride?.let { add("--mkvmerge-exe"); add(it) }
+        filter?.let { add("--filter"); add(it) }
+    }
+    // NO_COLOR so the assertions below read plain text whether or not a terminal is attached.
+    return NativeVerify.run(command, projectDirFile, mapOf("NO_COLOR" to "1"), echo)
+}
+
+/**
+ * The suite's own verdict, plus the one it cannot give: a filter matching no case runs nothing,
+ * prints `0 passed, 0 failed` and exits 0, so a renamed case would leave a green run that tested
+ * nothing at all.
+ */
+fun requireCasesRan(exitCode: Int, lines: List<String>) {
+    val summary = lines.lastOrNull { it.matches(Regex("""\d+ passed, \d+ failed""")) }
+        ?: throw GradleException("the acceptance suite printed no summary line - it did not finish")
+    require(exitCode == 0) { "the acceptance suite reported $summary" }
+    val passed = summary.substringBefore(" passed").toInt()
+    require(passed > 0) {
+        "the acceptance suite ran no cases at all ($summary) - check the -Pfilter value"
+    }
+}
+
+val nativeCompileTask = tasks.named("nativeCompile")
+
+// dependsOn declares no ordering, so nativeLoop needs this said explicitly; on any invocation
+// without nativeCompile in the graph it is simply inert.
+fun Task.afterNativeCompile() {
+    mustRunAfter(nativeCompileTask)
+    // Nothing here produces a file, and every run has to actually run.
+    outputs.upToDateWhen { false }
+    group = "verification"
+}
+
+val nativeSmoke = tasks.register("nativeSmoke") {
+    description = "Runs the native binary's built-in probes: charsets, locales, JSON, YAML, HTTPS."
+    afterNativeCompile()
+    val binary = nativeBinaryFile
+    val dir = projectDirFile
+    doLast {
+        requireNativeBinary(binary)
+        // The probes self-assert and exit non-zero on any mismatch, so running them is the assertion.
+        val (code, _) = NativeVerify.run(
+            listOf(binary.absolutePath, "native-smoke"),
+            dir,
+            emptyMap(),
+        ) { logger.lifecycle(it) }
+        require(code == 0) { "native-smoke exited $code" }
+    }
+}
+
+val unusedFontsCheck = tasks.register("unusedFontsCheck") {
+    description = "End-to-end check of find-unused-fonts, the one command no acceptance case covers."
+    afterNativeCompile()
+    val binary = nativeBinaryFile
+    val stagingDir = layout.buildDirectory.dir("font-check")
+    doLast {
+        requireNativeBinary(binary)
+        val staging = stagingDir.get().asFile
+        staging.deleteRecursively()
+        staging.resolve("fonts").mkdirs()
+        staging.resolve("subs.ass").writeText("Style: Default,Cuprum,20\n", Charsets.UTF_8)
+        staging.resolve("fonts/Cuprum.ttf").writeText("", Charsets.UTF_8)
+        staging.resolve("fonts/Unused Font.otf").writeText("", Charsets.UTF_8)
+        val (code, lines) = NativeVerify.run(
+            listOf(binary.absolutePath, "find-unused-fonts"),
+            staging,
+            emptyMap(),
+        ) { logger.lifecycle(it) }
+        require(code == 0) { "find-unused-fonts exited $code" }
+        // One font the subtitle references, one it does not, and the unreferenced base name - no
+        // extension, no prefix, no summary - is the whole of the output.
+        require(lines == listOf("Unused Font")) {
+            "find-unused-fonts reported $lines, expected exactly [Unused Font]"
+        }
+    }
+}
+
+val acceptanceTest = tasks.register("acceptanceTest") {
+    description = "Runs the acceptance suite against the native binary. -Pfilter=<substring> narrows it."
+    afterNativeCompile()
+    val binary = nativeBinaryFile
+    val groovy = groovyBin
+    val filter = acceptanceFilter
+    val workDir = acceptanceWorkDir
+    doLast {
+        requireNativeBinary(binary)
+        requireHarnessTools(groovy)
+        val started = System.nanoTime()
+        withAcceptanceLock(workDir) {
+            val (code, lines) = runHarness(binary, groovy, filter) { logger.lifecycle(it) }
+            requireCasesRan(code, lines)
+        }
+        logger.lifecycle("acceptance suite: ${NativeVerify.millis(System.nanoTime() - started)} ms")
+    }
+}
+
+val acceptanceSmoke = tasks.register("acceptanceSmoke") {
+    description = "Runs one representative acceptance case per command against the native binary."
+    afterNativeCompile()
+    val binary = nativeBinaryFile
+    val groovy = groovyBin
+    val cases = smokeCases
+    val workDir = acceptanceWorkDir
+    doLast {
+        requireNativeBinary(binary)
+        requireHarnessTools(groovy)
+        // --filter takes a single substring, so each case is its own harness run. All of them run
+        // before the task fails, because which command broke is the whole answer.
+        val onCi = System.getenv("GITHUB_ACTIONS") != null
+        val failed = mutableListOf<String>()
+        withAcceptanceLock(workDir) {
+            cases.forEach { case ->
+                logger.lifecycle(if (onCi) "::group::$case" else "--- $case")
+                val (code, lines) = runHarness(binary, groovy, case) { logger.lifecycle(it) }
+                if (onCi) logger.lifecycle("::endgroup::")
+                // A case that self-skips still prints [PASS], so this asserts the case exists and
+                // was reached - not merely that the run was green.
+                if (code != 0 || lines.none { it == "[PASS] $case" }) failed += case
+            }
+        }
+        require(failed.isEmpty()) { "acceptance cases failed or did not run: ${failed.joinToString(" ")}" }
+    }
+}
+
+val startupCheck = tasks.register("startupCheck") {
+    description = "Measures `mkvtool --version` startup and asserts it against a ceiling."
+    afterNativeCompile()
+    val binary = nativeBinaryFile
+    val runs = startupRuns
+    val ceiling = startupCeilingMs
+    // Lazy by design, so a host with no release label still runs ordinary builds; reading it inside
+    // this block keeps that.
+    val label = { releasePlatform }
+    doLast {
+        requireNativeBinary(binary)
+        // Why the tool is compiled at all: the scripts it replaces took about four seconds to print
+        // a help screen. Not a cold start in the strict sense - by the time this runs the binary has
+        // been executed already, so it is page-cached; what is measured is the first run and the
+        // steady state over many.
+        val first = NativeVerify.timeVersion(binary)
+        val mean = NativeVerify.meanMillis(List(runs) { NativeVerify.timeVersion(binary) })
+        val meanText = String.format(Locale.ROOT, "%.1f", mean)
+        val firstText = NativeVerify.millis(first)
+        logger.lifecycle("startup ${label()}: first --version $firstText ms, mean of $runs $meanText ms")
+        // Read at execution time, so nothing about the task's configuration depends on where it runs.
+        System.getenv("GITHUB_STEP_SUMMARY")?.let { path ->
+            File(path).appendText(
+                listOf(
+                    "### Startup: ${label()}",
+                    "",
+                    "- first `--version`: $firstText ms",
+                    "- mean of $runs runs: $meanText ms",
+                    "",
+                ).joinToString("\n"),
+                Charsets.UTF_8,
+            )
+        }
+        // Asserted rather than merely recorded, so a regression cannot pass silently.
+        require(mean <= ceiling) {
+            "startup ceiling exceeded: $meanText ms mean against a $ceiling ms ceiling"
+        }
+    }
+}
+
+// Cheapest and highest-signal first: the probes catch a dropped native-image flag in milliseconds
+// rather than eight minutes into a suite. Startup runs last, when the binary is warm on disk, which
+// is what the number is meant to describe. mustRunAfter only orders tasks that are both in the
+// graph, so naming both acceptance passes here costs nothing when only one of them runs.
+unusedFontsCheck { mustRunAfter(nativeSmoke) }
+acceptanceTest { mustRunAfter(unusedFontsCheck) }
+acceptanceSmoke { mustRunAfter(unusedFontsCheck) }
+startupCheck { mustRunAfter(unusedFontsCheck, acceptanceTest, acceptanceSmoke) }
+
+val nativeCheck = tasks.register("nativeCheck") {
+    group = "verification"
+    description = "Verifies an existing native binary: probes, fonts, acceptance (-Pacceptance=full|smoke|none), startup."
+    dependsOn(nativeSmoke, unusedFontsCheck, startupCheck)
+    when (acceptanceMode) {
+        "full" -> dependsOn(acceptanceTest)
+        "smoke" -> dependsOn(acceptanceSmoke)
+    }
+}
+
+tasks.register("nativeLoop") {
+    group = "verification"
+    description = "The whole loop: compile the native binary, then verify it."
+    dependsOn(nativeCompileTask, nativeCheck)
 }
