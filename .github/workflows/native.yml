@@ -204,8 +204,12 @@ jobs:
       # developer machine. -PnativeBinary names whatever is being verified - here a JVM launcher -
       # and the task adds two things a bare harness invocation lacks: the work-directory lock,
       # and a check that any cases ran at all.
+      #
+      # Groovy travels as the -PgroovyBin property, never via PATH: the Gradle daemon keeps the
+      # environment it started with, so a tool installed after any earlier ./gradlew step is
+      # invisible to everything the daemon spawns, while a property arrives with each invocation.
       - name: Run acceptance harness against the app
-        run: ./gradlew acceptanceTest -PnativeBinary=build/install/mkvtool/bin/mkvtool
+        run: ./gradlew acceptanceTest -PnativeBinary=build/install/mkvtool/bin/mkvtool "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"
 
       # The fat jar is published as the JVM fallback and no tier ran it: the step above covers
       # the same bytecode through the installDist launcher, and the native legs cover it
@@ -235,7 +239,7 @@ jobs:
             echo "::group::$case_name"
             # -Pfilter through the task, so a case renamed out from under this list fails here
             # instead of running nothing and exiting 0.
-            if ! ./gradlew acceptanceTest -PnativeBinary="$launcher" -Pfilter="$case_name"; then
+            if ! ./gradlew acceptanceTest -PnativeBinary="$launcher" -Pfilter="$case_name" "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"; then
               failed="$failed $case_name"
             fi
             echo "::endgroup::"
@@ -333,8 +337,12 @@ jobs:
           restore-keys: |
             grapes-${{ env.GROOVY_VERSION }}-
 
+      # Groovy travels as the -PgroovyBin property, never via PATH: the Gradle daemon keeps the
+      # native environment it started with - here the launcher-build step, before Groovy was
+      # installed - so a PATH entry added afterwards is invisible to everything the daemon
+      # spawns, while a property arrives with each invocation.
       - name: Run the acceptance harness against the app
-        run: ./gradlew acceptanceTest -PnativeBinary=build/install/mkvtool/bin/mkvtool
+        run: ./gradlew acceptanceTest -PnativeBinary=build/install/mkvtool/bin/mkvtool "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"
 
   native:
     # Merge (push is main-only via the branch filter) + weekly schedule + manual. These legs and
