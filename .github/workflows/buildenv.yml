@@ -1,0 +1,116 @@
+# Publishes the Linux build-and-test environment image to GHCR.
+#
+# The image is what `compose.yaml` runs and what docs/building.md tells a developer to pull. It is
+# consumed **by digest**: a tag can be moved, and a rebuild of an unchanged Dockerfile produces
+# different bytes anyway, because apt hands out whatever patches have landed since. So the tags
+# below are labels for humans and only `@sha256:` is a pin - moving that pin is a commit somebody
+# reviews, which is the whole point.
+#
+# Nothing here verifies the image separately. The Dockerfile asserts every pinned version as part of
+# building, so a build that succeeds has already checked itself - on pull requests too, where this
+# builds without pushing.
+
+name: Build environment image
+
+# The path list is spelled twice because GitHub does not support YAML anchors in workflow files.
+# It is everything the image is built from: the recipe, and the files the recipe copies in.
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - src/test/run_tests.groovy
+      - gradlew
+      - gradle/wrapper/**
+      - .github/workflows/buildenv.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - src/test/run_tests.groovy
+      - gradlew
+      - gradle/wrapper/**
+      - .github/workflows/buildenv.yml
+  workflow_dispatch:
+
+# No schedule, deliberately. A weekly rebuild would move the image without a commit behind it, which
+# is exactly what pinning by digest exists to prevent.
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish build environment image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # GHCR rejects an upper-case path, and the owner name is not guaranteed to be lower case.
+      - name: Derive the image name
+        id: image
+        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')-buildenv" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Skipped on pull requests: a fork's token cannot write packages, and a PR must not publish
+      # anything anyway. The build itself still runs, which is what validates a Dockerfile change.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # linux/amd64 only: it is what the CI runners and the release binary need. The Dockerfile
+          # is arm64-aware so an Apple Silicon developer can build one locally, but publishing that
+          # would need emulation for a platform no leg uses.
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          # A content tag, so a human can see at a glance which inputs an image came from, and a
+          # commit tag for traceability. Never `latest` - see the header.
+          tags: |
+            ${{ steps.image.outputs.name }}:env-${{ hashFiles('Dockerfile', 'src/test/run_tests.groovy', 'gradlew', 'gradle/wrapper/gradle-wrapper.properties') }}
+            ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+          # One platform and no attestations, so the digest below names the image itself rather than
+          # an index pointing at it - which is what makes the compose pin unambiguous.
+          provenance: false
+          sbom: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The pin has to be applied by a person: a commit pushed with GITHUB_TOKEN does not trigger CI,
+      # so an automated pin bump would land untested. Printing the exact line to paste is the next
+      # best thing.
+      - name: Report the digest and the pin
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### Build environment image"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| digest | \`${IMAGE}@${DIGEST}\` |"
+            echo "| content tag | \`env-${{ hashFiles('Dockerfile', 'src/test/run_tests.groovy', 'gradlew', 'gradle/wrapper/gradle-wrapper.properties') }}\` |"
+            echo "| commit tag | \`sha-${{ github.sha }}\` |"
+            echo
+            echo "To adopt it, set this in \`compose.yaml\`:"
+            echo
+            echo '```yaml'
+            echo "    image: \${MKVTOOL_IMAGE:-${IMAGE}@${DIGEST}}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
