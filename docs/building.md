@@ -57,6 +57,11 @@ The image is always referred to **by digest**, never by tag. A tag can be moved,
 unchanged `Dockerfile` produces different bytes regardless, because the distribution hands out
 whatever security patches have landed since. Moving the pin is meant to be a commit somebody reviews.
 
+CI runs its Linux native leg in the same image (the pin is spelled a second time in
+`.github/workflows/native.yml`, kept in step with `compose.yaml`), so a green run here and a green
+Linux native leg there mean the same thing — and the released Linux binary is compiled against the
+glibc this image fixes rather than whatever `ubuntu-latest` happens to be.
+
 ### What is in the image, and what is not
 
 The image holds the *environment*: the C toolchain, GraalVM, Groovy, a pinned MKVToolNix, the Gradle

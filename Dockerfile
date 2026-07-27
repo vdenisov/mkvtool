@@ -23,8 +23,10 @@ ARG GRAALVM_VERSION=21.0.2
 ARG GRAALVM_SHA256_AMD64=b048069aaa3a99b84f5b957b162cc181a32a4330cbc35402766363c5be76ae48
 ARG GRAALVM_SHA256_ARM64=a34be691ce68f0acf4655c7c6c63a9a49ed276a11859d7224fd94fc2f657cd7a
 
-# Runs the acceptance suite. Kept in step with the Groovy the CI legs install until they adopt this
-# image, at which point this becomes the only place it is written down.
+# Runs the acceptance suite. This is where the local loop and the containerized CI leg get their
+# Groovy. It is not the only place the version is written down and cannot become one: every CI job
+# on a plain runner installs its own, and that copy lives in native.yml. The two are kept in step
+# by hand; they run the same frozen harness, so they should not diverge.
 ARG GROOVY_VERSION=5.0.6
 ARG GROOVY_SHA256=14300bca33dc6a911ed5e2c6bc5b83b63fa8a5278e791820ff7e70fc76d06e1d
 
@@ -49,6 +51,10 @@ ENV LANG=C.UTF-8
 # --no-install-recommends everywhere, and the mkvtoolnix pin is asserted afterwards rather than
 # trusted: a dropped '=', an epoch appearing, or someone relaxing the pin to fix a build would
 # otherwise install a different version silently.
+#
+# git is the one package nothing in the build itself uses: it is there for CI, where actions/checkout
+# runs *inside* this image and falls back to a REST-API tarball when git is missing - which leaves no
+# .git behind and says so only in a log line nobody reads.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -56,11 +62,13 @@ RUN set -eux; \
         zlib1g-dev \
         ca-certificates \
         curl \
+        git \
         unzip \
         "mkvtoolnix=${MKVTOOLNIX_VERSION}"; \
     rm -rf /var/lib/apt/lists/*; \
     gcc --version; \
     test -f /usr/include/zlib.h; \
+    git --version; \
     mkvmerge --version; \
     mkvpropedit --version; \
     mkvmerge --version | grep -qF "mkvmerge v${MKVTOOLNIX_VERSION%%-*} "

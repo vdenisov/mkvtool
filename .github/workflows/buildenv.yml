@@ -1,6 +1,7 @@
 # Publishes the Linux build-and-test environment image to GHCR.
 #
-# The image is what `compose.yaml` runs and what docs/building.md tells a developer to pull. It is
+# The image is what `compose.yaml` runs locally, what native.yml's `native-linux` job builds the
+# release binary in, and what docs/building.md tells a developer to pull. It is
 # consumed **by digest**: a tag can be moved, and a rebuild of an unchanged Dockerfile produces
 # different bytes anyway, because apt hands out whatever patches have landed since. So the tags
 # below are labels for humans and only `@sha256:` is a pin - moving that pin is a commit somebody
@@ -123,9 +124,15 @@ jobs:
             echo "| content tag | \`${{ steps.meta.outputs.tag }}\` |"
             echo "| commit tag | \`sha-${{ github.sha }}\` |"
             echo
-            echo "To adopt it, set this in \`compose.yaml\`:"
+            echo "To adopt it, update both pins in one commit. In \`compose.yaml\`:"
             echo
             echo '```yaml'
             echo "    image: \${MKVTOOL_IMAGE:-${IMAGE}@${DIGEST}}"
+            echo '```'
+            echo
+            echo "and in \`.github/workflows/native.yml\` (the \`native-linux\` job's container):"
+            echo
+            echo '```yaml'
+            echo "      image: ${IMAGE}@${DIGEST}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

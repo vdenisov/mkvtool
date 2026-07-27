@@ -6,8 +6,9 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Weekly, so the 'upstream' leg picks up new MKVToolNix releases and
-    # catches regressions without any commits to this repo
+    # Weekly, for the live TheMovieDB contract job below — the only thing here that answers a
+    # question no commit asks. The MKVToolNix canary that used to justify this schedule now tests
+    # the binary instead, in native.yml, which is where it survives these scripts being deleted.
     - cron: "0 6 * * 1"
   workflow_dispatch:
 
@@ -22,18 +23,13 @@ jobs:
           - label: min
             groovy: "3.0.25"
             java: "11"
-            mkvtoolnix: distro
           # current — what development actually runs on
           - label: current
             groovy: "5.0.6"
             java: "21"
-            mkvtoolnix: distro
-          # upstream — current Groovy/JDK against the newest MKVToolNix from the
-          # upstream apt repo; a regression canary for mkvmerge's own output
-          - label: upstream
-            groovy: "5.0.6"
-            java: "21"
-            mkvtoolnix: upstream
+          # There was a third leg here, pointing current Groovy/JDK at the newest MKVToolNix: the
+          # canary for mkvmerge's own output. It now runs against the *binary*, in native.yml,
+          # because these scripts are being deleted and that question has to outlive them.
     # Named for the label rather than the versions, because a required status check is
     # matched by its name: spelling the versions here means bumping Groovy renames the
     # check and it silently drops out of branch protection, leaving the PR green with
@@ -47,13 +43,8 @@ jobs:
           distribution: temurin
           java-version: ${{ matrix.java }}
 
-      - name: Install MKVToolNix (${{ matrix.mkvtoolnix }})
+      - name: Install MKVToolNix
         run: |
-          if [ "${{ matrix.mkvtoolnix }}" = "upstream" ]; then
-            sudo mkdir -p /etc/apt/keyrings
-            sudo wget -q -O /etc/apt/keyrings/gpg-pub-moritzbunkus.gpg https://mkvtoolnix.download/gpg-pub-moritzbunkus.gpg
-            echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/gpg-pub-moritzbunkus.gpg] https://mkvtoolnix.download/ubuntu/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/mkvtoolnix.download.list
-          fi
           sudo apt-get update
           sudo apt-get install -y mkvtoolnix
           mkvmerge --version
