@@ -51,10 +51,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # GHCR rejects an upper-case path, and the owner name is not guaranteed to be lower case.
-      - name: Derive the image name
-        id: image
-        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')-buildenv" >> "$GITHUB_OUTPUT"
+      # Both values are computed once here and read back below, so the tag cannot come to disagree
+      # with the tag the summary reports.
+      #
+      # The name is lower-cased because GHCR rejects an upper-case path and the owner name is not
+      # guaranteed to be one. The content tag is `hashFiles` over everything the image is built from,
+      # truncated: the full value is a 64-character digest, which is unreadable as the at-a-glance
+      # label this is for, and it is not doing the work of identifying an image anyway - only the
+      # digest does that. Twelve characters is plenty to tell two recipes apart by eye.
+      # Both expressions arrive through the environment rather than being interpolated into the
+      # script: a value spliced into shell source is a quoting hazard, and hashFiles' argument list
+      # is itself full of quotes.
+      - name: Derive the image name and content tag
+        id: meta
+        env:
+          REPOSITORY: ${{ github.repository }}
+          INPUTS_HASH: ${{ hashFiles('Dockerfile', 'src/test/run_tests.groovy', 'gradlew', 'gradle/wrapper/gradle-wrapper.properties') }}
+        run: |
+          echo "name=ghcr.io/$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')-buildenv" >> "$GITHUB_OUTPUT"
+          echo "tag=env-${INPUTS_HASH:0:12}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -81,8 +96,8 @@ jobs:
           # A content tag, so a human can see at a glance which inputs an image came from, and a
           # commit tag for traceability. Never `latest` - see the header.
           tags: |
-            ${{ steps.image.outputs.name }}:env-${{ hashFiles('Dockerfile', 'src/test/run_tests.groovy', 'gradlew', 'gradle/wrapper/gradle-wrapper.properties') }}
-            ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+            ${{ steps.meta.outputs.name }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.name }}:sha-${{ github.sha }}
           # One platform and no attestations, so the digest below names the image itself rather than
           # an index pointing at it - which is what makes the compose pin unambiguous.
           provenance: false
@@ -96,7 +111,7 @@ jobs:
       - name: Report the digest and the pin
         if: github.event_name != 'pull_request'
         env:
-          IMAGE: ${{ steps.image.outputs.name }}
+          IMAGE: ${{ steps.meta.outputs.name }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           {
@@ -105,7 +120,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| digest | \`${IMAGE}@${DIGEST}\` |"
-            echo "| content tag | \`env-${{ hashFiles('Dockerfile', 'src/test/run_tests.groovy', 'gradlew', 'gradle/wrapper/gradle-wrapper.properties') }}\` |"
+            echo "| content tag | \`${{ steps.meta.outputs.tag }}\` |"
             echo "| commit tag | \`sha-${{ github.sha }}\` |"
             echo
             echo "To adopt it, set this in \`compose.yaml\`:"
