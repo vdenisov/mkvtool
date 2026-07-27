@@ -33,7 +33,18 @@ files. The dev loop:
 ./gradlew build              # compile + unit tests + the fat jar
 ./gradlew jarLauncher        # build/jar-launcher/mkvtool[.bat] — runs the fat jar
 ./gradlew releaseArchive     # build/release/mkvtool-<version>-<os>-<arch>.{zip,tar.gz}
+./gradlew nativeLoop         # compile the native binary, then verify it; see Native image
 ```
+
+The native half of that list needs a C toolchain, which the Windows development machine does not have,
+so it runs in the container `Dockerfile`/`compose.yaml` describe:
+
+```bash
+docker build -t mkvtool-buildenv:local .
+docker compose run --rm build ./gradlew nativeLoop
+```
+
+`docs/building.md` is the whole story, including the route without Docker.
 
 Subcommands: `mux`, `inspect`, `fetch-episodes`, `rename`, `filename-to-title`, `propedit`, `to-utf8`,
 `fix-srt`, `find-unused-fonts`, plus the hidden `native-smoke` build probe. The user-facing tour is in
@@ -90,6 +101,26 @@ inherited from the filesystem, and the whole thing runs on a developer machine b
   implementation of the single source of truth.
 - `jarLauncher` — see Testing: the fat jar's only way into the acceptance harness.
 
+### Verifying a native binary
+
+`nativeSmoke`, `unusedFontsCheck`, `acceptanceTest`, `acceptanceSmoke` and `startupCheck`, gathered by
+`nativeCheck` (`-Pacceptance=full|smoke|none`), with `nativeLoop` chaining `nativeCompile` in front of
+it. They exist as tasks rather than as workflow shell for the reason the release packaging does: a
+developer can run them before pushing, and CI calling the same task means local and CI verification
+cannot drift into two answers.
+
+The rule they share, extending `releaseArchive`'s: **a task that inspects a binary reads what is on
+disk, and only `nativeCompile` produces one.** Each takes `-PnativeBinary` and none depends on the
+compile, so the verified binary is provably the one that gets archived, and a binary from elsewhere — a
+downloaded asset, a copy signed after the fact — is verifiable too. `nativeLoop` is the one place the
+two are chained. None of it is wired into `check` or `build`, which must stay green on a machine with
+no GraalVM, no Groovy and no MKVToolNix.
+
+Two things they assert that the workflow shell they replaced did not: that a `--filter` actually
+matched something (a filter matching nothing runs no cases and exits 0, so a renamed case left a green
+run that tested nothing), and that `--version` exits 0 during the startup measurement (a binary that
+had started failing would exit fast and beat the ceiling).
+
 ### Native image
 
 Three build args, each guarding a failure mode that is **silent** on an ordinary JVM:
@@ -110,6 +141,36 @@ its own. Re-enabling it would mean moving off community-21 — a distribution de
 **No `\u` sequence in any comment.** kapt generates Java stubs and javac decodes unicode escapes *before*
 stripping comments, so a comment mentioning a numeric escape fails the build in a generated file nobody
 wrote. Say "a numeric escape" in words.
+
+#### The build environment
+
+`Dockerfile` and `compose.yaml` define the Linux toolchain — GraalVM CE 21.0.2, Groovy, a pinned
+MKVToolNix, `build-essential` and `zlib1g-dev` — and `docs/building.md` is the user-facing page for
+both it and the no-Docker route. Two rules keep it from drifting.
+
+**`gradle.properties` owns what the build resolves; the Dockerfile owns what the environment installs.**
+Nothing appears in both. They are different kinds of fact on different cadences: a base-image digest
+means nothing to Gradle, and an environment version moves by rebuild → new digest → a pin commit
+someone reviews. The image is referred to **by digest, never by tag** — a rebuild of an unchanged
+Dockerfile produces different bytes, because apt hands out whatever patches have landed.
+
+**The image holds the environment; named volumes hold the project's caches** — `build/`, `.gradle/`,
+`.kotlin/`, the Gradle dependency cache and the acceptance suite's scratch directory. That is what
+lets a Linux build coexist with the host's own `build/`, and what keeps the image stable across
+dependency bumps. Only `JAVA_HOME` is load-bearing for `nativeCompile`; `GRAALVM_HOME` is set as well
+because it is what the plugin names first, but setting either to an *empty* value is worse than
+leaving it unset — the plugin prefers `GRAALVM_HOME` whenever present and then hunts for a relative
+`bin/native-image`.
+
+**`toolchainDetection` was evaluated and rejected** (measured, not assumed — so it does not get
+re-attempted). With it enabled plus the Foojay resolver, an ordinary `./gradlew build` was unaffected,
+but on a machine carrying several JDK 21s and no GraalVM the plugin selected Amazon Corretto and failed
+with "isn't a GraalVM distribution", recommending the very `GRAALVM_HOME`/`JAVA_HOME` variables it was
+supposed to make unnecessary; Foojay provisioned nothing. That matches native-build-tools' own caveat
+that detection cannot tell a GraalVM JDK from a plain one. The value proposition inverts: it is safe
+only where GraalVM is the sole JDK, which is the container — and there a single JDK already makes the
+variables unnecessary, so it buys nothing. Note also that Foojay could serve *Oracle* GraalVM, which is
+neither 21.0.2 nor license-clean here, and the wrong pick would be silent.
 
 ## Layout and layering
 
@@ -191,7 +252,12 @@ Harness conventions worth knowing before touching anything it covers:
   offline through its hidden `--base-url`.
 - **Never run two suites at once**, a `--filter` run alongside a full one included: work directories are
   keyed by case name and recreated at case start, so a second run wipes the first one's fixtures mid-test
-  and the failure surfaces somewhere unrelated to what is being worked on.
+  and the failure surfaces somewhere unrelated to what is being worked on. Through `acceptanceTest` and
+  `acceptanceSmoke` this is enforced rather than remembered — they hold a lock on the work directory and
+  the second run refuses to start. Invoking the harness by hand still relies on discipline.
+- Under the container the work directory is a named volume, so it is shared between containers (hence
+  the lock) and `--keep` leaves nothing visible on the host — inspecting a failed case means a shell in
+  the container. Against the native binary the whole suite takes about half a minute.
 
 **Native smoke (`mkvtool native-smoke`, hidden).** Seven self-asserting probes — a windows-1251 decode, a
 CLDR native name, a real language guess, a JSON parse, a snakeyaml load and a dump, and an HTTPS request

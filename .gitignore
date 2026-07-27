@@ -17,11 +17,13 @@ episodes.txt.bak
 episodes.yaml
 http-client.private.env.json
 
-# Local docs are working notes — keep only CLAUDE.md and README.md tracked.
-# (docs/reference.md is already tracked, so this does not untrack it.)
+# Markdown at the root is working notes; docs/ is tracked documentation. The negation is needed
+# because the pattern above is unanchored and would otherwise swallow a new page in docs/ silently —
+# git add says nothing about a file it is ignoring.
 *.md
 !CLAUDE.md
 !README.md
+!docs/*.md
 
 # Test artifacts
 work/

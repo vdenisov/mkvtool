@@ -1,0 +1,51 @@
+# The one place the Linux build-and-test container is described. See docs/building.md.
+#
+#   docker compose run --rm build ./gradlew nativeLoop
+#
+# There is deliberately no `build:` key: with both `build:` and a digest-pinned `image:`, a
+# `docker compose build` would try to tag the result as a digest reference, which is not a thing.
+# The image is built with `docker build -t mkvtool-buildenv:local .` and MKVTOOL_IMAGE points this
+# service at it - or at any other image - without editing the file.
+
+services:
+  build:
+    image: ${MKVTOOL_IMAGE:-mkvtool-buildenv:local}
+    working_dir: /work
+    volumes:
+      # The source tree. Read-write, because a tool that wants to write into the project directory
+      # should not fail confusingly; nothing does today, and `git status` after a full run is what
+      # proves it.
+      - .:/work
+      # Everything below is a named volume shadowing a path inside that bind mount. Two reasons:
+      # a Linux build's output must never land in the host's build/ - the two toolchains produce
+      # different artifacts under the same names - and these are the paths with the heaviest I/O,
+      # where a bind mount on a Windows host is slowest.
+      - project-build:/work/build
+      - project-gradle:/work/.gradle
+      - project-kotlin:/work/.kotlin
+      # The acceptance suite's scratch directory: 132 cases, each recreating a directory and muxing
+      # real MKVs. The harness derives this path from its own script's location rather than from the
+      # working directory, so moving the storage underneath it changes nothing it can observe.
+      - acceptance-work:/work/src/test/work
+      # Gradle's dependency and build caches, shared across containers so a --rm run is still fast.
+      - gradle-home:/gradle
+    environment:
+      # Both settings are container-specific and therefore live here rather than in
+      # gradle.properties, which is shared with the host's own build loop.
+      #
+      # No daemon: a daemon started in a --rm container dies with it and leaves a stale entry in the
+      # registry on the shared volume, which the next container then tries to reach across a
+      # namespace it cannot see. The caches above keep most of the incremental win; what is lost is
+      # JIT warmup, which is noise next to a native-image compile.
+      #
+      # No file-system watching: Gradle watches by default on Linux, and inotify does not see edits
+      # made on the host through the bind mount - the symptom is a stale incremental build rather
+      # than an error, which is the worst kind.
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.vfs.watch=false"
+
+volumes:
+  project-build:
+  project-gradle:
+  project-kotlin:
+  acceptance-work:
+  gradle-home:

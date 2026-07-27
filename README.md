@@ -61,6 +61,10 @@ From a checkout:
 ./gradlew nativeCompile   # the native binary in build/native/nativeCompile/ (needs a GraalVM JDK 21)
 ```
 
+The native build also needs a C toolchain, and the project ships a container that has one along with
+everything else it takes to build and test a binary — see
+[docs/building.md](docs/building.md).
+
 ## Prerequisites
 
 - **MKVToolNix** — `mkvmerge` is auto-detected from `PATH` (with a fallback to the
