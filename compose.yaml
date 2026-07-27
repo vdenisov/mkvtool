@@ -9,7 +9,7 @@
 
 services:
   build:
-    image: ${MKVTOOL_IMAGE:-mkvtool-buildenv:local}
+    image: ${MKVTOOL_IMAGE:-ghcr.io/vdenisov/mkvtool-buildenv@sha256:4d952a4fc39da4e5982522723e0fee073356300a968ecf95ae59b89173ab4e65}
     working_dir: /work
     volumes:
       # The source tree. Read-write, because a tool that wants to write into the project directory
