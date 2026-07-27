@@ -1,26 +1,47 @@
 name: Native and release
 
 # The v2 Kotlin app (mkvtool). Kept separate from ci.yml, which stays Groovy-only and
-# untouched during the port. Four jobs with different cadences:
-#   build       - fast Linux JVM build + unit tests, on every push-to-main and PR. Also
-#                 reads the project version, which the release job consumes.
-#   harness-app - the Groovy oracle against the JVM launcher, plus a smaller pass over the
-#                 fat jar, on every push-to-main and PR.
-#   native      - the slow 4-OS GraalVM native-image build, its smoke probes, the acceptance
-#                 runs against the resulting binary, and the packaging of that binary into
-#                 its release archive; only on merge (push to main), a pushed v* tag, the
-#                 weekly schedule, and manual dispatch. Native config rarely changes and
-#                 each compile is minutes per OS, so it does not run per PR commit. Runner
-#                 minutes are free (public repo), so this is about CI noise, not cost.
-#                 Verify a branch by dispatching this workflow against it.
-#   release     - collects those archives, the jar and a checksums file. On a pushed v* tag
-#                 it creates a DRAFT release from them; on a dispatch it leaves them as a
-#                 workflow artifact and touches no release at all, which is how the whole
-#                 path is rehearsed without spending a tag.
+# untouched during the port. Six jobs with different cadences:
+#   build            - fast Linux JVM build + unit tests, on every push-to-main and PR. Also
+#                      reads the project version, which the release job consumes.
+#   harness-app      - the Groovy oracle against the JVM launcher, plus a smaller pass over
+#                      the fat jar, on every push-to-main and PR.
+#   harness-upstream - the same oracle against the newest MKVToolNix instead of the distro
+#                      package: the canary for mkvmerge's own output. Merge, weekly schedule
+#                      and dispatch, never a PR - a new mkvmerge release is not something a
+#                      pull request caused, and a check that reddens for reasons the author
+#                      cannot act on is a check people learn to ignore.
+#   native           - the slow GraalVM native-image build for Windows x64 and both macOS
+#                      architectures, its smoke probes, the acceptance runs against the
+#                      resulting binary and the packaging of that binary into its release
+#                      archive; only on merge (push to main), a pushed v* tag, the weekly
+#                      schedule and manual dispatch. Native config rarely changes and each
+#                      compile is minutes per OS, so it does not run per PR commit. Runner
+#                      minutes are free (public repo), so this is about CI noise, not cost.
+#                      Verify a branch by dispatching this workflow against it.
+#   native-linux     - the same, for Linux, on the same cadence. A leg of `native` in
+#                      everything but YAML: it is a job of its own only because it runs inside
+#                      the build-environment image, and a container cannot be turned off for
+#                      one entry of a matrix.
+#   release          - collects those archives, the jar and a checksums file. On a pushed v*
+#                      tag it creates a DRAFT release from them; on a dispatch it leaves them
+#                      as a workflow artifact and touches no release at all, which is how the
+#                      whole path is rehearsed without spending a tag.
 #
-# Nothing here ever publishes. A draft's assets need a token to download, so the Windows
-# binary is signed and re-uploaded by a human before anyone can reach it - which is also
-# why the Windows leg uploads the bare exe on its own.
+# `native-linux` is the one job that runs inside the pinned build-environment image, because it
+# is the one job whose environment reaches users: native-image links against the glibc of
+# whatever compiles it, so pinning that host is what stops `ubuntu-latest` moving the released
+# Linux binary's minimum supported glibc without a commit behind it. The pin also makes that leg
+# and a developer's `docker compose run --rm build ./gradlew nativeLoop` the same run. Every
+# other job stays on a plain runner deliberately: `build` on a stock Temurin is the one leg
+# proving the published fat jar builds without GraalVM, `harness-upstream` exists to be
+# unpinned, and `harness-app` is a JVM tier whose environment is not part of what it tests -
+# any JDK 21, mkvmerge and Groovy will do, and nothing a user receives is built there.
+#
+# Nothing here ever publishes: a tag creates a draft, and a draft's assets need a token to
+# download, so a human sees every asset first. The Windows leg uploads the bare exe on its own
+# so a signature can later be appended to the binary that was actually tested; today it ships
+# unsigned, and the install instructions say so.
 on:
   push:
     branches: [main]
@@ -41,8 +62,12 @@ permissions:
 
 jobs:
   build:
-    # Everything except the weekly canary, which only needs the native leg.
+    # Everything except the weekly schedule, which runs the native legs and the upstream
+    # canary - neither needs this job.
     if: github.event_name != 'schedule'
+    # On a stock Temurin, deliberately: this is the one leg that proves the published fat jar
+    # builds on a plain JDK 21 - the JDK every user of that jar actually has - rather than on
+    # the build-environment image's GraalVM.
     runs-on: ubuntu-latest
     name: Build + unit tests (JDK 21)
     outputs:
@@ -109,6 +134,13 @@ jobs:
     # It carries the fat jar's only coverage too, at the end: MKVToolNix, Groovy and the
     # Grapes cache are already paid for here, and a job of its own would spend three minutes
     # of setup to run bytecode this one already ran.
+    #
+    # Plain host installs, not the build-environment image. This is a JVM tier: what it tests
+    # is bytecode, any JDK 21 with any mkvmerge and Groovy will do, and nothing a user
+    # receives is built here - so the image would buy this leg a container pull on every PR
+    # and nothing else. The distro mkvtoolnix installed below is the same version the image
+    # pins anyway (both resolve from the same Ubuntu release); the deliberately unpinned end
+    # of that axis is harness-upstream.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     name: Acceptance harness (JVM launcher and fat jar)
@@ -124,17 +156,20 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # The launcher the harness invokes (build/install/mkvtool/bin/mkvtool), and the one
-      # that runs the fat jar (build/jar-launcher/mkvtool), which also builds the jar.
-      - name: Build the JVM launcher and the fat-jar launcher
-        run: ./gradlew installDist jarLauncher
-
-      # The harness needs mkvmerge at startup and asserts output via mkvmerge -J.
+      # The harness needs mkvmerge at startup and asserts output via mkvmerge -J; mkvpropedit
+      # keeps the propedit and filename-to-title cases from self-skipping. Which version ran is
+      # part of what the run proves, so it goes into the summary rather than only the log.
       - name: Install MKVToolNix
         run: |
           sudo apt-get update
           sudo apt-get install -y mkvtoolnix
           mkvmerge --version
+          mkvpropedit --version
+          {
+            echo "### mkvmerge"
+            echo
+            echo "\`$(mkvmerge --version | head -n1)\` — the distro package"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cache Groovy distribution
         uses: actions/cache@v6
@@ -159,8 +194,22 @@ jobs:
           restore-keys: |
             grapes-${{ env.GROOVY_VERSION }}-
 
+      # The launcher the harness invokes (build/install/mkvtool/bin/mkvtool), and the one
+      # that runs the fat jar (build/jar-launcher/mkvtool), which also builds the jar.
+      - name: Build the JVM launcher and the fat-jar launcher
+        run: ./gradlew installDist jarLauncher
+
+      # Through the Gradle task rather than by invoking the harness directly, for the reason the
+      # native legs do: one implementation of "run the suite against this binary", callable on a
+      # developer machine. -PnativeBinary names whatever is being verified - here a JVM launcher -
+      # and the task adds two things a bare harness invocation lacks: the work-directory lock,
+      # and a check that any cases ran at all.
+      #
+      # Groovy travels as the -PgroovyBin property, never via PATH: the Gradle daemon keeps the
+      # environment it started with, so a tool installed after any earlier ./gradlew step is
+      # invisible to everything the daemon spawns, while a property arrives with each invocation.
       - name: Run acceptance harness against the app
-        run: groovy src/test/run_tests.groovy --target app
+        run: ./gradlew acceptanceTest -PnativeBinary=build/install/mkvtool/bin/mkvtool "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"
 
       # The fat jar is published as the JVM fallback and no tier ran it: the step above covers
       # the same bytecode through the installDist launcher, and the native legs cover it
@@ -170,7 +219,8 @@ jobs:
       # inside the process), and three cases put real files, a real mkvmerge call and
       # non-ASCII names through the CLI. Run after the full suite, never beside it: the
       # harness keys its work directories by case name and recreates them at case start, so
-      # two concurrent suites wipe each other's fixtures.
+      # two concurrent suites wipe each other's fixtures — which the task's lock enforces
+      # rather than leaving to the order of these steps.
       - name: Smoke-test the fat jar
         run: |
           launcher=build/jar-launcher/mkvtool
@@ -187,7 +237,9 @@ jobs:
           failed=""
           for case_name in "${cases[@]}"; do
             echo "::group::$case_name"
-            if ! groovy src/test/run_tests.groovy --target app --app-bin "$launcher" --filter "$case_name"; then
+            # -Pfilter through the task, so a case renamed out from under this list fails here
+            # instead of running nothing and exiting 0.
+            if ! ./gradlew acceptanceTest -PnativeBinary="$launcher" -Pfilter="$case_name" "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"; then
               failed="$failed $case_name"
             fi
             echo "::endgroup::"
@@ -212,30 +264,109 @@ jobs:
           path: build/release/
           if-no-files-found: error
 
+  harness-upstream:
+    # The moving end of the mkvmerge version axis: the same oracle, the same launcher, the newest
+    # MKVToolNix instead of the distro package harness-app runs. It answers "did a new mkvmerge
+    # change its output under us", which has already paid for itself once - ${codec} keys on
+    # codec_id rather than on mkvmerge's display string *because* the display string changed
+    # between versions, and a two-version axis is what surfaced it.
+    #
+    # It lived in ci.yml as `Scripts (upstream)` and tested the scripts, which are being deleted. It
+    # is re-homed onto the binary here rather than at that deletion, so that while both still exist
+    # a red run can be arbitrated: run the suite twice against one mkvmerge, once per target, and
+    # the disagreement says whether it is a port bug or a genuine mkvmerge change.
+    #
+    # A job of its own rather than a matrix dimension on harness-app, because the two ends of the
+    # axis run on different cadences: merge, schedule and dispatch only here. A new MKVToolNix
+    # release is not something a pull request caused, and a red check its author cannot act on is
+    # one they learn to scroll past.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    name: Acceptance harness (upstream mkvmerge)
+    env:
+      GROOVY_VERSION: "5.0.6"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the JVM launcher
+        run: ./gradlew installDist
+
+      - name: Install MKVToolNix (upstream)
+        run: |
+          sudo mkdir -p /etc/apt/keyrings
+          sudo wget -q -O /etc/apt/keyrings/gpg-pub-moritzbunkus.gpg https://mkvtoolnix.download/gpg-pub-moritzbunkus.gpg
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/gpg-pub-moritzbunkus.gpg] https://mkvtoolnix.download/ubuntu/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/mkvtoolnix.download.list
+          sudo apt-get update
+          sudo apt-get install -y mkvtoolnix
+          mkvmerge --version
+          mkvpropedit --version
+          # The point of this leg is which version it ran, so it is evidence rather than a log line.
+          {
+            echo "### mkvmerge"
+            echo
+            echo "\`$(mkvmerge --version | head -n1)\` — newest upstream, deliberately unpinned"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cache Groovy distribution
+        uses: actions/cache@v6
+        with:
+          path: ~/groovy
+          key: groovy-${{ env.GROOVY_VERSION }}
+
+      - name: Install Groovy
+        run: |
+          if [ ! -d "$HOME/groovy/groovy-${{ env.GROOVY_VERSION }}" ]; then
+            curl -fsSL -o /tmp/groovy.zip "https://archive.apache.org/dist/groovy/${{ env.GROOVY_VERSION }}/distribution/apache-groovy-binary-${{ env.GROOVY_VERSION }}.zip"
+            mkdir -p "$HOME/groovy"
+            unzip -q /tmp/groovy.zip -d "$HOME/groovy"
+          fi
+          echo "$HOME/groovy/groovy-${{ env.GROOVY_VERSION }}/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Grapes
+        uses: actions/cache@v6
+        with:
+          path: ~/.groovy/grapes
+          key: grapes-${{ env.GROOVY_VERSION }}-${{ hashFiles('src/**/*.groovy') }}
+          restore-keys: |
+            grapes-${{ env.GROOVY_VERSION }}-
+
+      # Groovy travels as the -PgroovyBin property, never via PATH: the Gradle daemon keeps the
+      # native environment it started with - here the launcher-build step, before Groovy was
+      # installed - so a PATH entry added afterwards is invisible to everything the daemon
+      # spawns, while a property arrives with each invocation.
+      - name: Run the acceptance harness against the app
+        run: ./gradlew acceptanceTest -PnativeBinary=build/install/mkvtool/bin/mkvtool "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"
+
   native:
-    # Merge (push is main-only via the branch filter) + weekly schedule + manual. This is
-    # the only leg that exercises the *native* binary — harness-app above covers the JVM
-    # launcher — so the acceptance runs live here rather than in a job of their own, next to
-    # the binary they need. The weekly canary therefore also re-checks acceptance, which is
+    # Merge (push is main-only via the branch filter) + weekly schedule + manual. These legs and
+    # native-linux below are the only ones that exercise the *native* binary — harness-app covers
+    # the JVM launcher — so the acceptance runs live here rather than in a job of their own, next
+    # to the binary they need. The weekly canary therefore also re-checks acceptance, which is
     # what would catch a GraalVM update changing behavior rather than just breaking the build.
+    #
+    # Windows and macOS keep their choco and brew installs permanently: a Linux image cannot serve
+    # them, so what these legs contribute is OS spread at one mkvmerge version, while the version
+    # spread lives on Linux (harness-app and harness-upstream). Since choco and brew both track
+    # releases closely, they land in the same version class as the upstream leg — which is what
+    # makes a Windows-only failure attributable, once each leg records the version it ran.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            label: linux-x64
-            binary: build/native/nativeCompile/mkvtool
-            # mkvtoolnix is one apt package here, so this leg runs the whole oracle.
-            acceptance: full
           - os: windows-latest
             label: windows-x64
             binary: build/native/nativeCompile/mkvtool.exe
-            acceptance: smoke
           - os: macos-latest
             label: macos-arm64
             binary: build/native/nativeCompile/mkvtool
-            acceptance: smoke
           # GraalVM does not cross-compile, so an Intel binary needs an Intel host. The
           # -intel labels are the standard runner tier, free for public repositories; the
           # -large and -xlarge variants are the billed one. This image line is the last
@@ -244,7 +375,6 @@ jobs:
           - os: macos-15-intel
             label: macos-x64
             binary: build/native/nativeCompile/mkvtool
-            acceptance: smoke
     runs-on: ${{ matrix.os }}
     name: Native ${{ matrix.label }}
     # A leg finishes well inside this. The ceiling is here because native-image can *hang*
@@ -303,26 +433,11 @@ jobs:
           file -b "${{ matrix.binary }}"
           file -b "${{ matrix.binary }}" | grep -q "$want"
 
-      # The probe self-asserts and exits non-zero on any mismatch, so running it IS the
-      # assertion: proves -H:+AddAllCharsets (windows-1251 decode) and -H:+IncludeAllLocales
-      # (CLDR native name) survived into this OS's native binary.
-      - name: Smoke-test native binary
-        run: |
-          "${{ matrix.binary }}" native-smoke
-
-      # The acceptance tier below runs the Groovy oracle against the binary just built. The
-      # probes above cover what fails silently *inside* the image; these cover what the image
-      # does to real files, real mkvmerge invocations and real console output.
-
       # The harness needs mkvmerge at startup and asserts output via mkvmerge -J; mkvpropedit
       # is what keeps the propedit and filename-to-title cases from self-skipping.
       - name: Install MKVToolNix
         run: |
           case "$RUNNER_OS" in
-            Linux)
-              sudo apt-get update
-              sudo apt-get install -y mkvtoolnix
-              ;;
             macOS)
               HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install mkvtoolnix
               ;;
@@ -339,6 +454,15 @@ jobs:
           esac
           mkvmerge --version
           mkvpropedit --version
+          # Recorded, not merely printed. Which version a leg ran is part of what the run proves:
+          # choco and brew track releases closely, so these land in the same version class as the
+          # upstream leg, and that is what leaves the OS as the only explanation for an OS-only
+          # failure.
+          {
+            echo "### mkvmerge"
+            echo
+            echo "\`$(mkvmerge --version | head -n1)\` — whatever this platform's package manager ships"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cache Groovy distribution
         uses: actions/cache@v6
@@ -373,109 +497,25 @@ jobs:
           restore-keys: |
             grapes-${{ env.GROOVY_VERSION }}-${{ matrix.label }}-
 
-      # The whole oracle against the native binary. `--app-bin` is the seam task 0.4 left for
-      # exactly this: a binary whose name does not end in .bat is launched directly, so the
-      # (frozen) harness needs no change to test a native build.
-      - name: Run the full acceptance harness against the native binary
-        if: matrix.acceptance == 'full'
-        run: |
-          "$GROOVY" src/test/run_tests.groovy --target app --app-bin "${{ matrix.binary }}"
-
-      # One representative case per command instead of the full suite: this leg exists to catch
-      # what differs *per OS* in the native image, and 132 cases here would triple the leg for
-      # coverage the Linux leg already has. `--filter` takes a single substring, so each case is
-      # its own harness run; all of them run before the step fails, because which command broke
-      # on which OS is the whole answer.
-      - name: Run the acceptance smoke subset against the native binary
-        if: matrix.acceptance == 'smoke'
-        run: |
-          cases=(
-            # to-utf8: a windows-1251 decode through the CLI, i.e. -H:+AddAllCharsets with teeth
-            50_to_utf8_converts_in_place
-            # fix-srt: the reformat state machine over a charset-detected read
-            87_fix_srt_fixes_valid_file
-            # propedit: real mkvpropedit argv passthrough (31 is a no-op, so it proves less)
-            32_propedit_passthrough
-            # filename-to-title: the second mkvpropedit command
-            85_filename_to_title_sets_title
-            # fetch-episodes: loopback HTTP, both metadata files written
-            35_fetch_episodes_stub
-            # rename: the episodes.yaml load, i.e. snakeyaml in the image
-            94_rename_prefers_yaml
-            # inspect: both modes off one mkvmerge -J scan
-            74_check_and_identify_combined
-            # mux: a real mkvmerge invocation end to end
-            01_one_audio_one_subtitle
-            # Cyrillic through fetch, rename and file names — where a native image's stdout and
-            # filesystem encodings would differ from the JVM's if they differ anywhere.
-            38_non_ascii_titles_round_trip
-          )
-          failed=""
-          for case_name in "${cases[@]}"; do
-            echo "::group::$case_name"
-            if ! "$GROOVY" src/test/run_tests.groovy --target app --app-bin "${{ matrix.binary }}" --filter "$case_name"; then
-              failed="$failed $case_name"
-            fi
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "*** Smoke cases failed:$failed"
-            exit 1
-          fi
-
-      # find-unused-fonts is the one command the Groovy oracle has no case for, on any tier, so
-      # the subset above cannot supply a representative for it. Asserted here instead: one font
-      # the subtitle references, one it does not, and the unreferenced base name — no extension,
-      # no prefix, no summary — is the whole of the output.
-      - name: Check find-unused-fonts against the native binary
-        run: |
-          bin="$PWD/${{ matrix.binary }}"
-          work="$(mktemp -d)"
-          mkdir -p "$work/fonts"
-          printf 'Style: Default,Cuprum,20\n' > "$work/subs.ass"
-          : > "$work/fonts/Cuprum.ttf"
-          : > "$work/fonts/Unused Font.otf"
-          # `tr -d` because the tool ends its lines with the platform separator: on Windows the
-          # captured value would otherwise carry a trailing CR and never equal the expected name.
-          out="$(cd "$work" && "$bin" find-unused-fonts | tr -d '\r')"
-          echo "$out"
-          test "$out" = "Unused Font"
-
-      # Why the tool is compiled at all: the Groovy scripts it replaces took about four seconds
-      # to print a help screen. Not a cold start in the strict sense — native-smoke ran this
-      # binary a few steps ago, so it is page-cached; what is measured is the first --version run
-      # and the steady state over 50 of them. The 200 ms ceiling is asserted rather than just
-      # recorded, so a regression cannot pass silently.
-      - name: Measure startup
-        run: |
-          # bash's `time` and awk both take the decimal separator from the locale. Scoped to this
-          # step: a job-wide LC_ALL=C would give the JVM an ASCII sun.jnu.encoding and break the
-          # non-ASCII file names the acceptance runs above depend on.
-          export LC_ALL=C
-          bin="$PWD/${{ matrix.binary }}"
-          TIMEFORMAT='%3R'
-          first="$( { time "$bin" --version > /dev/null ; } 2>&1 )"
-          loop="$( { time ( i=0; while [ "$i" -lt 50 ]; do "$bin" --version > /dev/null; i=$((i + 1)); done ) ; } 2>&1 )"
-          read -r first_ms mean_ms <<< "$(awk -v f="$first" -v l="$loop" 'BEGIN { printf "%.1f %.1f", f * 1000, l * 1000 / 50 }')"
-          echo "startup ${{ matrix.label }}: first --version ${first_ms} ms, mean of 50 ${mean_ms} ms"
-          # A `time` line this could not parse leaves the numbers empty, and an empty value
-          # compares as a string against the ceiling below and passes. Refuse instead.
-          case "$first_ms$mean_ms" in
-            "" | *[!0-9.]*)
-              echo "*** could not measure startup: time reported first=[$first] loop=[$loop]"
-              exit 1
-              ;;
-          esac
-          {
-            echo "### Startup: ${{ matrix.label }}"
-            echo
-            echo "- first \`--version\`: ${first_ms} ms"
-            echo "- mean of 50 runs: ${mean_ms} ms"
-          } >> "$GITHUB_STEP_SUMMARY"
-          if ! awk -v m="$mean_ms" 'BEGIN { exit (m > 200) ? 1 : 0 }'; then
-            echo "*** startup ceiling exceeded: ${mean_ms} ms mean against a 200 ms ceiling"
-            exit 1
-          fi
+      # Everything done to the binary just built, as one Gradle task rather than four steps of
+      # workflow shell: the built-in probes (which prove -H:+AddAllCharsets and
+      # -H:+IncludeAllLocales survived into this OS's image), the find-unused-fonts check that no
+      # oracle case covers, the acceptance suite against the binary, and the `--version` startup
+      # measurement against its ceiling. The point of it being a task is that the same
+      # verification runs on a developer machine, so local and CI cannot drift into two answers.
+      # The task also guards two failures that fail *open* in hand-rolled shell: a `--filter`
+      # matching nothing runs no cases and exits 0, and a startup measurement that does not check
+      # `--version`'s exit code lets a binary that fails fast beat the ceiling.
+      #
+      # -Pacceptance=smoke on all three: one representative case per command rather than the whole
+      # oracle, because these legs exist to catch what differs *per OS* in a native image, and 132
+      # cases apiece would triple them for coverage native-linux already provides in full.
+      #
+      # $GROOVY is read by the task, exported by the Install Groovy step above. No -PnativeBinary:
+      # the default is host-aware (mkvtool.exe on Windows), which keeps this the same command a
+      # developer types.
+      - name: Verify the native binary
+        run: ./gradlew nativeCheck -Pacceptance=smoke
 
       # Releases ship an unsigned Windows binary for now, and the install instructions say so.
       # When that changes, signing belongs here - before archiving, since the signature rides
@@ -527,6 +567,85 @@ jobs:
           archive: false
           if-no-files-found: error
 
+  native-linux:
+    # The Linux leg of `native`, on the same cadence and doing the same things in the same order.
+    # It is a job of its own for one mechanical reason: it runs inside the build-environment image,
+    # a job's container cannot be turned off for a single matrix entry, and Windows and macOS
+    # runners cannot start a Linux image.
+    #
+    # Two things follow from the pin that the matrix legs do not get. native-image links against
+    # the glibc of whatever compiles it, so pinning this host is what fixes the released Linux
+    # binary's minimum supported glibc - `ubuntu-latest` moving to the next LTS would otherwise
+    # raise it for every user with nothing here going red. And GraalVM, mkvmerge, Groovy and the
+    # harness's Grape cache all come from the image, so this leg runs the same suite against the
+    # same versions a developer's `docker compose run --rm build ./gradlew nativeLoop` does.
+    #
+    # It runs the *whole* oracle where the other three run one case per command: mkvtoolnix is
+    # already in the image and the binary starts in about 13 ms, so 132 cases cost half a minute.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    container:
+      # The same digest compose.yaml pins, spelled as a literal because `container:` is resolved
+      # before any step runs and cannot read a value out of a file. The two homes are kept in step
+      # by hand - the buildenv workflow's job summary prints both lines to paste, and moving the
+      # pin is meant to be one reviewed commit touching both files.
+      image: ghcr.io/vdenisov/mkvtool-buildenv@sha256:4d952a4fc39da4e5982522723e0fee073356300a968ecf95ae59b89173ab4e65
+      # The image sets `USER builder` so that files written through a local bind mount belong to
+      # the developer. A job container is the other way round: the runner owns the workspace and
+      # documents a non-root container user as unsupported, so CI - and only CI - enters the
+      # environment as root.
+      options: --user root
+      # Harmless while the package is public, and the difference between working and an auth error
+      # if it ever is not. GITHUB_TOKEN can read this repository's own packages.
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: read
+    name: Native linux-x64
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Record the mkvmerge version
+        run: |
+          mkvmerge --version
+          mkvpropedit --version
+          {
+            echo "### mkvmerge"
+            echo
+            echo "\`$(mkvmerge --version | head -n1)\` — pinned by the build-environment image"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Two steps rather than the single `nativeLoop` a developer runs, only so that a compile
+      # failure and a verification failure are told apart at a glance. nativeCompile then
+      # nativeCheck is exactly what that task chains.
+      - name: Build native image
+        run: ./gradlew nativeCompile
+
+      - name: Verify the native binary
+        run: ./gradlew nativeCheck -Pacceptance=full
+
+      # Same rules as the matrix legs above, for the same reasons: packaged where it was tested,
+      # from what is on disk, with the derived platform label checked against what this leg claims
+      # to be building.
+      - name: Package the release archive
+        run: |
+          ./gradlew releaseArchive
+          ls -l build/release
+          ls build/release | grep -q -- '-linux-x64\.'
+
+      - name: Upload the release archive
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-linux-x64
+          path: build/release/
+          if-no-files-found: error
+
   release:
     # Collects the six release assets from the artifacts the jobs above uploaded, and on a
     # pushed v* tag creates a DRAFT release from them. Nothing here publishes: --draft is
@@ -534,7 +653,7 @@ jobs:
     # everything except that one call and leaves the assets as a workflow artifact, which is how
     # the whole path gets rehearsed without spending a tag. It needs no JDK: the version arrives
     # as a job output and the archives arrive built.
-    needs: [build, harness-app, native]
+    needs: [build, harness-app, native, native-linux]
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       github.event_name == 'workflow_dispatch'

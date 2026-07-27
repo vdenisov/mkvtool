@@ -148,6 +148,16 @@ wrote. Say "a numeric escape" in words.
 MKVToolNix, `build-essential` and `zlib1g-dev` — and `docs/building.md` is the user-facing page for
 both it and the no-Docker route. Two rules keep it from drifting.
 
+**CI's Linux native leg runs inside the same image**, by digest, and it is the only CI job that does:
+it is the one whose environment reaches users, because native-image links against the glibc of
+whatever compiles it, so pinning that host is what stops `ubuntu-latest` raising the released
+binary's minimum glibc without a commit behind it — and it makes a green container run on a
+developer machine and a green Linux native leg answer the same question. Every other job stays on a
+plain runner deliberately: their environments are not part of what they test, so the pin would buy
+them nothing. The digest is spelled in `compose.yaml` (the local loop) and in `native.yml` (that one
+job), kept in step by hand — the image-publishing workflow's summary prints both lines to paste.
+`git` is in the image only because `actions/checkout` needs it there.
+
 **`gradle.properties` owns what the build resolves; the Dockerfile owns what the environment installs.**
 Nothing appears in both. They are different kinds of fact on different cadences: a base-image digest
 means nothing to Gradle, and an environment version moves by rebuild → new digest → a pin commit
@@ -280,7 +290,19 @@ CI runs the unit tier and both JVM acceptance tiers on every push and PR; a 4-OS
 smoke probes, the acceptance suite in full on Linux and a representative case per command elsewhere, a
 `--version` startup measurement asserted under 200 ms, and the release archive for that platform) on
 merge, a pushed `v*` tag, a weekly schedule and manual dispatch; and the live TheMovieDB contract case on
-the schedule only, so network flakiness cannot redden the badge.
+the schedule only, so network flakiness cannot redden the badge. Everything a native leg does to the
+binary it just built is the `nativeCheck` task rather than workflow shell, so CI and a developer run one
+implementation of it.
+
+Two axes cross there. The **OS** axis is those four legs at one mkvmerge version each. The **mkvmerge**
+axis is Linux-only and lives on the JVM tier: the acceptance harness runs once against the distro
+package — the same version class the build-environment image pins — and once, on merge and the weekly
+schedule, against the newest upstream MKVToolNix — a canary for mkvmerge's own output, which has
+already paid for itself once (`${codec}` keys on `codec_id` because the display string changed between
+versions). Every leg records the mkvmerge it
+ran into the job summary, since that is what makes a one-OS failure separable from a one-version one.
+Versions are recorded rather than equalised: no package manager can install one chosen MKVToolNix on all
+three OSes, so comparability comes from writing down what ran.
 
 **Releases never publish from CI.** A pushed `v*` tag collects the four archives, the jar and a
 `sha256sum` checksums file, asserts the asset set and each archive's shape against the naming contract,
