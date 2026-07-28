@@ -131,12 +131,14 @@ jobs:
           fi
 
   harness-app:
-    # The acceptance harness against the JVM launcher, and a required check. It is the project's
-    # only end-to-end coverage: the unit tier is in-process by contract - faked probes, no
-    # mkvmerge, no subprocess - so this is the one tier that runs the real thing against real MKV
-    # files and asserts through `mkvmerge -J`. It was the port's oracle against the v1 scripts
-    # until they were deleted; the cases outlived their subject and are being translated to a
-    # Kotlin end-to-end tier rather than dropped.
+    # The end-to-end coverage, and a required check. The unit tier is in-process by contract - faked
+    # probes, no mkvmerge, no subprocess - so these are the runs that drive a real binary against
+    # real MKV files and assert through `mkvmerge -J`.
+    #
+    # Two suites do that here, deliberately, for as long as the migration takes: the Groovy harness
+    # that was the port's oracle against the v1 scripts, and the Kotlin `e2eTest` tier replacing it
+    # case by case. The cases outlived the scripts they pinned and are being moved rather than
+    # dropped. This job also carries the fat jar's only coverage, at the end.
     #
     # It carries the fat jar's only coverage too, at the end: MKVToolNix, Groovy and the
     # Grapes cache are already paid for here, and a job of its own would spend three minutes
@@ -217,6 +219,14 @@ jobs:
       # invisible to everything the daemon spawns, while a property arrives with each invocation.
       - name: Run acceptance harness against the app
         run: ./gradlew acceptanceTest -PnativeBinary=build/install/mkvtool/bin/mkvtool "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"
+
+      # The Kotlin end-to-end tier, which is replacing the Groovy suite above case by case. Both run
+      # for the duration of that migration: two suites in parallel is the cost of moving 124 cases
+      # without a window where neither covers something. No Groovy and no extra install - it drives
+      # the same launcher the step above does, and takes its temp directories from Kotest rather than
+      # from the harness's shared scratch directory, so the two do not contend.
+      - name: Run the end-to-end tier
+        run: ./gradlew e2eTest
 
       # The fat jar is published as the JVM fallback and no tier ran it: the step above covers
       # the same bytecode through the installDist launcher, and the native legs cover it

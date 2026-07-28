@@ -127,12 +127,19 @@ sealed interface ProbeResult {
      * A readable file. [tracks] is the signature view keyed by track id, [allTracks] the full records in
      * mkvmerge's own order (identify prints them as they come), and [chapters] the total entry count
      * across every chapter edition.
+     *
+     * [containerTitle] is the segment title — the container-level name most players show, which `mux`
+     * writes from `general.title` and which is a different field from the video track's own name. Null
+     * when the file carries none; defaulted so a fixture that does not care about it need not say so.
+     * Nothing in the tool reads it back today: it is here because it is part of a file's metadata as
+     * much as any track field is, and a model that describes a file has no business omitting it.
      */
     data class Probed(
         override val file: File,
         val allTracks: List<ProbedTrack>,
         val tracks: Map<Int, TrackSlot>,
         val chapters: Int,
+        val containerTitle: String? = null,
     ) : ProbeResult
 }
 
@@ -151,6 +158,12 @@ private data class IdentificationDto(
 private data class ContainerDto(
     val recognized: Boolean = false,
     val supported: Boolean = false,
+    val properties: ContainerPropertiesDto = ContainerPropertiesDto(),
+)
+
+@Serializable
+private data class ContainerPropertiesDto(
+    val title: String? = null,
 )
 
 @Serializable
@@ -234,7 +247,13 @@ fun parseProbe(file: File, json: String): ProbeResult {
         )
     }
 
-    return ProbeResult.Probed(file, allTracks, tracks, parsed.chapters.sumOf { it.numEntries })
+    return ProbeResult.Probed(
+        file = file,
+        allTracks = allTracks,
+        tracks = tracks,
+        chapters = parsed.chapters.sumOf { it.numEntries },
+        containerTitle = parsed.container.properties.title,
+    )
 }
 
 /**

@@ -195,6 +195,7 @@ org.plukh.mkvtool.core        — the domain: one engine per command plus the in
 org.plukh.mkvtool.cli         — picocli commands, option parsing, exit codes
 org.plukh.mkvtool.cli.render  — the text renderers and the type→renderer binding table
 org.plukh.mkvtool.out         — the output seam: diagnostics events, renderers, the registry, the palette
+org.plukh.mkvtool.e2e         — the end-to-end tier (src/e2eTest), and `e2e.support` its machinery
 ```
 
 Dependencies run **`out` ← `core` ← `cli`**, and `out` never names a core result type — that is what
@@ -238,12 +239,32 @@ File selection is `core`, not CLI plumbing: the mask rule decides which files ge
 
 ## Testing
 
-Three tiers, answering different questions.
+Four tiers, answering different questions — four only transitionally: two of them are the same tier in
+two languages, mid-migration.
 
 **Unit (Kotest, `src/test/kotlin`).** In-process, fast, **no mkvmerge and no subprocess** — probe results
 are faked data. That contract is deliberate; keep it. Data-driven tables for anything with more than two
 cases. Shared doubles live beside the tests: `SilentRenderer`, `RecordingRenderer`, `ProbeFixtures`,
 `RenderCapture`.
+
+**End-to-end (Kotest, `src/e2eTest/kotlin`, `./gradlew e2eTest`).** The tier replacing the Groovy suite
+below, case by case. It shells out to a real binary and asserts through the production `parseProbe`, so a
+case reads `ProbedTrack.language` rather than a map lookup. Deliberately **not** part of `check` or
+`build`, which must stay green with no mkvmerge, no Groovy and no GraalVM installed.
+
+Four things about it are decisions rather than defaults. `-PmkvtoolBin` names what is under test, which
+is what lets one tier cover the `installDist` launcher, the native binary **and** the fat jar — the last
+being packaging nothing else ever ran. Each case takes a Kotest `tempdir()`, so cases are independent and
+the suite runs its cases **in parallel**; that is also why it does not inherit the Groovy suite's
+one-run-at-a-time rule. A missing *tool* skips a case with a reason, while a missing *binary under test*
+fails the task naming the build step — the first is a developer machine, the second is a mistake.
+And `failOnNoDiscoveredTests` is on, because a suite that discovers nothing otherwise passes.
+
+The support code lives in `e2e/support/`: the subprocess invoker, tool resolution, the fixture stagers,
+and `cfg`, the `config.yaml` builder most `mux` cases rest on. `cfg` emits **text**, deliberately not the
+production `Config` model — the point of an end-to-end case is to exercise the real parser — and the one
+distinction it must never lose is absent-versus-empty for a track list: a missing key leaves the type
+unconfigured, `[]` says copy none of them, and separate cases pin each.
 
 **Acceptance (`src/test/run_tests.groovy`, 124 cases).** The **only** end-to-end coverage in the project:
 it runs the binary as a subprocess against real MKV fixtures and asserts via `mkvmerge -J`. It defaults to

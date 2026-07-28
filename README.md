@@ -608,16 +608,29 @@ across the whole batch and identifies *which config entry* a finding refers to.
 
 ## Tests
 
-Two tiers, and they answer different questions. The unit tier is in-process and
-fast, and needs neither MKVToolNix nor the network:
+The unit tier is in-process and fast, and needs neither MKVToolNix nor the
+network:
 
 ```
 ./gradlew test
 ```
 
-The acceptance tier is the Groovy suite under `src/test/`, and it is the only
-end-to-end coverage there is: it runs the binary as a subprocess against real MKV
-fixtures and asserts through `mkvmerge -J`.
+The end-to-end tier runs a real binary as a subprocess against real MKV fixtures
+and asserts through `mkvmerge -J`. It needs `mkvmerge` on `PATH`, so it is
+deliberately not part of `./gradlew build`:
+
+```
+./gradlew installDist && ./gradlew e2eTest
+./gradlew e2eTest -PmkvtoolBin=build/native/nativeCompile/mkvtool
+./gradlew jarLauncher && ./gradlew e2eTest -PmkvtoolBin=build/jar-launcher/mkvtool
+```
+
+`-PmkvtoolBin` takes any executable, which is how one tier covers all three
+packagings — the `installDist` launcher, the native binary and the fat jar. Cases
+needing a tool that is absent skip themselves with a reason rather than failing.
+
+There is a **second** end-to-end suite, in Groovy under `src/test/`, which the
+tier above is replacing case by case. Both run until that finishes:
 
 ```
 groovy src/test/run_tests.groovy                  # the installDist launcher
@@ -626,15 +639,12 @@ groovy src/test/run_tests.groovy --app-bin build/jar-launcher/mkvtool
 groovy src/test/run_tests.groovy --filter 01 --keep
 ```
 
-`--app-bin` takes any executable, which is how one suite covers three packagings:
-the `installDist` launcher, the native binary, and the fat jar through the small
-launcher `./gradlew jarLauncher` writes for it.
-
-It needs `mkvmerge` (auto-detected from PATH, or `--mkvmerge-exe`) and Groovy 3
-or newer. Cases that need `mkvpropedit` or a TheMovieDB API key skip themselves
-with a printed note when those are unavailable. Run only one suite at a time:
-work directories are keyed by case name, so a second run wipes the first one's
-fixtures mid-test.
+`--app-bin` is its equivalent of `-PmkvtoolBin`. It needs `mkvmerge` (auto-detected
+from PATH, or `--mkvmerge-exe`) and Groovy 3 or newer, and cases that need
+`mkvpropedit` or a TheMovieDB API key skip themselves with a printed note. Run
+only one copy of *it* at a time: its work directories are keyed by case name, so a
+second run wipes the first one's fixtures mid-test. The Kotlin tier has no such
+rule — each case gets a temp directory of its own — so the two can run together.
 
 ## Under the hood
 

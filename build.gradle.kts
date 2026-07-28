@@ -20,6 +20,10 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     // installDist provides the dev launcher; also names it via applicationName below.
     application
+    // Declares the end-to-end tier as a test suite, which derives its source set
+    // (src/e2eTest/kotlin) and its task (e2eTest) from one name. A core Gradle plugin, so no
+    // version and no catalog entry.
+    `jvm-test-suite`
     // Maintained shadow fork (com.gradleup.*); the old johnrengelman fork is dead.
     // Wires shadowJar into `assemble`, so `build` produces the fat jar.
     alias(libs.plugins.shadow)
@@ -138,6 +142,83 @@ tasks.test {
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
+// Declared here rather than beside the release tasks that also read it: the e2e suite below is the
+// first thing in the file to need it, and a build script is read top to bottom.
+val hostIsWindows = System.getProperty("os.name").lowercase().startsWith("windows")
+
+// The end-to-end tier: src/e2eTest/kotlin, run by `./gradlew e2eTest`. It shells out to a real
+// mkvtool binary against real MKV fixtures and asserts through mkvmerge, which is what the unit tier
+// deliberately does not do — that one is in-process with faked probe data, and stays that way.
+//
+// Declared as a test suite so the source set and the task both come from the one name. Note what the
+// suite does *not* do: it is not wired into `check`, and therefore not into `build`, because those
+// two must stay green on a machine with no GraalVM, no Groovy and no MKVToolNix. That is the same
+// rule the native verification tasks below follow.
+//
+// The binary under test is named by a system property so one tier can be aimed at all three
+// packagings — the installDist launcher, the fat jar through its generated launcher, and the native
+// binary. -PmkvtoolBin sets it; the default is the installDist launcher for this host.
+val mkvtoolBinPath: String = providers.gradleProperty("mkvtoolBin").orNull
+    // .bat on Windows, and it matters: the launcher installDist writes is a batch file there, so the
+    // extensionless spelling names a file that does not exist. The suite routes a .bat through
+    // `cmd /c` exactly as the Groovy harness does.
+    ?: if (hostIsWindows) "build/install/mkvtool/bin/mkvtool.bat" else "build/install/mkvtool/bin/mkvtool"
+
+testing {
+    suites {
+        val e2eTest by registering(JvmTestSuite::class) {
+            // Kotest runs on the JUnit platform; the runner brings the engine.
+            useJUnitJupiter()
+            dependencies {
+                implementation(project())
+                implementation(libs.kotest.runner.junit5)
+                implementation(libs.kotest.assertions.core)
+            }
+            targets.all {
+                testTask.configure {
+                    group = "verification"
+                    description = "Runs the end-to-end tier against a real binary. -PmkvtoolBin=<path> selects it."
+                    // Nothing here produces a file, and every run has to actually run.
+                    outputs.upToDateWhen { false }
+                    // A suite that discovers nothing passes, which is the failure mode this project has
+                    // already been bitten by twice in workflow shell — a filter matching no case ran no
+                    // case and exited 0. A tier whose specs stopped being found would go the same way.
+                    failOnNoDiscoveredTests = true
+                    val binary = File(mkvtoolBinPath).let {
+                        if (it.isAbsolute) it else File(projectDir, mkvtoolBinPath)
+                    }
+                    systemProperty("mkvtool.bin", binary.absolutePath)
+                    // The fixture every media case is built from, named rather than discovered so the
+                    // suite does not have to know where it runs from.
+                    systemProperty("mkvtool.testMkv", File(projectDir, "src/test/test.mkv").absolutePath)
+                    // A missing binary is a setup mistake, not a test failure, so it is refused here
+                    // naming the step that fixes it — rather than reaching the cases and surfacing as
+                    // an ENOENT from ProcessBuilder once per case, which says nothing useful.
+                    doFirst {
+                        require(binary.isFile) {
+                            "no mkvtool binary at $binary - run './gradlew installDist' first, or pass " +
+                                "-PmkvtoolBin=<path> to aim this tier at the fat jar or the native binary"
+                        }
+                    }
+                    // Per-case temp directories make the cases independent, so they can run at once —
+                    // which is the whole reason this tier does not inherit the Groovy suite's
+                    // one-run-at-a-time rule. Held below the core count: each case spawns subprocesses
+                    // of its own, and mkvmerge is the thing actually competing for the machine.
+                    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
+                }
+            }
+        }
+    }
+}
+
+// kapt exists for picocli-codegen, which annotates the main source set only. Applying the plugin gives
+// every source set its own kapt pass regardless, and the e2e tier has no annotation processors at all —
+// so these two are pure overhead on a tier meant to be run often.
+// Matched lazily rather than named: the suite registers its tasks after this point in the script, so
+// tasks.named would not find them yet.
+tasks.matching { it.name in setOf("kaptE2eTestKotlin", "kaptGenerateStubsE2eTestKotlin") }
+    .configureEach { enabled = false }
+
 tasks.jar {
     manifest {
         attributes("Implementation-Version" to project.version)
@@ -169,8 +250,6 @@ tasks.register("printVersion") {
     val version = project.version.toString()
     doLast { println(version) }
 }
-
-val hostIsWindows = System.getProperty("os.name").lowercase().startsWith("windows")
 
 // The archive's platform label is *derived* from the machine running the build rather than
 // passed in on the command line, so an archive cannot claim an architecture its binary does
