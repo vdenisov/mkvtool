@@ -8,7 +8,7 @@ import java.nio.charset.Charset
 
 /**
  * "Read this file, get a mapping or a named reason why not" — the loader behind `config.yaml` and
- * `episodes.yaml` in every command that reads either. A port of `src/lib/yaml.groovy`.
+ * `episodes.yaml` in every command that reads either.
  *
  * It **classifies and nothing more**: [MappingLoad.Problem] carries a bare, lowercase, unpunctuated
  * fragment that the caller finishes in its own words and prints through its own channel, because what to

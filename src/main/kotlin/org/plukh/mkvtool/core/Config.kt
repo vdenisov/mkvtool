@@ -3,8 +3,8 @@ package org.plukh.mkvtool.core
 import java.io.File
 
 /**
- * `config.yaml`: the muxing decisions, typed. A port of the reading v1 spread across `mux.groovy`,
- * `inspect.groovy` and `check.groovy`'s `makeSelection`.
+ * `config.yaml`: the muxing decisions, typed. v1 spread the reading of it across three files, `mux`,
+ * `inspect` and the check's `makeSelection`; one typed model replaces all three.
  *
  * One reader, deliberately. v1 had three sets of `config?.general?.…` chains against the raw mapping, and
  * every consumer here — the track selection, the template fields, the command line at 5.1 — reads this

@@ -5,7 +5,7 @@ import java.io.IOException
 
 /**
  * External-file discovery: finding the audio and subtitle files that belong to a main media file but do
- * not sit next to it. A port of `src/lib/discovery.groovy`; the language guesser it leans on to name a
+ * not sit next to it. The language guesser it leans on to name a
  * variant's language lives beside it in `LanguageGuess.kt`.
  *
  * Two layouts are in the wild and both are supported, including combined:
@@ -243,7 +243,7 @@ data class Variant(
  * fields — the discovery engine returns ingredients, never prose.
  *
  * The three descriptive fields come from [Variant.first] — the first entry in **discovery** order — not
- * from the variant's own identity, which is what `src/inspect.groovy` names a variant after. The two
+ * from the variant's own identity, which is what v1 named a variant after. The two
  * disagree in one case: a variant whose path-sorted first entry is not its discovery-first one displays
  * without the suffix its identity carries.
  */

@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
+import org.plukh.mkvtool.cli.MuxCommand
 import java.io.File
 
 /**
@@ -23,6 +24,9 @@ import java.io.File
  * be, and stays with a human reading.
  */
 class ConfigDocsParityTest : FunSpec({
+
+    /** Where the template lives, relative to the repository root. Spelled once — three things read it. */
+    val EXAMPLE_CONFIG_PATH = "docs/config.example.yaml"
 
     /**
      * Every key `parseConfig` reads, as leaf names. Leaf rather than dotted paths because the reference
@@ -69,7 +73,7 @@ class ConfigDocsParityTest : FunSpec({
     }
 
     val referenceKeys = keysIn(yamlFences(repoFile("docs/reference.md")))
-    val exampleKeys = keysIn(repoFile("src/config.example.yaml").readLines(Charsets.UTF_8))
+    val exampleKeys = keysIn(repoFile(EXAMPLE_CONFIG_PATH).readLines(Charsets.UTF_8))
 
     test("the reference documents every config key") {
         configKeys - referenceKeys shouldBe emptySet()
@@ -93,5 +97,38 @@ class ConfigDocsParityTest : FunSpec({
         referenceKeys.shouldNotBeEmpty()
         exampleKeys.shouldNotBeEmpty()
         (configKeys - referenceKeys - exampleKeys).shouldBeEmpty()
+    }
+
+    /**
+     * The no-config error names the template by URL, because a binary on `PATH` has no directory to
+     * point at. Nothing else can notice that URL going stale: it is only ever printed, and the harness
+     * case covering the message asserts on the bare file name rather than on a path. So the one thing
+     * that can rot — where in the repository the file sits — is checked here against the file itself.
+     */
+    test("the URL mux prints names the template's actual path") {
+        repoFile(EXAMPLE_CONFIG_PATH)
+        MuxCommand.EXAMPLE_CONFIG_URL shouldBe
+            "https://github.com/vdenisov/mkvtool/blob/main/$EXAMPLE_CONFIG_PATH"
+    }
+
+    /**
+     * Parity above is about the key *vocabulary* and reads both documents as text, so it would pass on
+     * a template that is not loadable YAML at all — and the template's whole job is to be copied and
+     * run. This loads it the way `mux` does.
+     */
+    test("the template loads as a config") {
+        when (val load = loadConfig(repoFile(EXAMPLE_CONFIG_PATH))) {
+            is MappingLoad.Loaded -> {
+                // The live half of the file is a working single-source config; everything optional is
+                // commented out, so this is also what a reader gets by copying it unedited.
+                load.value.general.destinationDir shouldBe "mkv"
+                load.value.mainSource.audioTracks.map { it.id } shouldBe listOf(1, 2)
+                load.value.mainSource.subtitleTracks.map { it.id } shouldBe listOf(4)
+                load.value.additionalSources.shouldBeEmpty()
+                // Omitted on purpose: mux derives it, and the file says so.
+                load.value.trackOrder shouldBe null
+            }
+            else -> error("the template did not load: $load")
+        }
     }
 })

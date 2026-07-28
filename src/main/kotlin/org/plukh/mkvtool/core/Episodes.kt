@@ -6,7 +6,7 @@ import java.util.Locale
 /**
  * Episode-metadata semantics: the join key between a media file and its episode, the canonical-name
  * parser and its file-name sanitizer, the two `episodes.*` readers' shapes, and the batch-relative
- * labels a group header is built from. A port of `src/lib/episodes.groovy`.
+ * labels a group header is built from.
  *
  * It owns the *shape*, never the I/O: [normalizeYaml] takes an already-parsed map, exactly as v1 did.
  * That seam predates the no-imports rule that forced it and outlives it — callers own reading, parsing

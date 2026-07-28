@@ -11,7 +11,6 @@ import org.plukh.mkvtool.core.FileFix
 import org.plukh.mkvtool.core.FileIdentification
 import org.plukh.mkvtool.core.FileProped
 import org.plukh.mkvtool.core.FileRenamed
-import org.plukh.mkvtool.core.FileTitled
 import org.plukh.mkvtool.core.FixRun
 import org.plukh.mkvtool.core.FileMux
 import org.plukh.mkvtool.core.FontUsageReport
@@ -23,7 +22,6 @@ import org.plukh.mkvtool.core.ShowFetched
 import org.plukh.mkvtool.core.ShowNameResolved
 import org.plukh.mkvtool.core.SubstitutionDrops
 import org.plukh.mkvtool.core.StrictVerdict
-import org.plukh.mkvtool.core.TitleRun
 import org.plukh.mkvtool.core.TrackOrder
 import org.plukh.mkvtool.core.TranslationFallback
 import org.plukh.mkvtool.out.RenderHints
@@ -47,8 +45,6 @@ fun textResultRenderers(hints: RenderHints = RenderHints()): ResultRendererRegis
         .register(FixRun::class, FixRunRenderer)
         .register(FileProped::class, FilePropedRenderer)
         .register(PropeditRun::class, PropeditRunRenderer)
-        .register(FileTitled::class, FileTitledRenderer)
-        .register(TitleRun::class, TitleRunRenderer)
         .register(FontUsageReport::class, FontUsageReportRenderer)
         .register(ShowFetched::class, ShowFetchedRenderer)
         .register(TranslationFallback::class, TranslationFallbackRenderer)

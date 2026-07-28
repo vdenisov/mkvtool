@@ -12,7 +12,7 @@ import java.util.concurrent.Callable
 
 /**
  * `mkvtool propedit` — run `mkvpropedit` with the given options against every `.mkv` in the current
- * directory. A verbatim port of `src/propedit.groovy`.
+ * directory.
  *
  * Every argument is forwarded to mkvpropedit untouched, so this command declares **no options of its
  * own** (not even `--color`, which would be ambiguous against a pass-through flag): it takes a single

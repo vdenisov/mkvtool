@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * `rename`: episode files to the canonical `Show - SxxEyy - Title[suffix].ext`, from `episodes.yaml`
- * (preferred) or `episodes.txt`. A port of `src/rename.groovy`.
+ * (preferred) or `episodes.txt`.
  *
  * Renaming is destructive and the SxxEyy token is the only thing tying a file to its episode, so the plan
  * is built in full and checked before anything is touched: a failure halfway through would leave a

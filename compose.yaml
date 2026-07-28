@@ -23,7 +23,7 @@ services:
       - project-build:/work/build
       - project-gradle:/work/.gradle
       - project-kotlin:/work/.kotlin
-      # The acceptance suite's scratch directory: 132 cases, each recreating a directory and muxing
+      # The acceptance suite's scratch directory: 124 cases, each recreating a directory and muxing
       # real MKVs. The harness derives this path from its own script's location rather than from the
       # working directory, so moving the storage underneath it changes nothing it can observe.
       - acceptance-work:/work/src/test/work

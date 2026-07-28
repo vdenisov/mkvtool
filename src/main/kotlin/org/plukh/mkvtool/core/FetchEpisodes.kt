@@ -9,7 +9,7 @@ import java.time.LocalDate
 
 /**
  * `fetch-episodes`: one season's episode names from TheMovieDB into `episodes.yaml` and `episodes.txt`.
- * A port of `src/fetch_episodes.groovy`.
+ *
  *
  * **Nothing is sanitized here.** Names are written exactly as TheMovieDB spells them, `:` and `?`
  * included: `rename` strips what a file name cannot carry at the point a name becomes one, and `mux`

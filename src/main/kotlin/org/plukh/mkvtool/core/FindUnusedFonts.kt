@@ -7,7 +7,7 @@ import java.io.File
 
 /**
  * The `find-unused-fonts` engine: report every font in a `fonts/` subdirectory whose base name is never
- * referenced in any `.ass` subtitle in the current directory. A port of `src/find_unused_fonts.groovy`.
+ * referenced in any `.ass` subtitle in the current directory.
  *
  * "Referenced" is v1's deliberately loose test: a case-insensitive substring match of the font's base
  * name (extension stripped) against the subtitle text. It over-reports usage rather than under-reports,

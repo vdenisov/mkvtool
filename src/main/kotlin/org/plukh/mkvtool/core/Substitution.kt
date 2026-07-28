@@ -10,7 +10,7 @@ import java.util.MissingResourceException
 
 /**
  * The substitution-variable engine: the file- and track-scope variables a templated config value
- * expands, and the two-stage validation around them. A port of `src/lib/subst.groovy`.
+ * expands, and the two-stage validation around them.
  *
  * Config values are templates — `"${'$'}{languageName} ${'$'}{codec}"` rather than a literal
  * `"Russian SRT"`. Variables come in two scopes: file-scope ones describe the episode being muxed and

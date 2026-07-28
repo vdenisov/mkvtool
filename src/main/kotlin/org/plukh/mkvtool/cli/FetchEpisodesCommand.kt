@@ -20,7 +20,7 @@ import java.util.concurrent.Callable
 
 /**
  * `mkvtool fetch-episodes` — write one season's episode names from TheMovieDB into `episodes.yaml` and
- * `episodes.txt`. A port of `src/fetch_episodes.groovy`.
+ * `episodes.txt`.
  *
  * Everything that can be settled without the network is settled first — the API key, the show id, the
  * season — so a mistyped argument costs no request. Exit codes: 2 for anything wrong with the arguments

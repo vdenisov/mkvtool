@@ -3,7 +3,7 @@ package org.plukh.mkvtool.core
 import org.plukh.mkvtool.out.CommandResult
 
 /**
- * The consistency check as a model. A port of `runConsistencyCheck` from `src/lib/check.groovy`, split
+ * The consistency check as a model. A port of v1's `runConsistencyCheck`, split
  * per the output seam: this computes the answer and composes no text at all — every phrase v1 built here
  * is composed by the report's text renderer instead.
  *

@@ -10,7 +10,7 @@ import java.util.regex.Pattern
 
 /**
  * The `fix-srt` engine: reformats a legacy subtitle format into standard numbered SRT cues, plus its
- * result model and the directory orchestrator. A verbatim port of `src/fix_srt.groovy`.
+ * result model and the directory orchestrator.
  *
  * The legacy input has no cue numbers; each block is a timing line `hh:mm:ss.cc,hh:mm:ss.cc`, a single
  * physical text line using `[br]` for internal breaks, and a blank separator. The fixer generates the

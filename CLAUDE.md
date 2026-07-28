@@ -5,11 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this project is
 
 A Kotlin/JVM command-line tool for automating MKV workflows — primarily TV show episodes. One binary,
-`mkvtool`, with nine subcommands, built with Gradle and shipped as GraalVM native-image binaries per OS
+`mkvtool`, with eight subcommands, built with Gradle and shipped as GraalVM native-image binaries per OS
 plus a fat jar as the JVM fallback.
 
-It began as nine separate Groovy scripts. They are still in the tree and still work, frozen, until they
-are deleted; what that era left behind that still shapes the code is in the last section.
+It began as nine separate Groovy scripts, which shipped through v2.0.0 and were then deleted. What that
+era left behind that still shapes the code is in the last section — read it before proposing anything
+that moves configuration back into code.
 
 **Documentation layers.** `README.md` is the front gate — install, the subcommand tour, a minimal config
 quick-start. User-facing depth (output and colour conventions, the check-report reading guide, the full
@@ -46,8 +47,8 @@ docker compose run --rm build ./gradlew nativeLoop
 
 `docs/building.md` is the whole story, including the route without Docker.
 
-Subcommands: `mux`, `inspect`, `fetch-episodes`, `rename`, `filename-to-title`, `propedit`, `to-utf8`,
-`fix-srt`, `find-unused-fonts`, plus the hidden `native-smoke` build probe. The user-facing tour is in
+Subcommands: `mux`, `inspect`, `fetch-episodes`, `rename`, `propedit`, `to-utf8`, `fix-srt`,
+`find-unused-fonts`, plus the hidden `native-smoke` build probe. The user-facing tour is in
 `README.md`; the option surface is in the `@Command` classes under `cli/`.
 
 `mux` reads `config.yaml` from the CWD (a per-show config next to the media files) or from an explicit
@@ -216,7 +217,7 @@ hand-assembled `episodes.txt` — use `core/CharsetDetection.kt` rather than qui
 | `Utf8Conversion.kt` | `to-utf8`: the charset decision table (`classify` → `Utf8Verdict`), strict decoding, the run |
 | `SrtFix.kt` | `fix-srt`: the pure reformatter and its state machine, plus the batch |
 | `Tools.kt` | `findMkvTool`: PATH resolution with the Windows default-location fallback |
-| `Propedit.kt`, `FilenameToTitle.kt` | the two mkvpropedit loops; they share only `buildPropeditCommand` |
+| `Propedit.kt` | the mkvpropedit loop and `buildPropeditCommand` |
 | `FindUnusedFonts.kt` | the `.ass`-versus-`fonts/` matcher |
 | `YamlMapping.kt` | `loadMapping`: "read this file, get a mapping or a named reason why not" |
 | `CharsetDetection.kt` | Groovy's auto-detection semantics, transcribed, for the files that need them |
@@ -244,15 +245,20 @@ are faked data. That contract is deliberate; keep it. Data-driven tables for any
 cases. Shared doubles live beside the tests: `SilentRenderer`, `RecordingRenderer`, `ProbeFixtures`,
 `RenderCapture`.
 
-**Acceptance (`src/test/run_tests.groovy`, 132 cases).** The oracle the port was built against, and the
-only end-to-end coverage in the project: it runs the real thing as a subprocess against real MKV fixtures
-and asserts via `mkvmerge -J`. `--target app` runs the binary (the default is `scripts`), and
-`--app-bin`/`MKVTOOL_APP_BIN` points it at any binary — the native one included.
+**Acceptance (`src/test/run_tests.groovy`, 124 cases).** The **only** end-to-end coverage in the project:
+it runs the binary as a subprocess against real MKV fixtures and asserts via `mkvmerge -J`. It defaults to
+the `installDist` launcher; `--app-bin`/`MKVTOOL_APP_BIN` points it at any other packaging — the native
+binary and the fat jar both go through it.
 
-It is **frozen**: do not edit it, and treat a red case as a bug in the code rather than in the test.
+It was the port's **oracle** against the v1 scripts and was frozen for that reason. It is not frozen any
+more — the scripts are gone, so there is nothing left for it to be an oracle against. What replaces the
+freeze is ordinary test discipline: an expectation may be changed or a case deleted, but that is an
+intended behaviour change and is justified as one in the PR, never as "the test was wrong".
+
 Assertions are substring `contains(...)` checks, so output has to reproduce the pinned text closely enough
 that every substring holds — including the `*** Error: ` / `*** Warning: ` prefixes, the stdout/stderr
-routing and the exit codes.
+routing and the exit codes. It is being translated case by case into a Kotlin end-to-end tier, after which
+no Groovy is left in the repository.
 
 Harness conventions worth knowing before touching anything it covers:
 
@@ -261,8 +267,8 @@ Harness conventions worth knowing before touching anything it covers:
   overrides — and **mkvmerge renumbers surviving tracks from 0 in source order**, so a variant's ids are
   not the source ids unless all tracks are kept, while `--track-name` still targets the *source* id.
   Getting that wrong leaves a name silently unchanged.
-- Cases needing `mkvpropedit`, a bare `groovy` on `PATH`, or a TheMovieDB key skip themselves with a
-  printed note rather than failing.
+- Cases needing `mkvpropedit` or a TheMovieDB key skip themselves with a printed note rather than
+  failing.
 - `withStubServer` serves canned JSON from a JDK `HttpServer`, which is how `fetch-episodes` is tested
   offline through its hidden `--base-url`.
 - **Never run two suites at once**, a `--filter` run alongside a full one included: work directories are
@@ -284,7 +290,7 @@ and no external tool.
 `native-smoke`, and three harness cases through the launcher `jarLauncher` generates. It is the published
 JVM fallback, and what only *it* can break is its own packaging — the `Main-Class` manifest and the
 resources merged from several dependencies — which is most of what `native-smoke` probes anyway. The full
-132 would add minutes to re-run bytecode that job has already run through `installDist`. The launcher is
+suite would add minutes to re-run bytecode that job has already run through `installDist`. The launcher is
 generated rather than committed because it has to name the versioned jar, and because the harness needs an
 executable to point `--app-bin` at: hence a shebang and the executable bit on POSIX, a `.bat` on Windows
 (the harness routes those through `cmd /c` and launches anything else directly), argv forwarded, the exit
@@ -361,7 +367,7 @@ no batch summary — the children *are* the output — so it is deliberately abs
 
 **One medium, one binding table.** The medium is chosen in exactly one place, `cli/OutputOptions` (the
 mixin that also carries `--color`), so `--json` is a flag there and a branch in one method rather than an
-edit in nine commands. Which renderer draws a given result type is decided in exactly one table,
+edit in every command. Which renderer draws a given result type is decided in exactly one table,
 `cli/render/TextResultRenderers.kt`, a registry of typed leaves. Lookup is by **exact class** — a
 supertype walk would need `kotlin-reflect`, which native-image does without — so every concrete result
 type registers itself or fails loudly on first emission. Renderers are named for the data they draw, never
@@ -400,9 +406,12 @@ drift.
 ## Commands and cores
 
 Each command gets its own core, result model and renderer, and sharing is limited to **pure helpers**.
-`filename-to-title` and `propedit` have a byte-identical loop and were still built as two of everything:
-each result model is that command's `--json` document, and `propedit` has no title to report, so one
-shared shape could not be domain-complete for both. Duplicate the loop, not the model.
+The rule was set by a pair that no longer exists: `filename-to-title` and `propedit` had a byte-identical
+loop and were still built as two of everything, because each result model is that command's `--json`
+document and `propedit` has no title to report, so one shared shape could not be domain-complete for
+both. **Duplicate the loop, not the model.** The pair went when `filename-to-title` was retired; the rule
+did not, and it is what keeps `to-utf8` and `fix-srt` — two directory walks over subtitle files that
+report entirely different things — from being fused.
 
 The exception, and the reason it is one: the consistency report has a single renderer shared by `inspect`
 and `mux`, because the report *must* look identical in both, and a second copy would be a drift bug
@@ -746,7 +755,7 @@ Converts `.srt`/`.ass`/`.ssa`/`.vtt` **in place**, and it is safe to point at a 
   a VobSub pair, and rewriting the binary one would destroy it.
 - Content is decoded and re-encoded **whole**, not line by line, so CRLF survives.
 
-### `propedit` and `filename-to-title`
+### `propedit`
 
 `propedit` passes every argument to `mkvpropedit` **verbatim**, with the file name inserted first, so
 anything mkvpropedit accepts works with no code change — options that look like `mkvtool`'s own included.
@@ -754,8 +763,9 @@ Passthrough survives picocli via `unmatchedOptionsArePositionalParams`, set on t
 place; the command declares one catch-all parameter list and *no* options, not even `--color`. `-h`/
 `--help` is intercepted only when it is the sole argument.
 
-Both commands reconstruct the target as `<base>.mkv`, which lower-cases the extension — a latent quirk,
-reproduced deliberately, that would matter on a case-sensitive filesystem holding `Show.MKV`.
+It reconstructs the target as `<base>.mkv` rather than using the file's own name, which lower-cases the
+extension — a quirk inherited from v1 and pinned as it stands, mattering on a case-sensitive filesystem
+holding `Show.MKV`, which the command's own case-insensitive selection will have picked up.
 
 ### `fetch-episodes`
 
@@ -799,7 +809,7 @@ TheMovieDB API
             └─ mux (+ config.yaml, + episodes.yaml for ${...} titles)
                  → mkvmerge → output MKV in destinationDir/
                  └─ post-processing:
-                      filename-to-title, propedit, to-utf8, fix-srt, find-unused-fonts
+                      propedit, to-utf8, fix-srt, find-unused-fonts
 ```
 
 ### The manual workflow this automates
@@ -849,19 +859,17 @@ an Intel runner, because GraalVM does not cross-compile, and both macOS legs ass
 twice: on the toolchain before compiling and on the binary afterwards, since an arm64 build published
 under an x64 name is worse than a missing asset.
 
-## The Groovy scripts (v1, frozen)
+## What the script era left behind
 
-The nine scripts under `src/`, their shared code in `src/lib/`, and the `bin/` wrapper pairs are the
-previous generation. They are **frozen**: never modify them, and never break their CI legs. They stay
-until they are deleted, one release after v2.0.0.
+The nine Groovy scripts under `src/`, their shared code in `src/lib/` and the `bin/` wrapper pairs were
+the previous generation. They shipped through v2.0.0 and were then deleted; their *mechanics* were never
+documented here and are not now — the closures-instead-of-methods rule, the `evaluate()`-by-absolute-path
+loading, the no-imports rule that shaped every helper's API, the `@GrabConfig` fragility across Groovy
+versions, the Groovy `properties` trap. Each was the correct solution inside the script model and none
+of it survives.
 
-Their *mechanics* are deliberately not documented here — the closures-instead-of-methods rule, the
-`evaluate()`-by-absolute-path loading, the no-imports rule that shaped every helper's API, the
-`@GrabConfig` fragility across Groovy versions, the Groovy `properties` trap. Each was the correct
-solution inside the script model, and each is now needed only to *read* those files rather than to change
-anything. They go out with the scripts, and so does this section.
-
-What that era produced and the current code still embodies is the part worth keeping:
+What that era produced and the current code still embodies is the part worth keeping, and this is why
+this section outlives its subject:
 
 - **The config system exists because in-place editing was destructive.** Track selection was originally
   done by editing the mkvmerge command line inside the script, once per group. The script was not under
@@ -876,3 +884,6 @@ What that era produced and the current code still embodies is the part worth kee
   companion is bound to its main file by *name*, so the file names had to be mutated until that was true.
   That coupling is a weakness rather than a design goal, and replacing it with matchers declared in the
   config is planned work.
+
+One artifact of the era is still in the tree: `src/test/run_tests.groovy`, the acceptance suite, which
+was the oracle the port was built against and is now the project's only end-to-end coverage. See Testing.

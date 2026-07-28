@@ -6,8 +6,8 @@ import java.nio.file.Paths
 
 /**
  * Which files a batch command works on: the extension rule, the file masks, and the two lists every
- * caller needs. A port of the `compileMasks` and file-listing block v1 kept in both `inspect.groovy` and
- * `mux.groovy`.
+ * caller needs. v1 kept a copy of the `compileMasks` and file-listing block in each of `mux` and
+ * `inspect`; this is the one shared version, because the mask rule decides which files get muxed.
  *
  * v1 duplicated `compileMasks` deliberately — a shared helper cost an `evaluate()` load there, and ten
  * lines of CLI plumbing were not worth it. An ordinary function costs nothing, and the mask rule decides

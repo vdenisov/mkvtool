@@ -29,8 +29,7 @@ import java.io.File
 import java.util.concurrent.Callable
 
 /**
- * `mkvtool mux` — mux every media file in the current directory per `config.yaml`. A port of
- * `src/mux.groovy`.
+ * `mkvtool mux` — mux every media file in the current directory per `config.yaml`.
  *
  * The config lives with the media: `config.yaml` in the current directory, or wherever `--config` points.
  * There is deliberately **no** fall-back to a template shipped with the tool — applying a demo config's
@@ -204,13 +203,15 @@ class MuxCommand : Callable<Int> {
         return null
     }
 
-    private companion object {
+    internal companion object {
         /**
-         * A binary on `PATH` has no directory to point at the way the script pointed at its own, and the
-         * build deliberately ships no classpath resources, so the template is named where it actually
-         * lives rather than as a file to copy from somewhere.
+         * A binary on `PATH` has no directory to point at, and the build deliberately ships no classpath
+         * resources, so the template is named where it actually lives rather than as a file to copy from
+         * somewhere. `internal` rather than private so `ConfigDocsParityTest` can assert the path against
+         * the repository: nothing else would notice this URL going stale, since it is only ever printed
+         * and the acceptance case covering the message asserts on the bare file name.
          */
         const val EXAMPLE_CONFIG_URL =
-            "https://github.com/vdenisov/mkvtool/blob/main/src/config.example.yaml"
+            "https://github.com/vdenisov/mkvtool/blob/main/docs/config.example.yaml"
     }
 }

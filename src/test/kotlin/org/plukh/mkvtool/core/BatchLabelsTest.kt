@@ -6,8 +6,9 @@ import io.kotest.matchers.shouldBe
 import org.plukh.mkvtool.out.pluralize
 
 /**
- * The display-only half of the episodes library, transcribed from the Groovy harness's
- * `122_batch_episode_labels` value for value, plus the edges that case never reached.
+ * The display-only half of the episodes library, transcribed value for value from the acceptance
+ * harness's `122_batch_episode_labels` — which tested the v1 library in-process and retired with it —
+ * plus the edges that case never reached.
  *
  * These labels are **batch-relative**: they need the other names to know where the number starts, which is
  * what makes them safe (`1080p` and `x264` sit inside the shared prefix) and exactly why they cannot answer
