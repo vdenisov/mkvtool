@@ -106,6 +106,30 @@ class ProbeTest : FunSpec({
             parseProbe(File("x.mkv"), fixture())
                 .shouldBeInstanceOf<ProbeResult.Probed>().chapters shouldBe 0
         }
+
+        // The segment title — the container-level name most players show, and a different field from
+        // the video track's own name. `mux` writes it from `general.title` and nothing reads it back,
+        // so these three cases are the only thing holding it.
+        test("the segment title is read off the container") {
+            val json = """{"container":{"recognized":true,"supported":true,
+                          "properties":{"title":"Show - S01E01 - Pilot"}},"tracks":[]}"""
+
+            parseProbe(File("x.mkv"), json)
+                .shouldBeInstanceOf<ProbeResult.Probed>().containerTitle shouldBe "Show - S01E01 - Pilot"
+        }
+
+        test("a file with no segment title reports none, rather than an empty one") {
+            parseProbe(File("x.mkv"), fixture())
+                .shouldBeInstanceOf<ProbeResult.Probed>().containerTitle shouldBe null
+        }
+
+        test("a declared but empty segment title is not the same as none") {
+            val json = """{"container":{"recognized":true,"supported":true,
+                          "properties":{"title":""}},"tracks":[]}"""
+
+            parseProbe(File("x.mkv"), json)
+                .shouldBeInstanceOf<ProbeResult.Probed>().containerTitle shouldBe ""
+        }
     }
 
     context("signatureOf") {
