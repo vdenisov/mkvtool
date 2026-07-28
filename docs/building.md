@@ -91,9 +91,10 @@ Nothing in here is bumped on a habit. Three mechanisms cover it, and each of the
 somebody reviews:
 
 - **Dependabot** (`.github/dependabot.yml`) opens weekly pull requests for the workflows' action pins,
-  the version catalog in `gradle/libs.versions.toml`, and the base image in the `Dockerfile`. That
-  digest is written out in the `FROM` line rather than held in a build argument precisely so Dependabot
-  can see it.
+  the version catalog in `gradle/libs.versions.toml`, and the base image's digest. That digest is
+  written out in the `FROM` line rather than held in a build argument precisely so Dependabot can see
+  it — and it is allowed to move the digest only. The Ubuntu release stays at 24.04 until somebody
+  decides otherwise, because it is what sets the released binary's glibc floor.
 - **The `Maintenance` workflow** watches MKVToolNix, which no bot knows about. Every Monday it records
   the Ubuntu candidate, the Chocolatey and Homebrew versions, and mkvtoolnix.download's current release
   in its job summary, and it opens a pull request when the pinned baseline has moved or dropped out of

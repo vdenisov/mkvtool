@@ -310,7 +310,9 @@ Versions are recorded rather than equalised: no package manager can install one 
 three OSes, so comparability comes from writing down what ran.
 
 **Keeping all of that current is itself scheduled.** Dependabot bumps the workflow action pins, the
-version catalog and the base image weekly. A `Maintenance` workflow on the same morning queries the four
+version catalog, and the base image's *digest* weekly — constrained to digests, because 24.04 is a glibc
+decision rather than a version to keep current, and unconstrained it proposed 26.04 on its first run. A
+`Maintenance` workflow on the same morning queries the four
 MKVToolNix sources — the Ubuntu candidate, Chocolatey, Homebrew and mkvtoolnix.download — records them
 in the job summary, and opens a pull request when the image's pinned baseline has moved or dropped out
 of the archive; it builds the image with the new version first, because a pull request authored by

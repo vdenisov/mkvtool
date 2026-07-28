@@ -589,7 +589,7 @@ jobs:
       # before any step runs and cannot read a value out of a file. The two homes are kept in step
       # by hand - the buildenv workflow's job summary prints both lines to paste, and moving the
       # pin is meant to be one reviewed commit touching both files.
-      image: ghcr.io/vdenisov/mkvtool-buildenv@sha256:e6cc604516e1a1bce1c657116725d15565915ec32266f06b8ed149473e6d92a6
+      image: ghcr.io/vdenisov/mkvtool-buildenv@sha256:68438c189c9d50599e0604f7559fb5c814ad88ce5122cbf6ae3871808eafd6d8
       # The image sets `USER builder` so that files written through a local bind mount belong to
       # the developer. A job container is the other way round: the runner owns the workspace and
       # documents a non-root container user as unsupported, so CI - and only CI - enters the

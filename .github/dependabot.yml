@@ -53,6 +53,16 @@ updates:
       day: monday
       time: "08:00"
     ignore:
+      # Digest updates only: stay on 24.04 and follow its rebuilds. The release is a decision, not a
+      # bump - the base image's glibc becomes the released Linux binary's minimum supported version,
+      # so moving off 24.04 raises that floor for every user and nothing in CI notices. Left
+      # unconstrained, the first run of this ecosystem proposed 26.04. Both major and minor are
+      # ignored, which covers 26.04 and an interim 24.10 alike; a digest moving under the same tag
+      # carries no version change, so it is not matched here and still arrives.
+      - dependency-name: ubuntu
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
       # The build-environment image is ours: buildenv.yml publishes it and a human pins the digest
       # in compose.yaml and native.yml together. A bot that moved one of those two would split a
       # pin whose whole point is that both sides name the same bytes. Listed defensively - nothing
