@@ -47,7 +47,7 @@ jobs:
 
       # The Dockerfile validates the candidate below, and it needs BuildKit: it reads TARGETARCH,
       # which only BuildKit supplies, so the classic builder dies in the GraalVM stage.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # Both values are read out of the Dockerfile rather than repeated here. A second home for
       # either is a second thing to keep in step, and this job exists precisely because keeping
