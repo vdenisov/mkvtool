@@ -85,6 +85,28 @@ Two consequences worth knowing:
 
 `docker compose down -v` throws all of it away and starts clean.
 
+### Keeping it current
+
+Nothing in here is bumped on a habit. Three mechanisms cover it, and each of them ends in a commit
+somebody reviews:
+
+- **Dependabot** (`.github/dependabot.yml`) opens weekly pull requests for the workflows' action pins,
+  the version catalog in `gradle/libs.versions.toml`, and the base image in the `Dockerfile`. That
+  digest is written out in the `FROM` line rather than held in a build argument precisely so Dependabot
+  can see it.
+- **The `Maintenance` workflow** watches MKVToolNix, which no bot knows about. Every Monday it records
+  the Ubuntu candidate, the Chocolatey and Homebrew versions, and mkvtoolnix.download's current release
+  in its job summary, and it opens a pull request when the pinned baseline has moved or dropped out of
+  Ubuntu's archive. It builds the image with the new version before pushing the branch, because a pull
+  request authored by `GITHUB_TOKEN` starts no checks of its own — closing and reopening it is what
+  runs CI on it.
+- **A person moves the digest.** Any of those merging rebuilds and republishes the image, and
+  `buildenv.yml`'s summary prints the two lines to paste: into `compose.yaml` and into
+  `.github/workflows/native.yml`, in one commit, since both have to name the same bytes.
+
+The image is never rebuilt on a schedule. A rebuild with no commit behind it is exactly what pinning by
+digest exists to prevent.
+
 ### If something goes wrong
 
 **`image build request failed with exit status 137`** during `nativeCompile` means the container ran

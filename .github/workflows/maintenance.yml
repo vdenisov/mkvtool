@@ -1,0 +1,198 @@
+# Watches MKVToolNix, which is the one dependency no bot knows about.
+#
+# Everything else mechanical is Dependabot's - GitHub Actions pins, the version catalog, the
+# Dockerfile's base image; see .github/dependabot.yml. MKVToolNix is not a package this repository
+# declares anywhere a bot can read: the build-environment image installs it from Ubuntu's archive,
+# and the CI legs on the other three OSes take whatever choco, brew and mkvtoolnix.download are
+# serving that week. So the four are queried directly and written into the job summary, which is
+# what makes a version spread part of a run's evidence rather than something to go and look up.
+#
+# Only the distro row is a decision. It is the version the image pins, so when it moves - or when
+# the pinned one falls out of the archive - this opens the bump as a pull request. The other three
+# are recorded and nothing more; they are not the same kind of string (Ubuntu's carries a -Nbuild
+# suffix) and no leg's version is chosen here.
+#
+# The image itself is not rebuilt on this schedule, deliberately, for the reason buildenv.yml gives
+# for having no schedule of its own: a rebuild with no commit behind it is what pinning by digest
+# exists to prevent. The bump below is a commit, and merging it triggers that workflow through its
+# path filter.
+
+name: Maintenance
+
+on:
+  # After CI's 06:00 and the native legs' 07:00, so a week's findings land against a schedule run
+  # that has just exercised `main`.
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One at a time: two runs would race the same branch.
+concurrency:
+  group: maintenance
+  cancel-in-progress: false
+
+jobs:
+  mkvtoolnix:
+    name: MKVToolNix versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # The Dockerfile validates the candidate below, and it needs BuildKit: it reads TARGETARCH,
+      # which only BuildKit supplies, so the classic builder dies in the GraalVM stage.
+      - uses: docker/setup-buildx-action@v3
+
+      # Both values are read out of the Dockerfile rather than repeated here. A second home for
+      # either is a second thing to keep in step, and this job exists precisely because keeping
+      # versions in step by hand is what goes wrong.
+      - name: Read the pin and the base image
+        id: pin
+        run: |
+          pinned=$(sed -n 's/^ARG MKVTOOLNIX_VERSION=//p' Dockerfile)
+          base=$(awk '/^FROM /{print $2; exit}' Dockerfile)
+          test -n "$pinned"
+          test -n "$base"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+      # The distro query is load-bearing and runs in the image's own base rather than on the
+      # runner: `ubuntu-latest` is 24.04 today but its archive configuration is the runner image's,
+      # not the base image's, and it is the base image's answer the pin has to track.
+      #
+      # The other three are best effort. They are public sites, they are being read for a report,
+      # and one of them being down is not a maintenance failure - it is a blank cell.
+      - name: Query the four sources
+        id: query
+        env:
+          BASE: ${{ steps.pin.outputs.base }}
+          PINNED: ${{ steps.pin.outputs.pinned }}
+        run: |
+          docker run --rm "$BASE" sh -c 'apt-get update -qq && apt-cache policy mkvtoolnix && apt-cache madison mkvtoolnix' > distro.txt
+          candidate=$(awk '/^  Candidate: /{print $2; exit}' distro.txt)
+          if [ -z "$candidate" ] || [ "$candidate" = "(none)" ]; then
+            echo "*** mkvtoolnix has no candidate in ${BASE} - the package is gone, not merely moved" >&2
+            exit 1
+          fi
+          # madison lists every version the archive still offers, which is the question the pin
+          # cares about: a pinned version that has dropped out fails `docker build`, not this job.
+          if grep -qF " | ${PINNED} | " distro.txt; then available=yes; else available=no; fi
+
+          brew=$(curl -fsS --max-time 20 https://formulae.brew.sh/api/formula/mkvtoolnix.json | jq -r '.versions.stable') || brew=""
+          # Chocolatey's newest version comes from where /api/v2/package/<id> redirects: it names
+          # the .nupkg, and the .nupkg carries the version. The obvious `package-versions` endpoint
+          # is gone (410) and the OData feed answers this particular filter with an empty page.
+          choco=$(curl -fsS --max-time 20 -o /dev/null -w '%{redirect_url}' https://community.chocolatey.org/api/v2/package/mkvtoolnix | sed 's|.*/mkvtoolnix\.||; s|\.nupkg$||') || choco=""
+          # That document is one long line and holds several <version> elements, so the
+          # latest-source block is cut out first and read second. No `head` anywhere in these
+          # pipelines: it closes the pipe early, and under pipefail that reads as a failed query.
+          upstream=$(curl -fsS --max-time 20 https://mkvtoolnix.download/latest-release.xml | sed -n 's:.*<latest-source>\(.*\)</latest-source>.*:\1:p' | sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p') || upstream=""
+          [ -n "$brew" ] || brew="unavailable"
+          [ -n "$choco" ] || choco="unavailable"
+          [ -n "$upstream" ] || upstream="unavailable"
+
+          if [ "$available" = "no" ]; then
+            reason="the pinned \`${PINNED}\` is no longer in the archive"
+            action=bump
+          elif [ "$candidate" != "$PINNED" ]; then
+            reason="the Ubuntu candidate moved from \`${PINNED}\` to \`${candidate}\`"
+            action=bump
+          else
+            reason="the pin is current"
+            action=none
+          fi
+
+          # Written once, read twice - the job summary below and, when there is one, the pull
+          # request body. Two copies would be free to disagree about the run they describe.
+          {
+            echo "### MKVToolNix"
+            echo
+            echo "| source | version |"
+            echo "|---|---|"
+            echo "| image pin (\`Dockerfile\`) | \`${PINNED}\` |"
+            echo "| Ubuntu 24.04 candidate | \`${candidate}\` |"
+            echo "| Chocolatey (Windows leg) | \`${choco}\` |"
+            echo "| Homebrew (macOS legs) | \`${brew}\` |"
+            echo "| mkvtoolnix.download | \`${upstream}\` |"
+            echo
+            echo "Pinned version still in the archive: **${available}**. Verdict: ${reason}."
+            echo
+            echo "Only the Ubuntu row is compared against the pin - it is the version the build"
+            echo "environment installs. The other three are recorded because they are what the"
+            echo "Windows, macOS and canary legs run, and a one-leg failure is only attributable"
+            echo "if the spread is written down."
+          } > versions.md
+          cat versions.md >> "$GITHUB_STEP_SUMMARY"
+
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+
+      # Building the image with the new version *before* the branch exists is what stands in for
+      # the checks the pull request will not have: a PR authored with GITHUB_TOKEN does not trigger
+      # workflows, so an unvalidated bump would sit there looking green-adjacent and untested. The
+      # Dockerfile asserts the installed version itself, so a build that finishes has checked the
+      # thing the bump claims. A candidate that cannot build reddens this run and opens nothing.
+      - name: Bump the pin and prove it builds
+        if: steps.query.outputs.action == 'bump'
+        env:
+          CANDIDATE: ${{ steps.query.outputs.candidate }}
+        run: |
+          sed -i "s|^ARG MKVTOOLNIX_VERSION=.*|ARG MKVTOOLNIX_VERSION=${CANDIDATE}|" Dockerfile
+          if git diff --quiet Dockerfile; then
+            echo "*** the bump changed nothing - the ARG line did not match" >&2
+            exit 1
+          fi
+          docker buildx build --output=type=cacheonly .
+
+      # The branch name is derived from the candidate, so a weekly re-run force-pushes the same
+      # branch and updates the open pull request rather than stacking a new one beside it.
+      - name: Open or update the pull request
+        if: steps.query.outputs.action == 'bump'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE: ${{ steps.query.outputs.candidate }}
+          REASON: ${{ steps.query.outputs.reason }}
+        run: |
+          branch="maintenance/mkvtoolnix-${CANDIDATE}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add Dockerfile
+          git commit -F - <<COMMIT
+          Bump the build environment's MKVToolNix pin to ${CANDIDATE}
+
+          - Bumped because ${REASON}.
+          - The image was rebuilt with the new version before this branch was pushed, so the
+            Dockerfile's own version assertion has already passed against it.
+          COMMIT
+          git push --force origin "$branch"
+
+          {
+            cat versions.md
+            echo
+            echo "This bumps \`ARG MKVTOOLNIX_VERSION\` because ${REASON}."
+            echo
+            echo "**No checks will start on their own.** A pull request authored with"
+            echo "\`GITHUB_TOKEN\` does not trigger workflows; closing and reopening this one does."
+            echo "The bump was validated before the branch was pushed by building the image with it,"
+            echo "which is the assertion \`buildenv.yml\` would have run."
+            echo
+            echo "After merging, \`buildenv.yml\` rebuilds and publishes the image and prints the new"
+            echo "digest with the two lines to paste - into \`compose.yaml\` and into"
+            echo "\`.github/workflows/native.yml\`, in one commit."
+          } > pr-body.md
+
+          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            gh pr edit "$branch" --body-file pr-body.md
+          else
+            gh pr create --base main --head "$branch" \
+              --title "Bump the build environment's MKVToolNix pin to ${CANDIDATE}" \
+              --body-file pr-body.md
+          fi

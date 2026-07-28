@@ -1,0 +1,37 @@
+# Single source of truth for every version the build resolves — dependencies and plugins alike.
+# The project's own version stays in gradle.properties: it is stamped into the artifacts, not
+# resolved from anywhere.
+#
+# A catalog rather than properties in gradle.properties, which is where these used to live:
+# Dependabot's Gradle parser reads build files and this file and never reads gradle.properties, so
+# a version held there is invisible to the bot that is supposed to bump it.
+
+[versions]
+kotlin = "2.4.10"
+picocli = "4.7.7"
+kotest = "6.2.3"
+# YAML parsing (config.yaml, episodes.yaml). 2.x is the maintained line; v1 ran 1.30.
+snakeyaml = "2.4"
+# JSON parsing (mkvmerge -J, the TheMovieDB API), and the planned `--json` output. Only the runtime
+# library is pinned here — the serialization *plugin* ships with the Kotlin distribution, so it
+# takes the kotlin version above.
+kotlinx-serialization = "1.11.0"
+shadow = "9.6.1"
+# GraalVM native-build-tools: provides the nativeCompile task. Needed to build the distributed
+# native binaries; ordinary build/test/installDist do not use it.
+graalvm-native = "1.1.6"
+
+[libraries]
+picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
+picocli-codegen = { module = "info.picocli:picocli-codegen", version.ref = "picocli" }
+snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+kotest-runner-junit5 = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
+kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
+graalvm-native = { id = "org.graalvm.buildtools.native", version.ref = "graalvm-native" }

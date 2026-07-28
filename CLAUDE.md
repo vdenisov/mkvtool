@@ -62,9 +62,11 @@ and those two personalities used to share a script; separate entry points are th
 
 ## Build
 
-- Gradle with the Kotlin DSL, single project, packages rather than modules. **Every version — project,
-  dependencies, plugins — lives only in `gradle.properties`**; build scripts and code read it from there.
-  Do not inline a version anywhere else.
+- Gradle with the Kotlin DSL, single project, packages rather than modules. **Every dependency and
+  plugin version lives only in `gradle/libs.versions.toml`**, and the project's own version only in
+  `gradle.properties`; build scripts and code read them from there. Do not inline a version anywhere
+  else. The catalog is not decoration — Dependabot's Gradle parser does not read `gradle.properties`,
+  so versions held there were invisible to the bot that is supposed to bump them.
 - **JDK 21 toolchain and a JDK 21 target, deliberately.** Both stay on 21 as newer JDKs appear; do not
   raise the target. The Gradle version itself is unconstrained.
 - picocli for the CLI, with `picocli-codegen` run through **kapt** — it is a javac annotation processor,
@@ -158,11 +160,14 @@ them nothing. The digest is spelled in `compose.yaml` (the local loop) and in `n
 job), kept in step by hand — the image-publishing workflow's summary prints both lines to paste.
 `git` is in the image only because `actions/checkout` needs it there.
 
-**`gradle.properties` owns what the build resolves; the Dockerfile owns what the environment installs.**
+**The version catalog owns what the build resolves; the Dockerfile owns what the environment installs.**
 Nothing appears in both. They are different kinds of fact on different cadences: a base-image digest
 means nothing to Gradle, and an environment version moves by rebuild → new digest → a pin commit
 someone reviews. The image is referred to **by digest, never by tag** — a rebuild of an unchanged
-Dockerfile produces different bytes, because apt hands out whatever patches have landed.
+Dockerfile produces different bytes, because apt hands out whatever patches have landed. The base
+image's own digest is written out in the `FROM` line rather than held in an `ARG`: Dependabot
+substitutes no build args, so a reference behind one is a reference it never bumps, and the price is
+that the `base-image` label names the release instead of the digest.
 
 **The image holds the environment; named volumes hold the project's caches** — `build/`, `.gradle/`,
 `.kotlin/`, the Gradle dependency cache and the acceptance suite's scratch directory. That is what
@@ -303,6 +308,16 @@ versions). Every leg records the mkvmerge it
 ran into the job summary, since that is what makes a one-OS failure separable from a one-version one.
 Versions are recorded rather than equalised: no package manager can install one chosen MKVToolNix on all
 three OSes, so comparability comes from writing down what ran.
+
+**Keeping all of that current is itself scheduled.** Dependabot bumps the workflow action pins, the
+version catalog and the base image weekly. A `Maintenance` workflow on the same morning queries the four
+MKVToolNix sources — the Ubuntu candidate, Chocolatey, Homebrew and mkvtoolnix.download — records them
+in the job summary, and opens a pull request when the image's pinned baseline has moved or dropped out
+of the archive; it builds the image with the new version first, because a pull request authored by
+`GITHUB_TOKEN` starts no checks of its own. Neither rebuilds the image on a schedule: both arrive as
+commits, and a commit touching the `Dockerfile` is what publishes a new image. One gap to know about —
+the native legs never run on a pull request, so a Kotlin or GraalVM-plugin bump wants a manual dispatch
+of the native workflow on its branch before it is believed.
 
 **Releases never publish from CI.** A pushed `v*` tag collects the four archives, the jar and a
 `sha256sum` checksums file, asserts the asset set and each archive's shape against the naming contract,
