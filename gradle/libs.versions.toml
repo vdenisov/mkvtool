@@ -11,7 +11,7 @@ kotlin = "2.4.10"
 picocli = "4.7.7"
 kotest = "6.2.3"
 # YAML parsing (config.yaml, episodes.yaml). 2.x is the maintained line; v1 ran 1.30.
-snakeyaml = "2.4"
+snakeyaml = "2.6"
 # JSON parsing (mkvmerge -J, the TheMovieDB API), and the planned `--json` output. Only the runtime
 # library is pinned here — the serialization *plugin* ships with the Kotlin distribution, so it
 # takes the kotlin version above.
