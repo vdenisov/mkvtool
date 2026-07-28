@@ -1,4 +1,5 @@
-// mkvtool v2 build. Versions come from gradle.properties (single source of truth).
+// mkvtool v2 build. Versions come from gradle/libs.versions.toml (single source of truth); the
+// project's own version comes from gradle.properties.
 
 // Imported rather than written out where used: inside a build script `java` names the Java plugin's
 // extension, so a fully qualified `java.io.…` does not resolve to the package at all.
@@ -7,34 +8,29 @@ import java.io.RandomAccessFile
 import java.util.Locale
 
 plugins {
-    // Versions supplied by pluginManagement in settings.gradle.kts.
-    kotlin("jvm")
+    // Versions supplied by the version catalog.
+    alias(libs.plugins.kotlin.jvm)
     // kapt runs picocli-codegen: it is a javac annotation processor, so KSP cannot
     // run it. picocli-codegen generates the GraalVM reflection config under
     // META-INF/native-image, consumed by the native-image build below.
-    kotlin("kapt")
+    alias(libs.plugins.kotlin.kapt)
     // kotlinx.serialization is a *compiler* plugin: it generates each @Serializable
     // class's serializer at compile time, so JSON parsing needs no runtime reflection
     // and therefore no native-image reachability config.
-    kotlin("plugin.serialization")
+    alias(libs.plugins.kotlin.serialization)
     // installDist provides the dev launcher; also names it via applicationName below.
     application
     // Maintained shadow fork (com.gradleup.*); the old johnrengelman fork is dead.
     // Wires shadowJar into `assemble`, so `build` produces the fat jar.
-    id("com.gradleup.shadow")
+    alias(libs.plugins.shadow)
     // GraalVM native-image. Adds the `nativeCompile` task and consumes the reflection
     // config kapt/picocli-codegen emits under META-INF/native-image. Applying it costs
     // nothing on an ordinary JDK; only `nativeCompile` requires a GraalVM JDK.
-    id("org.graalvm.buildtools.native")
+    alias(libs.plugins.graalvm.native)
 }
 
 group = "org.plukh"
 // version is inherited from gradle.properties.
-
-val picocliVersion = providers.gradleProperty("picocliVersion").get()
-val kotestVersion = providers.gradleProperty("kotestVersion").get()
-val snakeyamlVersion = providers.gradleProperty("snakeyamlVersion").get()
-val kotlinxSerializationVersion = providers.gradleProperty("kotlinxSerializationVersion").get()
 
 // JDK 21 (LTS) toolchain via Gradle toolchains — compilation and test execution use
 // JDK 21 regardless of the JDK that launched Gradle.
@@ -55,13 +51,13 @@ application {
 }
 
 dependencies {
-    implementation("info.picocli:picocli:$picocliVersion")
-    kapt("info.picocli:picocli-codegen:$picocliVersion")
-    implementation("org.yaml:snakeyaml:$snakeyamlVersion")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:$kotlinxSerializationVersion")
+    implementation(libs.picocli)
+    kapt(libs.picocli.codegen)
+    implementation(libs.snakeyaml)
+    implementation(libs.kotlinx.serialization.json)
 
-    testImplementation("io.kotest:kotest-runner-junit5:$kotestVersion")
-    testImplementation("io.kotest:kotest-assertions-core:$kotestVersion")
+    testImplementation(libs.kotest.runner.junit5)
+    testImplementation(libs.kotest.assertions.core)
 }
 
 // Version is defined once (project.version, from gradle.properties) and surfaced to

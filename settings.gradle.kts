@@ -1,17 +1,7 @@
-// Plugin versions are pinned in gradle.properties (single source of truth). Declaring
-// them here means build.gradle.kts applies the plugins without repeating versions.
+// Plugin and dependency versions are pinned in gradle/libs.versions.toml (single source of truth).
+// The version catalog's accessors are not available inside pluginManagement, so the plugins are
+// applied — with their versions — from build.gradle.kts instead; only the repositories live here.
 pluginManagement {
-    val kotlinVersion = providers.gradleProperty("kotlinVersion").get()
-    val shadowVersion = providers.gradleProperty("shadowVersion").get()
-    val graalvmNativeVersion = providers.gradleProperty("graalvmNativeVersion").get()
-    plugins {
-        kotlin("jvm") version kotlinVersion
-        kotlin("kapt") version kotlinVersion
-        // Ships with the Kotlin distribution, so it is versioned with the compiler.
-        kotlin("plugin.serialization") version kotlinVersion
-        id("com.gradleup.shadow") version shadowVersion
-        id("org.graalvm.buildtools.native") version graalvmNativeVersion
-    }
     repositories {
         gradlePluginPortal()
         mavenCentral()

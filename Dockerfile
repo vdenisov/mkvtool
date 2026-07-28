@@ -3,10 +3,10 @@
 # not have here (native-image wants MSVC's cl.exe), so this image is also how a Windows machine
 # builds a Linux binary at all.
 #
-# What lives where: this file owns the versions of everything the *environment* installs, and
-# gradle.properties owns the versions of everything the *build resolves*. Nothing appears in both.
-# They move on different cadences through different mechanisms - a version here changes by rebuild,
-# new digest, and a pin commit someone reviews.
+# What lives where: this file owns the versions of everything the *environment* installs, and the
+# version catalog (gradle/libs.versions.toml) owns the versions of everything the *build resolves*.
+# Nothing appears in both. They move on different cadences through different mechanisms - a version
+# here changes by rebuild, new digest, and a pin commit someone reviews.
 #
 # See docs/building.md for how to use it.
 
@@ -14,8 +14,11 @@
 # was tested against. 24.04 specifically, because it is what the CI runners use - the image's glibc
 # becomes the released binary's minimum supported version, so a newer distro here would raise that
 # floor for every user without anything failing in CI.
-ARG BASE_IMAGE=ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
-FROM ${BASE_IMAGE}
+#
+# Written out here rather than behind an ARG, which is what the digest used to sit in: Dependabot's
+# Dockerfile parser matches literal FROM references and substitutes no build args, so a
+# `FROM ${BASE_IMAGE}` is a reference it cannot see and therefore never bumps.
+FROM ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
 
 # The last GraalVM CE for JDK 21. Community builds stopped at 21.0.2, which is also why the Gradle
 # plugin's reachability-metadata repository is disabled - see build.gradle.kts.
@@ -154,7 +157,7 @@ RUN set -eux; \
 
 # Unpack the Gradle distribution the wrapper asks for, so the first real build does not spend a
 # 130 MB download on it. Only the distribution - not the project's dependency cache, which would tie
-# this image to gradle.properties and invalidate it on every dependency bump. The rule: the image
+# this image to the version catalog and invalidate it on every dependency bump. The rule: the image
 # holds the environment, the volumes hold the project's caches.
 COPY --chown=builder:builder gradlew /tmp/wrapper/gradlew
 COPY --chown=builder:builder gradle /tmp/wrapper/gradle
@@ -168,17 +171,17 @@ RUN set -eux; \
 # to it instead of replacing it.
 CMD ["bash"]
 
-# Re-declared for the label below, because an ARG before FROM does not survive into the stage.
-# Declared here rather than at the top so that changing it invalidates one layer instead of the
-# whole image.
-ARG BASE_IMAGE
-
 # So `docker inspect` answers "what is in this image" without anyone reading this file.
+#
+# The base-image label names the release rather than the digest, which is the one thing here that
+# is not the exact string the build used: the digest lives in the FROM line above and nothing can
+# read a FROM line back into a label, so repeating it would be a second copy free to drift. The
+# release is the fact worth having anyway - it is what fixes the released binary's glibc floor.
 LABEL org.opencontainers.image.title="mkvtool build environment" \
       org.opencontainers.image.description="Linux toolchain for building and testing the mkvtool native binary." \
       org.opencontainers.image.source="https://github.com/vdenisov/mkvtool" \
       org.opencontainers.image.licenses="MIT" \
-      org.plukh.mkvtool.base-image="${BASE_IMAGE}" \
+      org.plukh.mkvtool.base-image="ubuntu:24.04" \
       org.plukh.mkvtool.graalvm="${GRAALVM_VERSION}" \
       org.plukh.mkvtool.groovy="${GROOVY_VERSION}" \
       org.plukh.mkvtool.mkvtoolnix="${MKVTOOLNIX_VERSION}"

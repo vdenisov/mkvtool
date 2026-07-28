@@ -1,0 +1,60 @@
+# Mechanical version bumps arrive as bot PRs, so nothing here is hand-rolled. The two things no bot
+# knows about are elsewhere: MKVToolNix is watched by .github/workflows/maintenance.yml, and the
+# build-environment image's own digest is bumped by hand from what buildenv.yml prints.
+#
+# Everything runs Monday morning, after CI's 06:00 and the native legs' 07:00, so a week's bumps
+# land against a schedule run that has just exercised `main`.
+#
+# Worth knowing before reviewing a bump: the native legs run on push, schedule and dispatch and
+# never on a pull request, so a Kotlin or native-build-tools bump is not compiled to a native image
+# until it is merged. Dispatch `Native and release` on the PR branch before merging one of those.
+version: 2
+updates:
+  # The `uses:` pins across every workflow. Grouped because an action bump is never interesting on
+  # its own, and four separate PRs for four tag bumps is noise that gets scrolled past rather than
+  # reviewed.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # gradle/libs.versions.toml. It is a catalog rather than properties in gradle.properties
+  # precisely so this entry has something to read - Dependabot's Gradle parser does not look in
+  # gradle.properties at all.
+  #
+  # Minor and patch are grouped; a major gets its own PR, because a Kotlin or native-build-tools
+  # line change is the one that has to be believed rather than skimmed.
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+    groups:
+      gradle-minor:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # The Dockerfile's base image. Its digest is written out in the FROM line rather than held in an
+  # ARG specifically so that this entry can see it.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+    ignore:
+      # The build-environment image is ours: buildenv.yml publishes it and a human pins the digest
+      # in compose.yaml and native.yml together. A bot that moved one of those two would split a
+      # pin whose whole point is that both sides name the same bytes. Listed defensively - nothing
+      # under / references the image today.
+      - dependency-name: ghcr.io/vdenisov/mkvtool-buildenv
