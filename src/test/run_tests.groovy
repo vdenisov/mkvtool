@@ -15,7 +15,7 @@ import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 
 @CommandLine.Command(name='run_tests', mixinStandardHelpOptions=true,
-                     description='Run the mkv.groovy test suite')
+                     description='Run the mkvtool acceptance suite')
 @PicocliScript2
 
 @CommandLine.Option(names=['-f', '--filter'], description='Run only tests whose name contains this string')
@@ -28,12 +28,8 @@ import java.nio.charset.StandardCharsets
                     description='Path to mkvmerge executable (default: auto-detect from PATH)')
 @Field String mkvmergeExeOverride = null
 
-@CommandLine.Option(names=['--target'], paramLabel='scripts|app',
-                    description='What each case runs against: the Groovy scripts (default) or the mkvtool binary')
-@Field String runTarget = 'scripts'
-
 @CommandLine.Option(names=['--app-bin'], paramLabel='PATH',
-                    description='Override the mkvtool binary used by --target app (default: installDist launcher)')
+                    description='The mkvtool binary under test (default: the installDist launcher)')
 @Field String appBinOverride = null
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
@@ -41,22 +37,32 @@ import java.nio.charset.StandardCharsets
 def scriptDir = new File(getClass().protectionDomain.codeSource.location.toURI()).parentFile
 def repoRoot  = scriptDir.parentFile.parentFile          // …/mkv-script
 def testMkv   = new File(scriptDir, 'test.mkv')
-def mkvgroovy = new File(repoRoot, 'src/mux.groovy')
-def binDir    = new File(repoRoot, 'bin')
 def workRoot  = new File(scriptDir, 'work')
 
-// Shared colour helpers — auto mode: coloured on a dev terminal, plain when
-// piped (CI logs) or under NO_COLOR. See src/output.groovy.
-def ui = evaluate(new File(repoRoot, 'src/lib/output.groovy'))('auto')
+// Colour helpers, transcribed from the v1 lib this harness used to load in-process. Only red and
+// green are ever called from here, so the whole of what is needed is below rather than a copy of a
+// 150-line file. (`pluralize` was the third, and its only caller was the batch-label case that
+// retired with the library it tested in-process.)
+//
+// The terminal probe is transcribed too, isTerminal() included: on JDK 21 System.console() is null
+// whenever output is redirected, but from JDK 22 it returns a Console for a pipe as well, so the
+// null check alone would start colouring redirected output — every CI log and every piped run —
+// and a test assertion would begin seeing escapes.
+def onTerminal = {
+    def console = System.console()
+    console != null && (!console.respondsTo('isTerminal') || console.isTerminal())
+}
+def uiEnabled = onTerminal() && !System.getenv('NO_COLOR')
+def paint = { String code, s -> uiEnabled ? "${(char) 27}[${code}m${s}${(char) 27}[0m" : "$s" }
+def ui = [
+    red  : { s -> paint('31', s) },
+    green: { s -> paint('32', s) },
+]
 
 def isWindows = System.getProperty('os.name').toLowerCase().contains('win')
-def groovyBin = isWindows ? 'bin/groovy.bat' : 'bin/groovy'
-def groovyExe = new File(System.getProperty('groovy.home', ''), groovyBin).with {
-    exists() ? absolutePath : 'groovy'
-}
 
-// --target app runs the mkvtool binary instead of the Groovy scripts. Default is the
-// installDist launcher; --app-bin / MKVTOOL_APP_BIN overrides it (e.g. the native binary).
+// What is under test. Defaults to the installDist launcher; --app-bin / MKVTOOL_APP_BIN points it
+// at any other packaging — the native binary and the fat-jar launcher both go through here.
 def appBin = {
     def override = appBinOverride ?: System.getenv('MKVTOOL_APP_BIN')
     if (override) return new File(override)
@@ -65,8 +71,20 @@ def appBin = {
     new File(repoRoot, launcher)
 }()
 
-// Shared with the scripts under test; see src/tools.groovy.
-def findMkvTool = evaluate(new File(repoRoot, 'src/lib/tools.groovy'))
+// Locate an MKVToolNix executable: PATH first, then the Windows default install location.
+// Transcribed from the v1 lib for the same reason as the colour helpers above.
+def findMkvTool = { String name ->
+    try {
+        def probe = [name, '--version'].execute()
+        probe.waitFor()
+        if (probe.exitValue() == 0) return name
+    } catch (ignored) {}
+    if (isWindows) {
+        def path = "C:\\Program Files\\MKVToolNix\\${name}.exe"
+        if (new File(path).exists()) return path
+    }
+    throw new RuntimeException("'$name' not found on PATH or in default install location. Install MKVToolNix.")
+}
 
 def mkvmergeExe = mkvmergeExeOverride ?: findMkvTool('mkvmerge')
 
@@ -76,14 +94,11 @@ try {
     mkvpropeditExe = findMkvTool('mkvpropedit')
 } catch (ignored) {}
 
-assert testMkv.exists()   : "test.mkv not found at $testMkv"
-assert mkvgroovy.exists() : "mux.groovy not found at $mkvgroovy"
+assert testMkv.exists() : "test.mkv not found at $testMkv"
 
-// A missing binary under --target app is a setup error, not a per-case skip: fail loudly
-// and point at the build step instead of silently passing.
-if (runTarget == 'app') {
-    assert appBin.exists() : "mkvtool binary not found at $appBin — run './gradlew installDist' first (or pass --app-bin)"
-}
+// A missing binary is a setup error, not a per-case skip: fail loudly and point at the build step
+// instead of silently passing.
+assert appBin.exists() : "mkvtool binary not found at $appBin — run './gradlew installDist' first (or pass --app-bin)"
 
 // ─── Helpers (closures so they capture script-scope variables) ───────────────
 
@@ -263,34 +278,29 @@ def stageTree = { File workDir ->
     stageInput(workDir, 'extras/Sample.mkv')
 }
 
-/** Run any script from the repo's src/ in workDir; return [exitCode, output].
- *  The output is also kept for diagnostics if the test fails. */
+/** Run one mkvtool subcommand in workDir; return [exitCode, output].
+ *  The output is also kept for diagnostics if the test fails.
+ *
+ *  scriptName is a legacy key, not a path: it is the v1 script's file name, mapped to the
+ *  subcommand by stripping the suffix and turning underscores into hyphens. The scripts are gone
+ *  and every one of these cases is being translated to Kotlin, so the ~60 call sites keep the old
+ *  spelling rather than churning a file with a known end date. */
 def runScript = { String scriptName, File workDir, List extraArgs = [], Map env = [:] ->
-    List cmd
-    if (runTarget == 'app') {
-        // scriptName carries the .groovy suffix; map it to the subcommand (strip suffix,
-        // underscores to hyphens) — the inverse of the bin/ wrapper rule.
-        def subcmd = scriptName.replaceAll(/\.groovy$/, '').replace('_', '-')
-        // ProcessBuilder cannot launch a .bat directly, so route it through cmd /c;
-        // a native .exe (via --app-bin) is launched directly.
-        def prefix = appBin.name.toLowerCase().endsWith('.bat') ? ['cmd', '/c'] : []
-        cmd = prefix + [appBin.absolutePath, subcmd] + extraArgs
-    } else {
-        def script = new File(repoRoot, "src/${scriptName}")
-        assert script.exists() : "script not found at $script"
-        cmd = [groovyExe, script.absolutePath] + extraArgs
-    }
-    def result = exec(cmd, workDir, env)
+    def subcmd = scriptName.replaceAll(/\.groovy$/, '').replace('_', '-')
+    // ProcessBuilder cannot launch a .bat directly, so route it through cmd /c;
+    // a native .exe (via --app-bin) is launched directly.
+    def prefix = appBin.name.toLowerCase().endsWith('.bat') ? ['cmd', '/c'] : []
+    def result = exec(prefix + [appBin.absolutePath, subcmd] + extraArgs, workDir, env)
     lastMkvOutput = result[1]
     result
 }
 
-/** Run mux.groovy from workDir; return [exitCode, output]. */
+/** Run `mkvtool mux` from workDir; return [exitCode, output]. */
 def runMkvGroovy = { File workDir, List extraArgs = [] ->
     runScript('mux.groovy', workDir, extraArgs)
 }
 
-/** Run inspect.groovy from workDir; return [exitCode, output]. */
+/** Run `mkvtool inspect` from workDir; return [exitCode, output]. */
 def runInspect = { File workDir, List extraArgs = [] ->
     runScript('inspect.groovy', workDir, extraArgs)
 }
@@ -326,13 +336,6 @@ def check = { boolean cond, String msg ->
 
 def checkEquals = { actual, expected, String label ->
     if (actual != expected) throw new AssertionError("$label: expected <$expected> but got <$actual>")
-}
-
-/** Skip a case under --target app (it tests script-only mechanics). Returns true when
- *  skipped so the caller can `return`; prints a note like the other skip guards. */
-def skipUnderApp = { String reason ->
-    if (runTarget == 'app') { println "  (skipped under --target app: $reason)"; return true }
-    false
 }
 
 /** Run a named test case; handle pass/fail bookkeeping. */
@@ -851,77 +854,6 @@ runTest('24_realistic_season_episode') { workDir ->
     check(!langs.contains('rus'), 'no Russian tracks in output')
 }
 
-// ─── 25. bin/ wrappers exist and point at real scripts ───────────────────────
-// 18 hand-written files; this catches typos for the price of a directory listing.
-runTest('25_wrappers_exist_and_resolve') { workDir ->
-    if (skipUnderApp('tests the Groovy bin/ wrappers')) return
-    def wrappers = [
-        'mkv-mux'                : 'mux.groovy',
-        'mkv-inspect'            : 'inspect.groovy',
-        'mkv-rename'             : 'rename.groovy',
-        'mkv-propedit'           : 'propedit.groovy',
-        'mkv-fix-srt'            : 'fix_srt.groovy',
-        'mkv-fetch-episodes'     : 'fetch_episodes.groovy',
-        'mkv-filename-to-title'  : 'filename_to_title.groovy',
-        'mkv-to-utf8'            : 'to_utf8.groovy',
-        'mkv-find-unused-fonts'  : 'find_unused_fonts.groovy',
-    ]
-
-    wrappers.each { name, target ->
-        def sh  = new File(binDir, name)
-        def bat = new File(binDir, "${name}.bat")
-
-        check(sh.exists(),  "$name exists")
-        check(bat.exists(), "${name}.bat exists")
-        check(sh.length()  > 0, "$name is not empty")
-        check(bat.length() > 0, "${name}.bat is not empty")
-
-        // Both wrappers must name the same script, and it must be a real file
-        check(sh.text.contains("../src/${target}"),  "$name references src/$target")
-        check(bat.text.contains("..\\src\\${target}"), "${name}.bat references src\\$target")
-        check(new File(repoRoot, "src/${target}").exists(), "src/$target exists (referenced by $name)")
-    }
-}
-
-// ─── 26. Wrapper actually runs ────────────────────────────────────────────────
-// Bare invocation in a directory with a config but no media files: the script
-// should start up, find nothing to do, and exit cleanly. Deliberately avoids
-// any CLI flags so this test does not depend on later features.
-runTest('26_wrapper_smoke') { workDir ->
-    if (skipUnderApp('tests the Groovy bin/ wrappers')) return
-    // The wrappers hardcode a bare 'groovy'; the harness may be using groovy.home.
-    // On Windows 'groovy' is a .bat, which ProcessBuilder cannot launch directly —
-    // probe through cmd, the same way the wrapper itself is invoked below.
-    def groovyOnPath = { ->
-        try {
-            def probe = isWindows ? ['cmd', '/c', 'groovy', '--version'] : ['groovy', '--version']
-            def p = probe.execute()
-            p.waitFor()
-            return p.exitValue() == 0
-        } catch (ignored) {
-            return false
-        }
-    }()
-
-    if (!groovyOnPath) {
-        println "  (skipped: 'groovy' is not on PATH; wrappers require it)"
-        return
-    }
-
-    writeConfig(workDir, cfg(
-        audioTracks: [[id: 2, language: 'en', title: 'English', default: true]],
-        trackOrder: '0:0,0:2'
-    ))
-
-    def cmd = isWindows
-        ? ['cmd', '/c', new File(binDir, 'mkv-mux.bat').absolutePath]
-        : [new File(binDir, 'mkv-mux').absolutePath]
-
-    def (code, out) = exec(cmd, workDir)
-    checkEquals(code, 0, 'wrapper exit code')
-    check(out.contains('*** Done'), 'wrapper ran mux.groovy to completion')
-}
-
 // ─── 27. --dry-run prints the command and touches nothing ────────────────────
 runTest('27_dry_run_produces_no_output') { workDir ->
     stageInput(workDir)
@@ -1143,11 +1075,13 @@ runTest('36_fetch_episodes_stub_error') { workDir ->
 runTest('37_fetch_episodes_live_contract') { workDir ->
     def key = System.getenv('TMDB_API_KEY')
     if (!key) {
-        def keyFile = new File(repoRoot, 'src/apikey.txt')
+        // The repository root, not src/ — that directory held the scripts and their key file, and
+        // holds neither now. Ignored by git either way.
+        def keyFile = new File(repoRoot, 'apikey.txt')
         if (keyFile.exists()) key = keyFile.readLines().find { it.trim() }?.trim()
     }
     if (!key) {
-        println "  (skipped: no TheMovieDB API key in TMDB_API_KEY or src/apikey.txt)"
+        println "  (skipped: no TheMovieDB API key in TMDB_API_KEY or apikey.txt)"
         return
     }
 
@@ -1991,44 +1925,6 @@ runTest('84_to_utf8_color_summary') { workDir ->
     check(out2.contains('1 failed'), 'pinned summary substring survives colouring')
 }
 
-// ─── 85. filename_to_title writes the bare name, no stray quotes ─────────────
-// Regression guard for the embedded-\" bug: list-exec needs no manual quoting,
-// so the title must be exactly the base file name on every platform.
-runTest('85_filename_to_title_sets_title') { workDir ->
-    if (!mkvpropeditExe) {
-        println "  (skipped: mkvpropedit not available)"
-        return
-    }
-
-    def input = stageInput(workDir, 'My Episode.mkv')
-    def (code, out) = runScript('filename_to_title.groovy', workDir)
-    checkEquals(code, 0, 'exit code')
-
-    def parsed = identify(input)
-    checkEquals(parsed.container.get('properties').title, 'My Episode', 'segment title, unquoted')
-    def video = parsed.tracks.find { it.type == 'video' }
-    checkEquals(video.get('properties').track_name, 'My Episode', 'video track name, unquoted')
-    check(out.contains('1 processed, 0 failed'), 'summary printed')
-}
-
-// ─── 86. filename_to_title continues past a bad file and exits 1 ─────────────
-runTest('86_filename_to_title_exit_on_failure') { workDir ->
-    if (!mkvpropeditExe) {
-        println "  (skipped: mkvpropedit not available)"
-        return
-    }
-
-    new File(workDir, 'bad.mkv').text = 'not an mkv at all'
-    def good = stageInput(workDir, 'good.mkv')
-
-    def (code, out) = runScript('filename_to_title.groovy', workDir)
-    checkEquals(code, 1, 'exits 1 when any file failed')
-    check(out.contains('*** Error:'), 'reports the failure')
-    check(out.contains('1 processed, 1 failed'), 'summary counts both outcomes')
-    checkEquals(identify(good).container.get('properties').title, 'good',
-                'the good file was still processed')
-}
-
 // ─── 87. fix_srt reformats the legacy format into .srt.fixed ─────────────────
 // First-ever coverage of fix_srt: legacy "hh:mm:ss.cc,hh:mm:ss.cc" timing plus
 // [br] line breaks become numbered SRT cues with "-->" timing.
@@ -2559,68 +2455,6 @@ runTest('109_mux_rejects_inspection_flags') { workDir ->
     // output instead, rather than pinning behaviour worth changing separately.
 }
 
-// ─── 110. the discovery engine's matching rules ──────────────────────────────
-// Loaded in-process rather than through a script: these are the rules both
-// mkv-inspect and mkv-rename depend on, and asserting on the data structure is
-// far more precise than reading them back out of a report.
-runTest('110_discovery_engine_matching') { workDir ->
-    def episodes = evaluate(new File(repoRoot, 'src/lib/episodes.groovy'))
-    def discovery = evaluate(new File(repoRoot, 'src/lib/discovery.groovy'))(episodes)
-
-    // Whole-word language tokens only, two- and three-letter alike.
-    checkEquals(discovery.guessLanguage(['Rus sound']), 'rus', 'three-letter token in a directory')
-    checkEquals(discovery.guessLanguage(['Ru subs']), 'rus', 'two-letter token as a word')
-    checkEquals(discovery.guessLanguage(['Ru.subs']), 'rus', 'punctuation separates words')
-    checkEquals(discovery.guessLanguage(['Rusubs']), null, 'no match inside a longer word')
-    // Spellings come from CLDR, so a language answers to its own name too.
-    checkEquals(discovery.guessLanguage(['Русский']), 'rus', 'native name in its own script')
-    checkEquals(discovery.guessLanguage(['Espanol subs', 'Español']), 'spa', 'native name with diacritics')
-    checkEquals(discovery.guessLanguage(['English subs']), 'eng', 'English name')
-    // Two-letter codes that are ordinary words are excluded on purpose.
-    checkEquals(discovery.guessLanguage(['No subs']), null, "'No' is not Norwegian")
-    checkEquals(discovery.guessLanguage(['Extras (to be done)']), null, "'to' is not a language here")
-    // Only the bare two-letter form is withheld, which is what makes the entry
-    // cheap: the language still answers to its three-letter code and both names.
-    checkEquals(discovery.guessLanguage(['UK BluRay']), null, "'UK' is a region, not Ukrainian")
-    checkEquals(discovery.guessLanguage(['Ukr sound']), 'ukr', 'but the three-letter code still matches')
-    checkEquals(discovery.guessLanguage(['Українська']), 'ukr', 'and so does the native name')
-    checkEquals(discovery.guessLanguage(['El Bosque']), null, "'El' is a Spanish article, not Greek")
-    checkEquals(discovery.guessLanguage(['Greek subs']), 'gre', 'Greek reports its bibliographic code')
-    // Dropped from BIBLIOGRAPHIC because /B and /T agree on it — the fallback to
-    // getISO3Language has to produce the same answer the table used to.
-    checkEquals(discovery.guessLanguage(['Serbian']), 'srp', 'Serbian has no separate /B code')
-    checkEquals(discovery.trimForDisplay('.rus'), 'rus', 'display trims leading punctuation')
-    checkEquals(discovery.trimForDisplay('[Studio]'), 'Studio', 'display trims brackets')
-    // Range collapsing lives in episodes.groovy, where the episode semantics are
-    // — see test 122; discovery has no business knowing about episode numbers.
-
-    // A file name that is a prefix of another main file's must attach to the
-    // longest match, not be read as the shorter one plus a suffix.
-    ['Title', 'Title 2'].each { stageInput(workDir, "Show - S01E01 - ${it}.mkv".toString()) }
-    stageInput(workDir, 'Show - S01E02 - Second.mkv')
-    stageExternalText(workDir, 'Show - S01E01 - Title 2.srt')
-    stageExternalText(workDir, 'Show - S01E01 - Title!odd{sep}.srt')
-    // Its own name relates to no main file, so only the episode number can place
-    // it — and it has to be an episode only one main file claims, since two files
-    // for E01 make that episode ambiguous by design.
-    stageExternalText(workDir, 'Rus sound/[X]/Other Release S01E02.mka')
-
-    def mains = workDir.listFiles({ it.name.endsWith('.mkv') } as FileFilter).toList().sort { it.name }
-    def result = discovery.discoverCompanions(
-        mains, discovery.walkTree(workDir, [] as Set), [mainExtensions: ['mkv'] as Set])
-
-    def byFile = [:]
-    result.variants.each { v -> v.entries.each { byFile[it.file.name] = [variant: v, entry: it] } }
-
-    checkEquals(byFile['Show - S01E01 - Title 2.srt'].entry.main.name, 'Show - S01E01 - Title 2.mkv',
-                'longest main name wins over a shorter one plus a suffix')
-    checkEquals(byFile['Show - S01E01 - Title 2.srt'].entry.suffix, '', 'and so has no suffix at all')
-    checkEquals(byFile['Show - S01E01 - Title!odd{sep}.srt'].entry.suffix, '!odd{sep}',
-                'any separator starts a suffix')
-    checkEquals(byFile['Other Release S01E02.mka'].entry.tier, 2, 'matched by episode number only')
-    checkEquals(result.unmatched.size(), 0, 'nothing else is left over')
-}
-
 // ─── 111. --identify bundles discovered external files under each episode ────
 runTest('111_identify_external_files') { workDir ->
     stageTree(workDir)
@@ -2890,89 +2724,6 @@ runTest('120_unreadable_external_reported') { workDir ->
     check(!out.contains('Exception'), 'no stack trace')
 }
 
-// ─── 121. the probing progress meter, in both of its renderings ──────────────
-// Probing a season over a slow share is a long silence, so it gets a meter. The
-// two renderings exist because '\r' erases nothing in a file or a pipe: every
-// frame would be retained, smearing the log the tests themselves read.
-runTest('121_progress_meter_renderings') { workDir ->
-    // Named for the harness's own script-level `ui`, which this must not shadow.
-    def meter = evaluate(new File(repoRoot, 'src/lib/output.groovy'))('never')
-
-    def capture = { Closure body ->
-        def buffer = new ByteArrayOutputStream()
-        def previous = System.out
-        System.setOut(new PrintStream(buffer, true))
-        try { body() } finally { System.setOut(previous) }
-        buffer.toString()
-    }
-
-    def bar = capture {
-        def p = meter.progress('*** Reading 5 files', 5, [interactive: true])
-        5.times { p.tick() }
-        p.finish()
-    }
-    def frames = bar.split('\r').findAll { it.trim() }
-    checkEquals(frames.size(), 5, 'one frame per percentage change')
-    check(frames[-1].contains('100%'), "the meter reaches 100%; got:\n${bar}")
-    check(frames[-1].contains('[########################]'), 'the bar fills')
-    check(!bar.contains('█'), 'the bar is ASCII, for Windows consoles on legacy codepages')
-
-    def dots = capture {
-        def p = meter.progress('*** Reading 200 files', 200, [interactive: false])
-        200.times { p.tick() }
-        p.finish()
-    }
-    // A bare '\r' is the rewriting kind; the one in a Windows CRLF line ending is
-    // not, which is why this looks for a carriage return with no newline after it.
-    check(!(dots =~ /\r(?!\n)/).find(), "nothing is rewritten in place when redirected; got:\n${dots}")
-    check(dots.startsWith('*** Reading 200 files'), 'the label is still printed')
-    // Dots are emitted per slice of the total, not per file, so a long batch
-    // cannot wrap the terminal with hundreds of them.
-    def dotCount = dots.count('.')
-    check(dotCount > 0 && dotCount <= 50, "dots are capped for a long batch, got ${dotCount}")
-}
-
-// ─── 122. batch-relative episode labels for the layout groups ────────────────
-// Display only, and deliberately not parseSeasonEpisode: this needs the rest of
-// the batch to know where the number starts, which is exactly what makes it safe
-// (1080p and x264 sit inside the shared prefix) and exactly why it cannot answer
-// "which episode is this file" for one file on its own.
-runTest('122_batch_episode_labels') { workDir ->
-    def episodes = evaluate(new File(repoRoot, 'src/lib/episodes.groovy'))
-    def label = { List names -> episodes.formatRanges(episodes.batchLabels(names).values()) }
-
-    checkEquals(label((1..4).collect { "My Show - S01E0${it} - Title".toString() }), '01-04',
-                'an SxxEyy batch uses the episode number')
-    checkEquals(label((1..10).collect {
-        "[Salender-Raws] Hellsing OVA - ${String.format('%02d', it)} (BD 1920x1080 x264 5.1 FLAC)".toString()
-    }), '01-10', 'a plain numbered batch is anchored on its common prefix')
-
-    // The prefix of 10..19 ends mid-number, so the trailing digits have to come
-    // off it or the batch reads as 0-9.
-    checkEquals(label((10..19).collect { "Show - ${it}".toString() }), '10-19', 'trailing digits are trimmed')
-    checkEquals(label((1..9).collect { "Show - 0${it}".toString() }), '01-09', 'padding survives the trim')
-    checkEquals(label((1..3).collect { "Hellsing${it}".toString() }), '1-3', 'no separator is still a number')
-    checkEquals(label((1..3).collect { "Show (2024) 0${it}".toString() }), '01-03',
-                'a number in the show name is inside the prefix, so it cannot be mistaken for one')
-    checkEquals(label(['Show - 01', 'Show - 02', 'Show - 05']), '01-02, 05', 'gaps break the run')
-    checkEquals(episodes.batchLabels(['Alpha', 'Beta']), [:], 'an unnumbered batch has no labels at all')
-
-    // The line a layout-group header carries, composed here rather than in each
-    // caller: inspect.groovy's report and mux.groovy's pre-flight are the same
-    // report and must render a group identically. The real ui.pluralize is used
-    // rather than a stub, so this cannot drift from what the scripts pass in.
-    //
-    // It yields the noun and the ranges, with no count of its own: the caller
-    // has already printed one ("6 files - episodes 05-10"), which is exactly the
-    // job pluralize exists for as against plural.
-    checkEquals(episodes.membershipLabel((1..3).collect { "Show - S01E0${it} - T".toString() }, ui.pluralize),
-                'episodes 01-03', 'membershipLabel composes the noun and the ranges')
-    checkEquals(episodes.membershipLabel(['Show - S01E01 - T'], ui.pluralize), 'episode 01',
-                'and agrees in number with what it found')
-    checkEquals(episodes.membershipLabel(['Alpha', 'Beta'], ui.pluralize), null,
-                'declining when the batch is not numbered, so the caller falls back to file names')
-}
-
 // ─── 123. every layout group names its files, the largest included ───────────
 // The old report left the majority unnamed because its job was spotting
 // outliers. Now the job is "here are your muxing passes and what goes in each",
@@ -3117,54 +2868,6 @@ runTest('125_same_kind_externals_split_groups') { workDir ->
     check(out.contains('Layout 2'),
           "but the episode carrying an extra file of the same kind is its own pass; got:\n${out}")
     check(!out.contains('Layout 3'), 'and there are two passes, not one per file')
-}
-
-// ─── 126. the shared YAML-mapping loader classifies, and only classifies ─────
-// Four call sites — config.yaml and episodes.yaml, in mux and in inspect — share
-// this, and each applies its own policy to the result. So what is pinned here is
-// the classification itself, plus the two options that exist precisely because
-// the callers differ: the charset and the in-guard transform.
-runTest('126_yaml_mapping_loader') { workDir ->
-    def loader = evaluate(new File(repoRoot, 'src/lib/yaml.groovy'))({ String t -> new Yaml().load(t) })
-    def write = { String name, String text ->
-        def f = new File(workDir, name)
-        f.setText(text, 'UTF-8')
-        f
-    }
-
-    def good = loader.loadMapping(write('good.yaml', "a: 1\n"))
-    checkEquals(good.value, [a: 1], 'a mapping comes back as itself')
-    checkEquals(good.problem, null, 'and reports no problem')
-
-    def empty = loader.loadMapping(write('empty.yaml', ''))
-    checkEquals(empty.value, null, 'an empty file has no value')
-    check(empty.problem?.contains('is empty'), "and says so; got: ${empty.problem}")
-
-    def list = loader.loadMapping(write('list.yaml', "- one\n- two\n"))
-    checkEquals(list.value, null, 'a sequence is not a mapping')
-    check(list.problem?.contains('not a mapping'), "and says so; got: ${list.problem}")
-
-    def broken = loader.loadMapping(write('broken.yaml', "a: 1\n  b: [\n"))
-    checkEquals(broken.value, null, 'a syntax error has no value')
-    // The fragment is lowercase and unpunctuated because the caller finishes it:
-    // mux appends "; there is nothing to mux with." and exits, inspect appends
-    // "; continuing without it." and does not.
-    check(broken.problem?.startsWith('could not parse'),
-          "and is a bare fragment for the caller to finish; got: ${broken.problem}")
-    checkEquals(broken.problem.readLines().size(), 1,
-                'first line only - snakeyaml dumps a screenful of context after it')
-
-    // The transform runs INSIDE the guard, which is the only reason normalizeYaml
-    // is safe to pass: `episode: "one"` throws there, not at parse time.
-    def blew = loader.loadMapping(write('t.yaml', "a: 1\n"),
-                                  [transform: { throw new NumberFormatException('boom') }])
-    checkEquals(blew.value, null, 'a transform that throws is a problem, not a stack trace')
-    check(blew.problem?.contains('could not parse'), "and is reported like one; got: ${blew.problem}")
-
-    // charset is a parameter because episodes.yaml is a fixed UTF-8 contract while
-    // config.yaml keeps Groovy's auto-detection. Unifying them would break one.
-    def cyrillic = loader.loadMapping(write('cyr.yaml', "show: Тест\n"), [charset: 'UTF-8'])
-    checkEquals(cyrillic.value?.show, 'Тест', 'an explicit charset reads non-ASCII correctly')
 }
 
 // ─── 127. the check report grays a guessed external language ─────────────────

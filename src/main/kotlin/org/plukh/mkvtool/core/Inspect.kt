@@ -8,7 +8,7 @@ import org.plukh.mkvtool.out.plural
 import java.io.File
 
 /**
- * `inspect`: everything that reports rather than muxes. A port of `src/inspect.groovy`.
+ * `inspect`: everything that reports rather than muxes.
  *
  * One spine serves both modes. Discovery, the single probing pass, the external legend and the leftovers
  * run whatever was asked for; `--identify` and the consistency check are two consumers hanging off the
@@ -457,7 +457,7 @@ private fun externalsFor(
 
     val hits = discovered.variants
         .flatMap { variant -> variant.entries.filter { it.main == main }.map { Hit(variant, it) } }
-        // Sorted on the two keys concatenated rather than as a pair, as `src/inspect.groovy` does. The
+        // Sorted on the two keys concatenated rather than as a pair, as v1 did. The
         // two agree below 27 variants, which is as far as labels stay one character wide.
         .sortedBy { "${it.variant.label}${it.entry.entry.relPath}" }
 

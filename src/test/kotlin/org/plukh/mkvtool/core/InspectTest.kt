@@ -435,7 +435,7 @@ class InspectTest : FunSpec({
         }
 
         test("a configured source that is also a discovered companion is read once") {
-            // The canonical `${fileName}` layout produces exactly this every run. `src/inspect.groovy`
+            // The canonical `${fileName}` layout produces exactly this every run. v1
             // reads such a file twice, because `File(path)` and `./path` have different absolute paths and
             // its cache is keyed on those; keying canonically is what collapses them to one subprocess.
             val dir = tempdir()

@@ -16,7 +16,7 @@ import java.util.concurrent.Callable
 
 /**
  * `mkvtool rename` — rename episode files to `Show - SxxEyy - Title[suffix].ext` from `episodes.yaml`
- * (preferred) or `episodes.txt`. A port of `src/rename.groovy`.
+ * (preferred) or `episodes.txt`.
  *
  * Both metadata files carry names exactly as TheMovieDB spells them, `:` and `?` included, so that `mux`
  * can put the real spelling into a title. Making a name safe for a *file* name is this command's job

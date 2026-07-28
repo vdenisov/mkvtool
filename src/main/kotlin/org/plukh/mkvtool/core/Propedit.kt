@@ -8,7 +8,7 @@ import java.io.File
 
 /**
  * The `propedit` engine: run `mkvpropedit` with a set of pass-through options against every `.mkv` in a
- * directory. A verbatim port of `src/propedit.groovy` — a generic wrapper that inserts the file name as
+ * directory — a generic wrapper that inserts the file name as
  * the first argument and forwards everything else untouched, so any property mkvpropedit can set works
  * without editing this code.
  */
@@ -32,10 +32,11 @@ data class PropeditRun(val files: List<FileProped>, val total: Int, val failed: 
  * Build the mkvpropedit command line for one file: `[exe, "<baseName>.mkv", <args...>]`. The user's
  * [args] are forwarded verbatim, after the file name.
  *
- * v1 reconstructs the name as `baseName + ".mkv"` (via `FilenameUtils.getBaseName`), which lower-cases
- * the extension — reproduced here with [File.nameWithoutExtension]. For the ordinary `Show.mkv` this is
- * identical to the real name; on an upper-case `Show.MKV` it names a file that does not exist, which is a
- * latent v1 bug kept deliberately rather than fixed in passing.
+ * The name is *reconstructed* as `nameWithoutExtension + ".mkv"` rather than taken from the file, which
+ * lower-cases the extension. For the ordinary `Show.mkv` that is identical to the real name; on an
+ * upper-case `Show.MKV` it names a file that does not exist, and the command selects files
+ * case-insensitively, so the two disagree exactly there. Inherited from v1 and pinned as it stands;
+ * fixing it is issue #12.
  */
 fun buildPropeditCommand(exe: String, file: File, args: List<String>): List<String> =
     listOf(exe, "${file.nameWithoutExtension}.mkv") + args

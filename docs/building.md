@@ -32,7 +32,7 @@ docker compose run --rm build ./gradlew nativeLoop
 
 `nativeLoop` is the whole loop: compile the binary, run its built-in probes, check
 `find-unused-fonts`, run the acceptance suite against it, and measure startup against a ceiling.
-From cold that is about three minutes, most of it compilation — the full suite of 132 cases takes
+From cold that is about three minutes, most of it compilation — the full suite of 124 cases takes
 around half a minute, because the binary starts in roughly 13 ms where the Groovy scripts it
 replaced took seconds apiece. When the binary is already current, the whole thing is well under a
 minute.

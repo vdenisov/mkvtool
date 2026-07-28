@@ -133,7 +133,7 @@ tasks.test {
     // the task as up to date after a documentation-only edit and the check silently does not run. It would
     // still run in CI, where nothing is cached, which is the worst version of this: green locally, red on
     // push.
-    inputs.files("docs/reference.md", "src/config.example.yaml")
+    inputs.files("docs/reference.md", "docs/config.example.yaml")
         .withPropertyName("documentationUnderTest")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
@@ -246,7 +246,7 @@ val releaseReadme = tasks.register("releaseReadme") {
             "There is no runtime to install alongside it.",
             "",
             "MKVToolNix is required: mkvmerge is looked up on PATH, and mkvpropedit as well for",
-            "the propedit and filename-to-title commands. https://mkvtoolnix.download/",
+            "the propedit command. https://mkvtoolnix.download/",
             "",
             "Commands, options and the config.yaml reference:",
             "https://github.com/vdenisov/mkvtool",
@@ -526,10 +526,9 @@ val smokeCases = listOf(
     "50_to_utf8_converts_in_place",
     // fix-srt: the reformat state machine over a charset-detected read.
     "87_fix_srt_fixes_valid_file",
-    // propedit: real mkvpropedit argv passthrough (31 is a no-op, so it proves less).
+    // propedit: real mkvpropedit argv passthrough (31 is a no-op, so it proves less). This is the only
+    // case here that runs mkvpropedit, so it carries that tool's whole native coverage.
     "32_propedit_passthrough",
-    // filename-to-title: the second mkvpropedit command.
-    "85_filename_to_title_sets_title",
     // fetch-episodes: loopback HTTP, both metadata files written.
     "35_fetch_episodes_stub",
     // rename: the episodes.yaml load, i.e. snakeyaml in the image.
@@ -590,8 +589,6 @@ fun runHarness(
     val command = buildList {
         addAll(launcherFor(groovy))
         add(harnessScript)
-        add("--target")
-        add("app")
         add("--app-bin")
         add(binary.absolutePath)
         mkvmergeExeOverride?.let { add("--mkvmerge-exe"); add(it) }

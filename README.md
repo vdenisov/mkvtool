@@ -1,7 +1,6 @@
 # mkvtool
 
-[![Native and release](https://github.com/vdenisov/mkvtool/actions/workflows/native.yml/badge.svg)](https://github.com/vdenisov/mkvtool/actions/workflows/native.yml)
-[![CI](https://github.com/vdenisov/mkvtool/actions/workflows/ci.yml/badge.svg)](https://github.com/vdenisov/mkvtool/actions/workflows/ci.yml)
+[![CI](https://github.com/vdenisov/mkvtool/actions/workflows/native.yml/badge.svg)](https://github.com/vdenisov/mkvtool/actions/workflows/native.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A command-line tool for remuxing TV shows and movies with
@@ -69,8 +68,7 @@ everything else it takes to build and test a binary — see
 
 - **MKVToolNix** — `mkvmerge` is auto-detected from `PATH` (with a fallback to the
   default Windows install location); you can also set an explicit path in
-  `config.yaml`. `mkvpropedit` (on `PATH`) is needed only by `filename-to-title`
-  and `propedit`.
+  `config.yaml`. `mkvpropedit` (on `PATH`) is needed only by `propedit`.
 - A [TheMovieDB](https://www.themoviedb.org/) API key — only for
   `fetch-episodes`.
 - **Java 21 or newer** — only if you run the fat jar rather than the native
@@ -113,7 +111,6 @@ documents one command's options.
 | `inspect` | Looks at the files and reports; changes nothing and needs no config. The default run compares track structure across the batch, `--identify` prints a track table per file. |
 | `fetch-episodes` | Fetches episode names for a show/season from TheMovieDB and writes `episodes.yaml` and `episodes.txt`. |
 | `rename` | Batch-renames files to `Show - SxxEyy - Title.ext` using that metadata. |
-| `filename-to-title` | Sets the MKV segment title and video track name to the file name (via `mkvpropedit`). |
 | `propedit` | Batch-runs `mkvpropedit` over every MKV in the current directory, passing your arguments through — fix any property (track names, forced/default flags, …) without a full remux. |
 | `to-utf8` | Converts `.srt`/`.ass`/`.ssa`/`.vtt` subtitles to UTF-8 in place, from `--encoding` (default Windows-1251). Skips files that are already UTF-8; `--backup` keeps the originals. |
 | `fix-srt` | Converts subtitles in a non-standard timing format into valid SRT (writes `<name>.srt.fixed`). A malformed file is reported and skipped rather than stopping the batch. |
@@ -135,7 +132,7 @@ silent choice between the two.
 If `--api-key` is not supplied, the key is read from `apikey.txt` — the current
 directory first, then `~/.mkvtool/apikey.txt` (`%USERPROFILE%\.mkvtool\apikey.txt`
 on Windows), so the key does not have to be copied into every media directory.
-Endpoint examples live in [`src/themoviedb.http`](src/themoviedb.http).
+Endpoint examples live in [`docs/themoviedb.http`](docs/themoviedb.http).
 
 `--language` takes a TheMovieDB locale such as `ru-RU`, and the names are fetched
 in that language. TheMovieDB answers an untranslated field with an empty string
@@ -464,7 +461,6 @@ any file failed, so it can be used from a shell script.
 ### Post-processing utilities
 
 ```
-mkvtool filename-to-title   # segment title + video track name := file name
 mkvtool propedit            # batch mkvpropedit — fix properties without remuxing
 mkvtool to-utf8             # subtitles → UTF-8, in place
 mkvtool fix-srt             # repair non-standard SRT timing/markup
@@ -498,7 +494,7 @@ excluded, and line endings survive conversion. The full rationale is in the
 `mux` is driven by a YAML configuration file — `config.yaml` in the media
 directory, or `--config <path>`. Quick start:
 
-1. Copy [`src/config.example.yaml`](src/config.example.yaml) next to your media
+1. Copy [`docs/config.example.yaml`](docs/config.example.yaml) next to your media
    files as `config.yaml`.
 2. Run `mkvtool inspect --identify` to see each file's track IDs.
 3. Keep the tracks you want, delete the rest:
@@ -522,6 +518,11 @@ mainSource:
       title: "English"
       default: true
 ```
+
+The template also sets `general.title` from episode metadata, which expects
+`fetch-episodes` and `rename` to have run first. Without that metadata `mux`
+reports the unresolved variables and skips those files rather than stamping a
+wrong title — comment the line out and the title falls back to the file name.
 
 Omitting `audioTracks` or `subtitleTracks` copies no tracks of that type, and
 the output track order is derived from the config unless you set `trackOrder`
@@ -614,16 +615,14 @@ fast, and needs neither MKVToolNix nor the network:
 ./gradlew test
 ```
 
-The acceptance tier is the Groovy suite under `src/test/`. It runs the real thing
-as a subprocess against real MKV fixtures, and it is the specification the port
-was built against — the same cases run against the v1 scripts and against the
-binary, and both must answer identically:
+The acceptance tier is the Groovy suite under `src/test/`, and it is the only
+end-to-end coverage there is: it runs the binary as a subprocess against real MKV
+fixtures and asserts through `mkvmerge -J`.
 
 ```
-groovy src/test/run_tests.groovy --target app     # the binary (installDist by default)
-groovy src/test/run_tests.groovy                  # the v1 scripts
-groovy src/test/run_tests.groovy --target app --app-bin build/native/nativeCompile/mkvtool
-groovy src/test/run_tests.groovy --target app --app-bin build/jar-launcher/mkvtool
+groovy src/test/run_tests.groovy                  # the installDist launcher
+groovy src/test/run_tests.groovy --app-bin build/native/nativeCompile/mkvtool
+groovy src/test/run_tests.groovy --app-bin build/jar-launcher/mkvtool
 groovy src/test/run_tests.groovy --filter 01 --keep
 ```
 
@@ -632,10 +631,10 @@ the `installDist` launcher, the native binary, and the fat jar through the small
 launcher `./gradlew jarLauncher` writes for it.
 
 It needs `mkvmerge` (auto-detected from PATH, or `--mkvmerge-exe`) and Groovy 3
-or newer. Cases that need `mkvpropedit`, or a bare `groovy` on `PATH` for the
-wrapper smoke test, skip themselves with a printed note when those are
-unavailable. Run only one suite at a time: work directories are keyed by case
-name, so a second run wipes the first one's fixtures mid-test.
+or newer. Cases that need `mkvpropedit` or a TheMovieDB API key skip themselves
+with a printed note when those are unavailable. Run only one suite at a time:
+work directories are keyed by case name, so a second run wipes the first one's
+fixtures mid-test.
 
 ## Under the hood
 
@@ -644,17 +643,37 @@ full guide to reading the consistency check report, `to-utf8`'s safety rationale
 and the complete `config.yaml` field reference — they live in
 [docs/reference.md](docs/reference.md).
 
-## The Groovy scripts (v1)
+## Removed in 2.1.0
 
-This started as nine separate Groovy scripts, one per command, and they are still
-in the tree — `src/*.groovy`, the shared code in `src/lib/`, and a wrapper pair
-each in `bin/`. They are frozen: the binary reproduces their behaviour, all new
-work happens in it, and the scripts will be deleted once it has a release of
-overlap behind it. Nothing above needs them.
+**`filename-to-title`.** It set an MKV's segment title and video track name to the
+file's own base name, via `mkvpropedit`. That made sense when the file name was the
+only place an episode title lived; `mux` now writes the segment title from episode
+metadata at mux time, through `general.title`, so the command was standing in for
+something the muxer does properly.
 
-If you are moving over from them, the v2.0.0 release notes carry the mapping and
-the handful of differences. Running a script still needs Java 11 or newer, Groovy
-3 or newer, and network access on first run for `@Grab`.
+It is worth being exact about what does *not* replace it: `mux` writes that title
+during a remux, and `filename-to-title` retitled files that were already muxed,
+without one. If that is what you were using it for, `mkvtool propedit` does it
+today with the property named explicitly, for example:
+
+```
+mkvtool propedit --edit info --set "title=Show - S01E01 - Pilot"
+```
+
+Fixing metadata across a library without remuxing — computing the expected values
+rather than being told them — is planned, and tracked separately.
+
+## Coming from v1
+
+Up to v2.0.0 this was nine separate Groovy scripts, one per command, invoked
+through `bin/mkv-<name>` wrappers. They were removed in 2.1.0; every one of them
+is a subcommand — `mkv-mux` is `mkvtool mux`, `mkv-fetch-episodes` is
+`mkvtool fetch-episodes`, and so on. The v2.0.0 release notes carry the full
+mapping and the handful of behavioural differences.
+
+One thing changed rather than moved: `apikey.txt` is looked up in the current
+directory and then in `~/.mkvtool/`, where the scripts also looked beside
+themselves — a binary on `PATH` has no directory of its own.
 
 ## License
 

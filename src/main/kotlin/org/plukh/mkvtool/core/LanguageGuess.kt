@@ -4,8 +4,8 @@ import java.util.Locale
 import java.util.MissingResourceException
 
 /**
- * Guessing a language from the words of a folder name or a file-name suffix. A port of the language half
- * of `src/lib/discovery.groovy`, used to describe an external track that carries no tag of its own.
+ * Guessing a language from the words of a folder name or a file-name suffix. Used to describe an
+ * external track that carries no tag of its own.
  *
  * The spellings are **derived from CLDR at load time** rather than typed out: for each curated code the
  * JDK supplies the three-letter code, the English name and the language's own name for itself, which is

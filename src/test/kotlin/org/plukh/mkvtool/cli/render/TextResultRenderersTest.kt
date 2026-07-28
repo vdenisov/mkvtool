@@ -19,7 +19,6 @@ import org.plukh.mkvtool.core.MuxAbort
 import org.plukh.mkvtool.core.SubstitutionDrops
 import org.plukh.mkvtool.core.FileProped
 import org.plukh.mkvtool.core.FileRenamed
-import org.plukh.mkvtool.core.FileTitled
 import org.plukh.mkvtool.core.InspectReport
 import org.plukh.mkvtool.core.FixRun
 import org.plukh.mkvtool.core.MuxRun
@@ -30,7 +29,6 @@ import org.plukh.mkvtool.core.RenameRun
 import org.plukh.mkvtool.core.ShowFetched
 import org.plukh.mkvtool.core.ShowNameResolved
 import org.plukh.mkvtool.core.StrictVerdict
-import org.plukh.mkvtool.core.TitleRun
 import org.plukh.mkvtool.core.TrackOrder
 import org.plukh.mkvtool.core.TranslationFallback
 import org.plukh.mkvtool.core.TrackSelection
@@ -55,8 +53,6 @@ class TextResultRenderersTest : FunSpec({
             FixRun::class,
             FileProped::class,
             PropeditRun::class,
-            FileTitled::class,
-            TitleRun::class,
             FontUsageReport::class,
             ShowFetched::class,
             TranslationFallback::class,

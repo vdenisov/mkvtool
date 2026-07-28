@@ -15,12 +15,13 @@ import java.nio.file.Files
  * The tree walk and the companion matcher, in-process over temp directories.
  *
  * Every expectation here was taken from the v1 engine itself rather than from a reading of it: the same
- * fixtures were run through `src/lib/discovery.groovy` and its answer — variant order, labels, adopted
- * suffixes, section aggregates, leftovers — is what the assertions pin. Discovery probes nothing, so the
- * fixture files are one byte of text each and no mkvmerge is involved.
+ * fixtures were run through it and its answer — variant order, labels, adopted suffixes, section
+ * aggregates, leftovers — is what the assertions pin. Discovery probes nothing, so the fixture files are
+ * one byte of text each and no mkvmerge is involved.
  *
- * The matching cases mirror harness case `110_discovery_engine_matching`; the tree fixture mirrors the
- * harness's shared `stageTree`, whose rendered form cases 111-115 assert.
+ * The matching cases were transcribed from the acceptance harness's `110_discovery_engine_matching`,
+ * which retired with the scripts it tested in-process; the tree fixture mirrors the harness's shared
+ * `stageTree`, whose rendered form cases 111-115 still assert.
  */
 class DiscoveryTest : FunSpec({
 

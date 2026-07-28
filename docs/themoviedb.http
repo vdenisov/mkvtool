@@ -1,4 +1,4 @@
-# TheMovieDB API examples used by fetch_episodes.groovy.
+# The TheMovieDB endpoints `mkvtool fetch-episodes` calls, as runnable examples.
 # Supply the API key via an IntelliJ HTTP Client private environment file
 # (http-client.private.env.json, not committed): {"dev": {"apiKey": "<your key>"}}
 

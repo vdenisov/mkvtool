@@ -3,11 +3,11 @@ package org.plukh.mkvtool.core
 import java.io.File
 
 /**
- * Locating the MKVToolNix executables. A verbatim port of `src/lib/tools.groovy`.
+ * Locating the MKVToolNix executables.
  *
  * This is pure resolution logic — no presentation — so it lives in `core`; the caller catches
- * [MkvToolNotFoundException] and decides what to say and which exit code to use. `propedit` is the
- * first consumer; `filename-to-title` reuses it.
+ * [MkvToolNotFoundException] and decides what to say and which exit code to use. `propedit` resolves
+ * `mkvpropedit` through it, `mux` and `inspect` resolve `mkvmerge`.
  */
 
 /**

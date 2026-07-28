@@ -14,7 +14,7 @@ import java.nio.charset.StandardCharsets
 
 /**
  * The `to-utf8` conversion engine: the charset-decision logic, its result model, and the directory
- * orchestrator. Behavior is a verbatim port of `src/to_utf8.groovy`; the design subtleties it encodes
+ * orchestrator. Behavior is a verbatim port of v1's; the design subtleties it encodes
  * (strict-decode to refuse mojibake, UTF-16 refusal, idempotent re-run, whole-content re-encode to
  * keep CRLF) are documented on `classify` and in CLAUDE.md.
  */

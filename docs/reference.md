@@ -358,7 +358,7 @@ line by line, so CRLF subtitles stay CRLF.
 
 `mux` is driven by a YAML configuration file (`config.yaml` in the media
 directory, or `--config <path>`); copy the template
-[`src/config.example.yaml`](../src/config.example.yaml) as a starting point.
+[`config.example.yaml`](config.example.yaml) as a starting point.
 
 ### General settings
 

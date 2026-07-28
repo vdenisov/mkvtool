@@ -1,16 +1,19 @@
 name: Native and release
 
-# The v2 Kotlin app (mkvtool). Kept separate from ci.yml, which stays Groovy-only and
-# untouched during the port. Six jobs with different cadences:
+# The whole of CI for mkvtool. It was once one of two workflows, the other holding the v1 Groovy
+# scripts' own legs; those scripts are gone and so is that file. Seven jobs with different cadences:
 #   build            - fast Linux JVM build + unit tests, on every push-to-main and PR. Also
 #                      reads the project version, which the release job consumes.
-#   harness-app      - the Groovy oracle against the JVM launcher, plus a smaller pass over
+#   harness-app      - the acceptance suite against the JVM launcher, plus a smaller pass over
 #                      the fat jar, on every push-to-main and PR.
-#   harness-upstream - the same oracle against the newest MKVToolNix instead of the distro
+#   harness-upstream - the same suite against the newest MKVToolNix instead of the distro
 #                      package: the canary for mkvmerge's own output. Merge, weekly schedule
 #                      and dispatch, never a PR - a new mkvmerge release is not something a
 #                      pull request caused, and a check that reddens for reasons the author
 #                      cannot act on is a check people learn to ignore.
+#   live-contract    - the one case that calls the real TheMovieDB API, on the schedule and on
+#                      dispatch only. Same reasoning as harness-upstream, one step further: it
+#                      answers "has the API changed shape", which no commit asks.
 #   native           - the slow GraalVM native-image build for Windows x64 and both macOS
 #                      architectures, its smoke probes, the acceptance runs against the
 #                      resulting binary and the packaging of that binary into its release
@@ -37,6 +40,9 @@ name: Native and release
 # proving the published fat jar builds without GraalVM, `harness-upstream` exists to be
 # unpinned, and `harness-app` is a JVM tier whose environment is not part of what it tests -
 # any JDK 21, mkvmerge and Groovy will do, and nothing a user receives is built there.
+#
+# The acceptance harness is still Groovy, which is why four jobs install it; that is the last
+# Groovy in the repository and it is being translated to a Kotlin end-to-end tier.
 #
 # Nothing here ever publishes: a tag creates a draft, and a draft's assets need a token to
 # download, so a human sees every asset first. The Windows leg uploads the bare exe on its own
@@ -125,11 +131,12 @@ jobs:
           fi
 
   harness-app:
-    # The Groovy acceptance harness (the port's oracle) run against the mkvtool binary
-    # instead of the scripts. It was non-blocking while the port was under way and every
-    # command was still missing; with `mux` landed it passes in full, so it is now a
-    # blocking check — a case that goes red here is a behavior difference from the scripts,
-    # which is exactly what must not merge. Add it to branch-protection required checks.
+    # The acceptance harness against the JVM launcher, and a required check. It is the project's
+    # only end-to-end coverage: the unit tier is in-process by contract - faked probes, no
+    # mkvmerge, no subprocess - so this is the one tier that runs the real thing against real MKV
+    # files and asserts through `mkvmerge -J`. It was the port's oracle against the v1 scripts
+    # until they were deleted; the cases outlived their subject and are being translated to a
+    # Kotlin end-to-end tier rather than dropped.
     #
     # It carries the fat jar's only coverage too, at the end: MKVToolNix, Groovy and the
     # Grapes cache are already paid for here, and a job of its own would spend three minutes
@@ -157,7 +164,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       # The harness needs mkvmerge at startup and asserts output via mkvmerge -J; mkvpropedit
-      # keeps the propedit and filename-to-title cases from self-skipping. Which version ran is
+      # keeps the propedit cases from self-skipping. Which version ran is
       # part of what the run proves, so it goes into the summary rather than only the log.
       - name: Install MKVToolNix
         run: |
@@ -271,10 +278,11 @@ jobs:
     # codec_id rather than on mkvmerge's display string *because* the display string changed
     # between versions, and a two-version axis is what surfaced it.
     #
-    # It lived in ci.yml as `Scripts (upstream)` and tested the scripts, which are being deleted. It
-    # is re-homed onto the binary here rather than at that deletion, so that while both still exist
-    # a red run can be arbitrated: run the suite twice against one mkvmerge, once per target, and
-    # the disagreement says whether it is a port bug or a genuine mkvmerge change.
+    # It began as a leg of the deleted Groovy workflow, testing the scripts. It was re-homed onto the
+    # binary one task *before* that deletion, deliberately: while both still existed a red run could be
+    # arbitrated by running the suite against each target on one mkvmerge, and the disagreement said
+    # whether it was a port bug or a genuine mkvmerge change. After the deletion there is nothing left
+    # to arbitrate against, which is why the move could not wait.
     #
     # A job of its own rather than a matrix dimension on harness-app, because the two ends of the
     # axis run on different cadences: merge, schedule and dispatch only here. A new MKVToolNix
@@ -343,6 +351,83 @@ jobs:
       # spawns, while a property arrives with each invocation.
       - name: Run the acceptance harness against the app
         run: ./gradlew acceptanceTest -PnativeBinary=build/install/mkvtool/bin/mkvtool "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"
+
+  live-contract:
+    # The one case that calls the real TheMovieDB API. It answers "has the API changed shape", which
+    # is a weekly-signal question no commit asks - so, like harness-upstream, it never runs on a push
+    # or a PR: network flakiness that reddens the badge on every push trains you to ignore the badge,
+    # which is worse than having no badge.
+    #
+    # It lived in the deleted Groovy workflow and ran the scripts there. It is the *case* that
+    # survived rather than the job: the case exercises whichever binary it is pointed at, and here it
+    # is pointed at the JVM launcher. Moving it was not optional - the workflow that scheduled it is
+    # gone, and an unscheduled job is a test that silently stops running.
+    #
+    # The case skips itself when no key is resolvable, so this job passes rather than fails when
+    # TMDB_API_KEY is unset - which is also what happens on PRs from forks, where GitHub withholds
+    # secrets by design.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    name: TheMovieDB live contract
+    env:
+      GROOVY_VERSION: "5.0.6"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Build the JVM launcher
+        run: ./gradlew installDist
+
+      # The harness resolves mkvmerge at startup and asserts if it cannot, even when filtered down
+      # to a single case that never calls it.
+      - name: Install MKVToolNix
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mkvtoolnix
+          mkvmerge --version
+
+      - name: Cache Groovy distribution
+        uses: actions/cache@v6
+        with:
+          path: ~/groovy
+          key: groovy-${{ env.GROOVY_VERSION }}
+
+      - name: Install Groovy
+        run: |
+          if [ ! -d "$HOME/groovy/groovy-${{ env.GROOVY_VERSION }}" ]; then
+            curl -fsSL -o /tmp/groovy.zip "https://archive.apache.org/dist/groovy/${{ env.GROOVY_VERSION }}/distribution/apache-groovy-binary-${{ env.GROOVY_VERSION }}.zip"
+            mkdir -p "$HOME/groovy"
+            unzip -q /tmp/groovy.zip -d "$HOME/groovy"
+          fi
+          echo "$HOME/groovy/groovy-${{ env.GROOVY_VERSION }}/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Grapes
+        uses: actions/cache@v6
+        with:
+          path: ~/.groovy/grapes
+          key: grapes-${{ env.GROOVY_VERSION }}-${{ hashFiles('src/**/*.groovy') }}
+          restore-keys: |
+            grapes-${{ env.GROOVY_VERSION }}-
+
+      # Through the Gradle task rather than by invoking the harness directly, as every other leg
+      # does: -Pfilter goes through the task's "did any case actually run" guard, so a case renamed
+      # out from under this job fails here instead of running nothing and exiting 0. Groovy travels
+      # as -PgroovyBin, never via PATH - the daemon started by the launcher build above predates the
+      # install step and keeps that environment.
+      - name: Run the live contract case
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: |
+          ./gradlew acceptanceTest \
+            -PnativeBinary=build/install/mkvtool/bin/mkvtool \
+            -Pfilter=37_fetch_episodes_live_contract \
+            "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"
 
   native:
     # Merge (push is main-only via the branch filter) + weekly schedule + manual. These legs and
@@ -434,7 +519,7 @@ jobs:
           file -b "${{ matrix.binary }}" | grep -q "$want"
 
       # The harness needs mkvmerge at startup and asserts output via mkvmerge -J; mkvpropedit
-      # is what keeps the propedit and filename-to-title cases from self-skipping.
+      # is what keeps the propedit cases from self-skipping.
       - name: Install MKVToolNix
         run: |
           case "$RUNNER_OS" in
@@ -508,7 +593,7 @@ jobs:
       # `--version`'s exit code lets a binary that fails fast beat the ceiling.
       #
       # -Pacceptance=smoke on all three: one representative case per command rather than the whole
-      # oracle, because these legs exist to catch what differs *per OS* in a native image, and 132
+      # suite, because these legs exist to catch what differs *per OS* in a native image, and 124
       # cases apiece would triple them for coverage native-linux already provides in full.
       #
       # $GROOVY is read by the task, exported by the Install Groovy step above. No -PnativeBinary:
@@ -581,7 +666,7 @@ jobs:
     # same versions a developer's `docker compose run --rm build ./gradlew nativeLoop` does.
     #
     # It runs the *whole* oracle where the other three run one case per command: mkvtoolnix is
-    # already in the image and the binary starts in about 13 ms, so 132 cases cost half a minute.
+    # already in the image and the binary starts in about 13 ms, so 124 cases cost half a minute.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     container:

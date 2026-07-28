@@ -1,0 +1,132 @@
+# mkvtool — config.yaml template
+#
+# Copy this file next to your media as `config.yaml` and edit it. `mkvtool mux` reads it from the
+# current directory, or from `--config <path>`; there is no fallback and this template is never
+# loaded automatically, because silently applying someone else's track selections to your files
+# produces confidently wrong output.
+#
+# One config describes one muxing pass. A season whose episodes do not all have the same tracks
+# needs one config per group — `mkvtool inspect` prints those groups, and `mkvtool inspect
+# --identify` prints the track IDs the selections below refer to. Run both before editing this.
+#
+# Every key the loader reads appears below. The ones with a useful default are set; the rest are
+# commented out, with the behaviour you get by leaving them that way. **Track IDs are placeholders**
+# — they come from your own files, and copying them unchanged is the one thing that cannot work.
+#
+# Templates. Every `title`, and every `additionalSources` file path, is substituted per episode:
+#
+#   File scope (any of those fields):  fileName, extension, showName, seasonNum,
+#                                      episodeNum, episodeName, seasonName, showYear
+#   Track scope (a track title only):  language, languageName, languageNative, codec
+#
+# Episode data comes from `episodes.yaml` (or `episodes.txt`) in the same directory, written by
+# `mkvtool fetch-episodes`; showName and episodeName also fall back to a canonical
+# "Show - SxxEyy - Title" file name. A misspelled variable is an error before anything is muxed,
+# never a literal in the output. The full field reference is in reference.md, next to this file.
+
+general:
+  # Where the muxed files are written, relative to the media directory. Created if missing.
+  destinationDir: "mkv"
+
+  # Which files in the directory count as main sources. Everything else is passed over.
+  allowedExtensions: ["mkv", "avi", "mp4"]
+
+  # The segment (container) title — what most players show. Distinct from the video track's own
+  # name below: they are stored separately, and each falls back to the file name on its own.
+  #
+  # **This line needs episode metadata.** As written it resolves from `episodes.yaml` (or from
+  # canonical `Show - SxxEyy - Title` file names), so on a directory of raw release names with
+  # neither, every file is *dropped* with a report naming the unresolved variables rather than
+  # muxed with a wrong title. Run `fetch-episodes` and `rename` first, or comment this line out —
+  # omitted, the title falls back to the file name and nothing depends on metadata.
+  title: "${showName} - S${seasonNum}E${episodeNum} - ${episodeName}"
+
+  # Full path to mkvmerge. Omit it, as here, to resolve from PATH — with a fallback to the default
+  # Windows install location. Set it only when you need a specific build.
+  # mkvmergeExe: "C:\\Program Files\\MKVToolNix\\mkvmerge.exe"
+
+# Tracks taken from the main source file — the episode itself. IDs are what `inspect --identify`
+# lists (`mkvmerge -i` reports the same numbers); track 0 is the video.
+mainSource:
+  videoTrack:
+    # Language tag written onto the video track.
+    language: "ja"
+
+    # The video track's own name. Defaults to the file name; set it to override. Written with no
+    # value (an empty `title:`) it clears the name instead, which is a different thing from
+    # omitting the key.
+    # title: "BDRip ${codec}"
+
+  # Audio tracks to copy, in the order given. Omitting this key entirely — or setting it to [] —
+  # copies no audio at all.
+  audioTracks:
+    - id: 1
+      language: "ja"
+      # "日本語 FLAC": the language's own name for itself, plus the track's actual codec.
+      title: "${languageNative} ${codec}"
+      # Exactly one track per type should carry this. Omitted means false.
+      default: true
+
+    - id: 2
+      language: "en"
+      title: "${languageNative} ${codec}"
+
+    # - id: 3
+    #   language: "ru"
+    #   title: "${languageNative} ${codec}"
+
+  # Subtitle tracks to copy. Omitting this key — or setting it to [] — copies no subtitles.
+  subtitleTracks:
+    - id: 4
+      language: "en"
+      title: "${languageName}"
+      default: true
+
+    # Character set of a subtitle track whose encoding mkvmerge would otherwise have to guess.
+    # Omit it to let mkvmerge detect. (For files on disk, `mkvtool to-utf8` converts them once and
+    # settles the question permanently.)
+    # - id: 5
+    #   language: "ru"
+    #   title: "${languageName}"
+    #   charset: "windows-1251"
+
+  # Extra mkvmerge options for the main source, passed through verbatim ahead of the file name.
+  # additionalOptions:
+  #   - "--compression"
+  #   - "0:none"
+
+# Extra files muxed in alongside the main source — an external dub, a subtitle file. Each one holds
+# exactly one track, which mkvmerge always calls track 0, so no id is given here.
+#
+# `file` is a template resolved per episode. After `mkvtool rename` a companion's name is the main
+# file's name plus its own suffix, which is what makes `${fileName}` the usual pattern; a companion
+# kept in a per-studio folder works the same way. `inspect --identify` shows what each pattern
+# resolved to for each episode, and finds companions no config mentions yet.
+# additionalSources:
+#   - file: "Rus sound/[Studio]/${fileName}.mka"
+#     tracks:
+#       - language: "ru"
+#         title: "${languageNative} ${codec}"
+#         default: false
+#     # additionalOptions:
+#     #   - "--compression"
+#     #   - "0:none"
+#
+#   - file: "${fileName}[Studio].ass"
+#     tracks:
+#       - language: "ru"
+#         title: "${languageName}"
+#         charset: "UTF-8"
+#         default: false
+
+# Output track order, as `sourceIndex:trackId` pairs — source 0 is the main file, 1 and up are the
+# additionalSources in order.
+#
+# Omitted, as here, it is derived from what you configured above: the video track, then audioTracks
+# in listed order, then subtitleTracks, then one entry per additional source. That is what most
+# configs want, and `mux` prints the derived value as it runs. Set it only to override that order.
+#
+# An explicit value is checked against the configured tracks and a mismatch is warned about rather
+# than refused — mkvmerge silently ignores an entry matching no muxed track, so a stale id left
+# behind after editing the lists above would otherwise have no visible effect at all.
+# trackOrder: "0:0,0:2,0:1,0:4"

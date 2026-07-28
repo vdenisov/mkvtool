@@ -9,7 +9,7 @@ import org.plukh.mkvtool.out.plural
 import java.io.File
 
 /**
- * `mux`: one `mkvmerge` command per media file, built from `config.yaml`. A port of `src/mux.groovy`.
+ * `mux`: one `mkvmerge` command per media file, built from `config.yaml`.
  *
  * The command line is the whole product — everything else in this file exists to get one built correctly
  * and then to run it. What goes into it is a human decision recorded in the config; this only executes it,

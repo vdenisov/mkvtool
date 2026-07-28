@@ -14,7 +14,7 @@ import java.util.concurrent.Callable
 
 /**
  * `mkvtool to-utf8` — convert `.srt/.ass/.ssa/.vtt` files in the current directory to UTF-8 in place.
- * A verbatim port of `src/to_utf8.groovy`. Thin by design: it resolves the charset, takes its renderer
+ * Thin by design: it resolves the charset, takes its renderer
  * from [OutputOptions], and delegates to [convertDirectory], deriving the exit code from the returned
  * model — 2 on an unusable charset name (before any file is touched), 1 if any file failed, else 0.
  * Exit codes flow through picocli's `Callable<Int>` return.

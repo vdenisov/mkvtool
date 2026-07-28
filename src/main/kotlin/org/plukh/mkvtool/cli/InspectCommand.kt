@@ -27,8 +27,7 @@ import java.io.File
 import java.util.concurrent.Callable
 
 /**
- * `mkvtool inspect` — per-file track tables and a batch consistency report. A port of
- * `src/inspect.groovy`.
+ * `mkvtool inspect` — per-file track tables and a batch consistency report.
  *
  * It writes nothing and **exits 0 whatever it finds**. A config is optional throughout: missing, empty,
  * malformed or merely stale, each is a warning and the run carries on, because reading the track table is

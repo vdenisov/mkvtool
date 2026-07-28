@@ -7,8 +7,7 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 /**
- * Probing a media file with `mkvmerge -J`, and the signatures the consistency check compares. A port of
- * the probing half of `src/lib/check.groovy`.
+ * Probing a media file with `mkvmerge -J`, and the signatures the consistency check compares.
  *
  * The `-J` document is mapped into typed records **at parse time**, which retires the Groovy `properties`
  * trap by construction: there are no raw maps to accidentally read a bean property off. [ProbedTrack]
