@@ -173,6 +173,12 @@ testing {
                 implementation(project())
                 implementation(libs.kotest.runner.junit5)
                 implementation(libs.kotest.assertions.core)
+                // Declared even though the main source set already has it: snakeyaml is an
+                // `implementation` dependency there, so it is on this tier's runtime classpath but
+                // not its compile one. The episodes.yaml fixture writer *serialises* rather than
+                // string-building, because the titles under test carry colons, quotes and question
+                // marks on purpose and hand-quoting them is the exact trap it exists to avoid.
+                implementation(libs.snakeyaml)
             }
             targets.all {
                 testTask.configure {

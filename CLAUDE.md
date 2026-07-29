@@ -260,11 +260,21 @@ one-run-at-a-time rule. A missing *tool* skips a case with a reason, while a mis
 fails the task naming the build step — the first is a developer machine, the second is a mistake.
 And `failOnNoDiscoveredTests` is on, because a suite that discovers nothing otherwise passes.
 
-The support code lives in `e2e/support/`: the subprocess invoker, tool resolution, the fixture stagers,
-and `cfg`, the `config.yaml` builder most `mux` cases rest on. `cfg` emits **text**, deliberately not the
-production `Config` model — the point of an end-to-end case is to exercise the real parser — and the one
-distinction it must never lose is absent-versus-empty for a track list: a missing key leaves the type
-unconfigured, `[]` says copy none of them, and separate cases pin each.
+The support code lives in `e2e/support/`: the subprocess invoker, tool resolution, and the fixture layer —
+which has specs of its own, because a builder that silently produces the wrong MKV would be a defect every
+case inherits without any of them naming it. `cfg`, the `config.yaml` builder most `mux` cases rest on,
+emits **text**, deliberately not the production `Config` model — the point of an end-to-end case is to
+exercise the real parser — and the one distinction it must never lose is absent-versus-empty for a track
+list: a missing key leaves the type unconfigured, `[]` says copy none of them, and separate cases pin each.
+
+Everything with tracks in it is derived at run time from one committed input, `src/test/test.mkv`: track 0
+video (und), 1–3 audio (jpn/eng/rus), 4–6 subtitles (eng/rus-forced/jpn). `buildVariant` derives an MKV
+with a chosen subset and per-id overrides, and it carries the trap the whole layer is shaped around: **a
+variant is configured in source ids and reported in output ids.** mkvmerge renumbers surviving tracks from
+0 in source order, while `--track-name` and its siblings are source-file options and still name the source
+id — so an override written against the ids the *result* reports lands on a track that was never muxed, and
+mkvmerge accepts that in silence. `fullCopy` keeps all seven tracks and so collapses the two spaces into
+one, which is why nearly every check-report fixture uses it.
 
 **Acceptance (`src/test/run_tests.groovy`, 124 cases).** The **only** end-to-end coverage in the project:
 it runs the binary as a subprocess against real MKV fixtures and asserts via `mkvmerge -J`. It defaults to
@@ -283,11 +293,10 @@ no Groovy is left in the repository.
 
 Harness conventions worth knowing before touching anything it covers:
 
-- Fixtures derive from one input, `src/test/test.mkv`: track 0 video (und), 1–3 audio (jpn/eng/rus), 4–6
-  subtitles (eng/rus-forced/jpn). `buildVariant` derives an MKV with a chosen track subset and per-id
-  overrides — and **mkvmerge renumbers surviving tracks from 0 in source order**, so a variant's ids are
-  not the source ids unless all tracks are kept, while `--track-name` still targets the *source* id.
-  Getting that wrong leaves a name silently unchanged.
+- Fixtures derive from the same `src/test/test.mkv` the Kotlin tier uses, through closures of the same
+  names — so the layout and the two-id-spaces trap described above apply here unchanged. One difference
+  worth knowing while both tiers exist: this suite's own comment on `buildVariant` claims the per-id
+  overrides are keyed by the *output* id, which is wrong. Read the Kotlin version.
 - Cases needing `mkvpropedit` or a TheMovieDB key skip themselves with a printed note rather than
   failing.
 - `withStubServer` serves canned JSON from a JDK `HttpServer`, which is how `fetch-episodes` is tested

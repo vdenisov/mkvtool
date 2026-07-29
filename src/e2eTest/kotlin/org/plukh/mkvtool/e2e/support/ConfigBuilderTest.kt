@@ -133,6 +133,36 @@ class ConfigBuilderTest : FunSpec({
         cfg(mkvmergeExe = fakeExe) shouldNotContain "title:"
         load(cfg(mkvmergeExe = fakeExe, generalTitle = "\${showName}")).general.title?.text shouldBe "\${showName}"
     }
+
+    // The two presets a whole batch of cases shares. Thin, but a preset naming the wrong track id is a
+    // defect that shows up as a dozen unrelated assertions failing, in cases that never mention it.
+    context("the shared presets") {
+        test("checkCfg selects the ids the consistency-check cases perturb") {
+            val config = load(checkCfg(mkvmergeExe = fakeExe))
+
+            // 1, 2 and 6, addressed against a seven-track copy where the output ids are the source ids.
+            config.mainSource.audioTracks.map { it.id } shouldBe listOf(1, 2)
+            config.mainSource.subtitleTracks.map { it.id } shouldBe listOf(6)
+            // Omitted, so the check cases keep exercising derivation alongside everything else.
+            config.trackOrder shouldBe null
+        }
+
+        test("companionCfg carries the fileName placeholder as literal text") {
+            val yaml = companionCfg(mkvmergeExe = fakeExe)
+
+            // The hazard the port introduces: Kotlin interpolates `$`, where Groovy's single-quoted
+            // literals could not. A resolved placeholder here would name a file that never exists, and
+            // every companion pre-flight case would report the wrong thing.
+            yaml shouldContain "\${fileName}[Studio].mka"
+            load(yaml).additionalSources.single().file shouldBe "\${fileName}[Studio].mka"
+        }
+
+        test("companionCfg orders the companion's track after the main source's") {
+            // The 1:0 is what makes a missing companion a hard mkvmerge failure rather than a quietly
+            // smaller output - which is the situation the pre-flight exists to catch up front.
+            load(companionCfg(mkvmergeExe = fakeExe)).trackOrder shouldBe "0:0,0:1,1:0"
+        }
+    }
 })
 
 private fun MappingLoad<Config>.shouldBeLoaded() {
