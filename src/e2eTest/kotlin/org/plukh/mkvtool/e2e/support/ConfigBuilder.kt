@@ -100,6 +100,52 @@ fun cfg(
     }
 }
 
+/**
+ * The config the consistency-check cases run against: audio 1 and 2, subtitle 6.
+ *
+ * Those three ids are exactly the ones the check cases perturb with `fullCopy(names = ...)`, and a
+ * seven-track copy is what makes an id in this config address the track it names. No `trackOrder`, so
+ * derivation stays exercised.
+ */
+fun checkCfg(
+    mkvmergeExe: String = requireNotNull(org.plukh.mkvtool.e2e.support.mkvmergeExe) {
+        "mkvmerge is required to build a config — this case should have been gated on needsMkvmerge"
+    },
+): String = cfg(
+    mkvmergeExe = mkvmergeExe,
+    audioTracks = listOf(
+        TrackSpec(id = 1, language = "ja", title = "Japanese", default = true),
+        TrackSpec(id = 2, language = "ru", title = "Russian"),
+    ),
+    subtitleTracks = listOf(TrackSpec(id = 6, language = "ja", title = "Signs")),
+)
+
+/**
+ * The config the companion pre-flight cases run against: one audio track plus a `${'$'}{fileName}` source.
+ *
+ * The `1:0` in the track order is what makes a missing companion a hard mkvmerge failure rather than a
+ * quietly smaller output - which is the situation the pre-flight exists to catch before the batch starts.
+ *
+ * Note the escape in the source pattern: the placeholder has to reach the YAML as literal text for the
+ * tool to resolve it, and Kotlin's string interpolation is the new way to break what Groovy's
+ * single-quoted literals protected.
+ */
+fun companionCfg(
+    mkvmergeExe: String = requireNotNull(org.plukh.mkvtool.e2e.support.mkvmergeExe) {
+        "mkvmerge is required to build a config — this case should have been gated on needsMkvmerge"
+    },
+): String = cfg(
+    mkvmergeExe = mkvmergeExe,
+    audioTracks = listOf(TrackSpec(id = 1, language = "ja", title = "Japanese", default = true)),
+    trackOrder = "0:0,0:1,1:0",
+    additionalSources = listOf(
+        AdditionalSourceSpec(
+            file = "\${fileName}[Studio].mka",
+            tracks = listOf(SourceTrackSpec(language = "ru", title = "Studio Dub")),
+        ),
+    ),
+)
+
 /** An empty list is written as `[]` rather than omitted — see the distinction in the file comment. */
 private fun trackList(key: String, tracks: List<TrackSpec>, indent: String): String {
     if (tracks.isEmpty()) return "$indent$key: []\n"

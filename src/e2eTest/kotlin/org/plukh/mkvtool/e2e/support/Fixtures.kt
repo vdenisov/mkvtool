@@ -31,6 +31,17 @@ fun stageInput(workDir: File, name: String = "test.mkv"): File {
 fun writeConfig(workDir: File, yaml: String): File =
     File(workDir, "config.yaml").also { it.writeText(yaml, StandardCharsets.UTF_8) }
 
+/**
+ * The two byte-order marks the `to-utf8` cases build inputs from.
+ *
+ * They are constants rather than the output of a concatenation helper: the Groovy suite carried a
+ * `catBytes` closure whose own comment said it existed because Groovy has no `byte[] + byte[]`, and Kotlin
+ * has one — so the helper encoded a language limitation rather than any meaning, and a call site now reads
+ * `UTF8_BOM + text.toByteArray(...)`.
+ */
+val UTF8_BOM: ByteArray = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
+val UTF16_BOM: ByteArray = byteArrayOf(0xFF.toByte(), 0xFE.toByte())
+
 /** Write raw bytes into [workDir] — for the charset cases, where the point is what is on disk. */
 fun writeBytes(workDir: File, name: String, bytes: ByteArray): File =
     File(workDir, name).also { it.parentFile?.mkdirs(); it.writeBytes(bytes) }
@@ -43,6 +54,13 @@ fun writeText(workDir: File, name: String, text: String, charset: Charset): File
 fun findOutput(workDir: File, destDir: String = "mkv"): File? =
     File(workDir, destDir).listFiles()?.firstOrNull { it.name.endsWith(".mkv") }
 
-/** Every `.mkv` a mux run produced, by name, sorted — for the batch cases. */
+/**
+ * Every `.mkv` a mux run produced, by name, sorted — for the batch cases.
+ *
+ * Filters to `.mkv`, where the Groovy original returned every name it found in a hardcoded `mkv/`. Every
+ * assertion resting on it is about muxed output, so the filter is what those cases mean; a case wanting to
+ * assert that the destination directory holds *nothing else* needs a plain directory listing rather than
+ * this.
+ */
 fun outputNames(workDir: File, destDir: String = "mkv"): List<String> =
     File(workDir, destDir).listFiles().orEmpty().filter { it.name.endsWith(".mkv") }.map { it.name }.sorted()
