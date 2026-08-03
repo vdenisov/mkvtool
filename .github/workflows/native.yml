@@ -86,7 +86,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@v6.2.0
 
       # Ordinary JVM build: compile, unit tests, and the shadow jar. No GraalVM and no
       # MKVToolNix — the unit tier fakes probe data and the native-smoke probe uses
@@ -163,7 +163,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@v6.2.0
 
       # The harness needs mkvmerge at startup and asserts output via mkvmerge -J; mkvpropedit
       # keeps the propedit cases from self-skipping. Which version ran is
@@ -311,7 +311,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@v6.2.0
 
       - name: Build the JVM launcher
         run: ./gradlew installDist
@@ -389,7 +389,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@v6.2.0
 
       - name: Build the JVM launcher
         run: ./gradlew installDist
@@ -493,7 +493,7 @@ jobs:
           java-version: "21"
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@v6.2.0
 
       # An Intel runner and an Intel toolchain are two separate claims: setup-graalvm picks
       # its download from the host architecture, and an arm64 JDK on an Intel host would
@@ -703,7 +703,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@v6.2.0
 
       - name: Record the mkvmerge version
         run: |
