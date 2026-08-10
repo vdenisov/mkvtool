@@ -19,7 +19,7 @@ kotlinx-serialization = "1.11.0"
 shadow = "9.6.1"
 # GraalVM native-build-tools: provides the nativeCompile task. Needed to build the distributed
 # native binaries; ordinary build/test/installDist do not use it.
-graalvm-native = "1.1.6"
+graalvm-native = "1.1.7"
 
 [libraries]
 picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
