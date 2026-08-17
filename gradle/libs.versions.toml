@@ -9,7 +9,7 @@
 [versions]
 kotlin = "2.4.10"
 picocli = "4.7.7"
-kotest = "6.2.3"
+kotest = "6.2.4"
 # YAML parsing (config.yaml, episodes.yaml). 2.x is the maintained line; v1 ran 1.30.
 snakeyaml = "2.6"
 # JSON parsing (mkvmerge -J, the TheMovieDB API), and the planned `--json` output. Only the runtime
@@ -19,7 +19,7 @@ kotlinx-serialization = "1.11.0"
 shadow = "9.6.1"
 # GraalVM native-build-tools: provides the nativeCompile task. Needed to build the distributed
 # native binaries; ordinary build/test/installDist do not use it.
-graalvm-native = "1.1.6"
+graalvm-native = "1.1.9"
 
 [libraries]
 picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
