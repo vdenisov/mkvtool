@@ -38,7 +38,7 @@ the binary starts in roughly 13 ms where the Groovy scripts it replaced took sec
 To narrow it while iterating:
 
 ```
-docker compose run --rm build ./gradlew acceptanceTest -Pfilter=74_check     # one Groovy case
+docker compose run --rm build ./gradlew acceptanceTest -Pfilter=01_one       # one Groovy case
 docker compose run --rm build ./gradlew nativeE2e --tests '*ToUtf8Test'      # one Kotlin spec
 docker compose run --rm build ./gradlew nativeCheck -Pacceptance=smoke       # one case per command
 docker compose run --rm build bash                                           # a shell, to poke around
@@ -179,7 +179,7 @@ binary built somewhere else — a downloaded release asset, or a copy signed aft
 | `nativeSmoke` | Runs the binary's built-in probes: charsets, locales, JSON, YAML, HTTPS. They self-assert, so running them is the check. |
 | `nativeE2e` | The Kotlin end-to-end tier against the binary: every case but the live TheMovieDB one, or only the `Smoke`-tagged ones under `-Pacceptance=smoke`. |
 | `acceptanceTest` | The full Groovy acceptance suite against the binary. `-Pfilter=<substring>` narrows it to matching cases. |
-| `acceptanceSmoke` | One representative Groovy case per command not yet moved to the Kotlin tier — what the per-platform CI legs run. |
+| `acceptanceSmoke` | One representative Groovy case per command that has no `Smoke`-tagged Kotlin case yet — what the per-platform CI legs run. |
 | `startupCheck` | First and mean `--version` time, asserted against a ceiling. |
 | `nativeCheck` | All of the above. `-Pacceptance=full\|smoke\|none` picks which pass of both suites, if any; `none` leaves only the probes and the startup measurement. |
 | `nativeLoop` | `nativeCompile`, then `nativeCheck`. |

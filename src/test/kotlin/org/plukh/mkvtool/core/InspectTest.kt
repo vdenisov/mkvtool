@@ -296,6 +296,23 @@ class InspectTest : FunSpec({
             probed shouldContainExactly listOf("Show - S01E01 - Title.mkv")
         }
 
+        test("of an idx/sub pair the .idx is the half read") {
+            // A lone .sub identifies as a zero-track MPEG stream, so probing it would say nothing useful.
+            val dir = tempdir()
+            File(dir, "Show - S01E01 - Title.mkv").writeText("x")
+            File(dir, "Subs").mkdirs()
+            File(dir, "Subs/Show - S01E01 - Title.idx").writeText("x")
+            File(dir, "Subs/Show - S01E01 - Title.sub").writeText("x")
+            val probed = mutableListOf<String>()
+
+            inspectDirectory(dir, options(identify = true), SilentRenderer) {
+                probed += it.name
+                probedResult(it)
+            }
+
+            probed shouldContainExactly listOf("Show - S01E01 - Title.mkv", "Show - S01E01 - Title.idx")
+        }
+
         test("matching runs pre-mask, so a mask does not turn the rest of the season into leftovers") {
             val dir = tempdir()
             listOf("01", "02").forEach { ep ->
@@ -453,6 +470,20 @@ class InspectTest : FunSpec({
             probed shouldHaveSize 2
             probed shouldContainExactly probed.distinct()
         }
+
+        test("--identify and --check together share one probe per file") {
+            val dir = tempdir()
+            File(dir, "a.mkv").writeText("x")
+            File(dir, "b.mkv").writeText("x")
+            val probed = mutableListOf<String>()
+
+            inspectDirectory(dir, options(identify = true, check = true), SilentRenderer) {
+                probed += it.name
+                probedResult(it)
+            }
+
+            probed shouldContainExactly listOf("a.mkv", "b.mkv")
+        }
     }
 })
 
@@ -478,11 +509,12 @@ private fun variantExternals(language: String, guessed: Boolean) =
 
 private fun options(
     identify: Boolean = false,
+    check: Boolean = !identify,
     config: Config? = null,
     fileMasks: List<String> = emptyList(),
 ): InspectOptions = InspectOptions(
     identify = identify,
-    check = !identify,
+    check = check,
     config = config,
     substitution = SubstitutionEngine(),
     fileMasks = fileMasks,
