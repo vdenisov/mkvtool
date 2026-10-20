@@ -236,7 +236,7 @@ jobs:
       # and the resources merged from several dependencies — so native-smoke does most of the
       # work here (it decodes a charset, reads a CLDR name, parses JSON and round-trips YAML
       # inside the process), and a few cases put real files, a real mkvmerge call and
-      # non-ASCII names through the CLI: the Groovy ones below, and the Kotlin tier's Smoke
+      # non-ASCII names through the CLI: the Groovy one below, and the Kotlin tier's Smoke
       # cases in the next step. Run after the full suite, never beside it: the harness keys
       # its work directories by case name and recreates them at case start, so two
       # concurrent suites wipe each other's fixtures — which the task's lock enforces rather
@@ -249,8 +249,6 @@ jobs:
           cases=(
             # a real mkvmerge invocation end to end
             01_one_audio_one_subtitle
-            # Cyrillic through fetch, rename and file names
-            38_non_ascii_titles_round_trip
           )
           failed=""
           for case_name in "${cases[@]}"; do
@@ -380,19 +378,15 @@ jobs:
     # or a PR: network flakiness that reddens the badge on every push trains you to ignore the badge,
     # which is worse than having no badge.
     #
-    # It lived in the deleted Groovy workflow and ran the scripts there. It is the *case* that
-    # survived rather than the job: the case exercises whichever binary it is pointed at, and here it
-    # is pointed at the JVM launcher. Moving it was not optional - the workflow that scheduled it is
-    # gone, and an unscheduled job is a test that silently stops running.
+    # The case is the Kotlin tier's one Live-tagged test, pointed at the JVM launcher. It needs no
+    # mkvmerge and no Groovy - it never touches a media file.
     #
-    # The case skips itself when no key is resolvable, so this job passes rather than fails when
-    # TMDB_API_KEY is unset - which is also what happens on PRs from forks, where GitHub withholds
-    # secrets by design.
+    # With no key the case would skip, the tier would run nothing and its zero-executed guard would
+    # fail the job. So the step checks for the key first and passes with a notice instead - which is
+    # what happens on a fork, where the secret does not exist.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     name: TheMovieDB live contract
-    env:
-      GROOVY_VERSION: "5.0.6"
     steps:
       - uses: actions/checkout@v7
 
@@ -406,50 +400,18 @@ jobs:
       - name: Build the JVM launcher
         run: ./gradlew installDist
 
-      # The harness resolves mkvmerge at startup and asserts if it cannot, even when filtered down
-      # to a single case that never calls it.
-      - name: Install MKVToolNix
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mkvtoolnix
-          mkvmerge --version
-
-      - name: Cache Groovy distribution
-        uses: actions/cache@v6
-        with:
-          path: ~/groovy
-          key: groovy-${{ env.GROOVY_VERSION }}
-
-      - name: Install Groovy
-        run: |
-          if [ ! -d "$HOME/groovy/groovy-${{ env.GROOVY_VERSION }}" ]; then
-            curl -fsSL -o /tmp/groovy.zip "https://archive.apache.org/dist/groovy/${{ env.GROOVY_VERSION }}/distribution/apache-groovy-binary-${{ env.GROOVY_VERSION }}.zip"
-            mkdir -p "$HOME/groovy"
-            unzip -q /tmp/groovy.zip -d "$HOME/groovy"
-          fi
-          echo "$HOME/groovy/groovy-${{ env.GROOVY_VERSION }}/bin" >> "$GITHUB_PATH"
-
-      - name: Cache Grapes
-        uses: actions/cache@v6
-        with:
-          path: ~/.groovy/grapes
-          key: grapes-${{ env.GROOVY_VERSION }}-${{ hashFiles('src/**/*.groovy') }}
-          restore-keys: |
-            grapes-${{ env.GROOVY_VERSION }}-
-
-      # Through the Gradle task rather than by invoking the harness directly, as every other leg
-      # does: -Pfilter goes through the task's "did any case actually run" guard, so a case renamed
-      # out from under this job fails here instead of running nothing and exiting 0. Groovy travels
-      # as -PgroovyBin, never via PATH - the daemon started by the launcher build above predates the
-      # install step and keeps that environment.
+      # Through the tag rather than a test-name filter: a tag that matches nothing is caught by the
+      # task's zero-executed guard, so a case renamed or untagged out from under this job fails here
+      # instead of running nothing and passing.
       - name: Run the live contract case
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: |
-          ./gradlew acceptanceTest \
-            -PnativeBinary=build/install/mkvtool/bin/mkvtool \
-            -Pfilter=37_fetch_episodes_live_contract \
-            "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"
+          if [ -z "$TMDB_API_KEY" ]; then
+            echo "::notice::TMDB_API_KEY is not set, so the live contract case was not run"
+            exit 0
+          fi
+          ./gradlew e2eTest -Pe2eTags=Live
 
   native:
     # Merge (push is main-only via the branch filter) + weekly schedule + manual. These legs and

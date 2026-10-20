@@ -109,7 +109,8 @@ inherited from the filesystem, and the whole thing runs on a developer machine b
 `nativeSmoke`, `nativeE2e`, `acceptanceTest`, `acceptanceSmoke` and `startupCheck`, gathered by
 `nativeCheck` (`-Pacceptance=full|smoke|none`, one switch for both end-to-end tiers), with
 `nativeLoop` chaining `nativeCompile` in front of it. `nativeE2e` is the Kotlin tier as a task of its own,
-aimed at `-PnativeBinary` like the rest — every case under `full`, the `Smoke`-tagged ones under `smoke`.
+aimed at `-PnativeBinary` like the rest — every case but `Live` under `full`, the `Smoke`-tagged ones under
+`smoke`.
 They exist as tasks rather than as workflow shell for the reason the release packaging does: a developer
 can run them before pushing, and CI calling the same task means local and CI verification cannot drift
 into two answers.
@@ -262,14 +263,23 @@ one-run-at-a-time rule. A missing *tool* skips a case with a reason, while a mis
 fails the task naming the build step — the first is a developer machine, the second is a mistake.
 And `failOnNoDiscoveredTests` is on, because a suite that discovers nothing otherwise passes.
 
-One case per command moved to this tier carries the Kotest tag `Smoke`, and `-Pe2eTags=<expression>`
-selects by tag. That subset is what runs where the whole tier would cost more than it tells — the native
-binaries off Linux and the fat jar — and it is what the Groovy suite's smoke list shrinks into as its
-cases move. A tag filter fails open in a way `failOnNoDiscoveredTests` cannot see: Kotest reports every
-case it filtered out as *skipped*, and a skipped case counts as discovered, so a misspelt tag would pass
-having run nothing. The task therefore counts the cases that actually ran and fails on zero. `nativeE2e`
-also sets `mkvtool.requireTools`, under which a case needing a missing tool fails instead of skipping:
-every environment it runs in carries MKVToolNix, so there a skip is lost coverage reported green.
+One case per command moved to this tier carries the Kotest tag `Smoke`, as does the Cyrillic
+`fetch-episodes`-to-`rename` round trip, and `-Pe2eTags=<expression>` selects by tag. That subset is what
+runs where the whole tier would cost more than it tells — the native binaries off Linux and the fat jar —
+and it is what the Groovy suite's smoke list shrinks into as its cases move. A tag filter fails open in a
+way `failOnNoDiscoveredTests` cannot see: Kotest reports every case it filtered out as *skipped*, and a
+skipped case counts as discovered, so a misspelt tag would pass having run nothing. The task therefore
+counts the cases that actually ran and fails on zero. `nativeE2e` also sets `mkvtool.requireTools`, under
+which a case needing a missing tool fails instead of skipping: every environment it runs in carries
+MKVToolNix, so there a skip is lost coverage reported green.
+
+`fetch-episodes` is tested offline: `withStubServer` serves canned JSON from a JDK `HttpServer`, reached
+through the command's hidden `--base-url`. The one exception is the case tagged `Live`, which calls the
+real TheMovieDB to ask whether the API has changed shape. It runs only when the tag expression names it —
+`e2eTier` adds `!Live` to any expression that does not — so an ordinary run never touches the network,
+whatever is in the environment. The `live-contract` job selects it with `-Pe2eTags=Live`. Without
+`TMDB_API_KEY` it skips, and a run selecting only it then fails the zero-executed guard, which is why that
+job checks for the key itself.
 
 The support code lives in `e2e/support/`: the subprocess invoker, tool resolution, and the fixture layer —
 which has specs of its own, because a builder that silently produces the wrong MKV would be a defect every
@@ -308,10 +318,6 @@ Harness conventions worth knowing before touching anything it covers:
   names — so the layout and the two-id-spaces trap described above apply here unchanged. One difference
   worth knowing while both tiers exist: this suite's own comment on `buildVariant` claims the per-id
   overrides are keyed by the *output* id, which is wrong. Read the Kotlin version.
-- The live TheMovieDB case skips itself with a printed note when there is no API key, rather than
-  failing.
-- `withStubServer` serves canned JSON from a JDK `HttpServer`, which is how `fetch-episodes` is tested
-  offline through its hidden `--base-url`.
 - **Never run two suites at once**, a `--filter` run alongside a full one included: work directories are
   keyed by case name and recreated at case start, so a second run wipes the first one's fixtures mid-test
   and the failure surfaces somewhere unrelated to what is being worked on. Through `acceptanceTest` and
@@ -328,7 +334,7 @@ code. Each one covers something that fails silently in a misconfigured native im
 and no external tool.
 
 **The fat jar** gets a fourth, smaller pass, in the same CI job as the JVM launcher: `--version`,
-`native-smoke`, a few Groovy harness cases and the Kotlin tier's `Smoke` cases through the launcher
+`native-smoke`, a Groovy harness case and the Kotlin tier's `Smoke` cases through the launcher
 `jarLauncher` generates. It is the published JVM fallback, and what only *it* can break is its own
 packaging — the `Main-Class` manifest and the resources merged from several dependencies — which is most
 of what `native-smoke` probes anyway. The full suites would add minutes to re-run bytecode that job has
@@ -341,10 +347,10 @@ addressed relative to the script, since each case runs in a fresh working direct
 CI runs the unit tier and both end-to-end tiers against the JVM launcher on every push and PR; a 4-OS
 native leg (compile, the smoke probes, both end-to-end tiers in full on Linux and a representative case
 per command elsewhere, a `--version` startup measurement asserted under 200 ms, and the release archive
-for that platform) on merge, a pushed `v*` tag, a weekly schedule and manual dispatch; and the live
-TheMovieDB contract case on the schedule only, so network flakiness cannot redden the badge. Everything a
-native leg does to the binary it just built is the `nativeCheck` task rather than workflow shell, so CI
-and a developer run one implementation of it.
+for that platform) on merge, a pushed `v*` tag, a weekly schedule and manual dispatch; and the `Live`
+TheMovieDB contract case on the schedule and dispatch only, so network flakiness cannot redden the badge.
+Everything a native leg does to the binary it just built is the `nativeCheck` task rather than workflow
+shell, so CI and a developer run one implementation of it.
 
 Two axes cross there. The **OS** axis is those four legs at one mkvmerge version each. The **mkvmerge**
 axis is Linux-only and lives on the JVM launcher: both end-to-end tiers run once against the distro
