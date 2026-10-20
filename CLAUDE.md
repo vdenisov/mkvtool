@@ -360,11 +360,14 @@ of the native workflow on its branch before it is believed.
 **Releases never publish from CI.** A pushed `v*` tag collects the four archives, the jar and a
 `sha256sum` checksums file, asserts the asset set and each archive's shape against the naming contract,
 and creates a **draft**; a dispatch does everything except that last call and leaves the assets as a
-workflow artifact, which is how the path is rehearsed without spending a tag. The Windows binary **ships
-unsigned** for now, and the install instructions say so rather than promising a signature. Two consequences
-worth knowing: the Windows leg uploads the bare exe on its own, so a signature can later be appended to the
-binary that was actually tested rather than to a local rebuild; and a published asset is never re-signed in
-place — the next version gets the signature, because anything that pinned the old checksum would start
+workflow artifact, which is how the path is rehearsed without spending a tag. **The Windows binary is
+code-signed, by hand, between the draft and Publish**: the key lives in Certum's cloud HSM and is unlocked
+per session from a phone, so CI cannot sign and is not meant to. The Windows leg uploads the bare exe on its
+own, so the signature is appended to the binary that was actually tested rather than to a local rebuild;
+the signer rebuilds the zip around it with `-PnativeBinary`, then replaces the zip and the checksums file
+on the draft. Until that happens the draft's zip holds an unsigned exe beside a readme saying it is signed,
+which is why it is the one asset that must not be published as CI left it. A published asset is never
+re-signed in place, which is why 2.0.0 stays unsigned: anything that pinned its checksum would start
 failing.
 
 ## The output seam

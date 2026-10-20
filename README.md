@@ -40,8 +40,9 @@ to install alongside it, and the `.tar.gz` archives keep the executable bit, so 
 `mkvtool-<version>-checksums.txt` is attached to the same release in `sha256sum`
 format, covering every asset, so `sha256sum -c` verifies what you downloaded.
 
-The Windows binary ships unsigned for now — a signature is in the works, and until
-then the checksums above are how to verify what you downloaded. On macOS, an
+The Windows binary is code-signed — its Digital Signatures tab names Open Source
+Developer Victor Denisov, with a certificate issued by Certum — and timestamped, so
+the signature outlives the certificate. Releases up to 2.0.0 are unsigned. On macOS, an
 archive downloaded in a browser carries the quarantine attribute;
 `xattr -d com.apple.quarantine mkvtool` clears it. Each archive's own readme
 repeats whichever of these applies to it.
