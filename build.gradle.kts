@@ -173,7 +173,8 @@ val e2eTags: String? = providers.gradleProperty("e2eTags").orNull
  * only in which binary they run and which cases they select.
  *
  * @param binary the mkvtool executable under test
- * @param tags a Kotest tag expression selecting the cases, or null for all of them
+ * @param tags a Kotest tag expression selecting the cases, or null for every case but `Live`, which runs only
+ *   when the expression names it
  * @param requireBinary refuses a missing binary before any case runs, naming the step that builds it
  */
 fun Test.e2eTier(binary: File, tags: String?, requireBinary: (File) -> Unit) {
@@ -188,7 +189,14 @@ fun Test.e2eTier(binary: File, tags: String?, requireBinary: (File) -> Unit) {
     // The fixture every media case is built from, named rather than discovered so the suite does not
     // have to know where it runs from.
     systemProperty("mkvtool.testMkv", File(projectDir, "src/test/test.mkv").absolutePath)
-    tags?.let { systemProperty("kotest.tags", it) }
+    // The Live case calls the real TheMovieDB, so it runs only when the expression names it - an
+    // ordinary run must not depend on the network, whatever happens to be in the environment.
+    val expression = when {
+        tags == null -> "!Live"
+        "Live" in tags -> tags
+        else -> "($tags) & !Live"
+    }
+    systemProperty("kotest.tags", expression)
     // A missing binary is a setup mistake, not a test failure, so it is refused here naming the step
     // that fixes it — rather than reaching the cases and surfacing as an ENOENT from ProcessBuilder once
     // per case, which says nothing useful.
@@ -203,7 +211,7 @@ fun Test.e2eTier(binary: File, tags: String?, requireBinary: (File) -> Unit) {
     doLast {
         logger.lifecycle("$name: $executed tests ran")
         if (executed == 0L) {
-            throw GradleException("$name ran no tests (kotest.tags=${tags ?: "none"}) - every case was skipped")
+            throw GradleException("$name ran no tests (kotest.tags=$expression) - every case was skipped")
         }
     }
     // Per-case temp directories make the cases independent, so they can run at once — which is the
@@ -228,6 +236,9 @@ testing {
                 // string-building, because the titles under test carry colons, quotes and question
                 // marks on purpose and hand-quoting them is the exact trap it exists to avoid.
                 implementation(libs.snakeyaml)
+                // Declared for the same reason: the stub TheMovieDB's JSON is built with it rather than by
+                // hand, because the titles under test carry quotes and backslashes on purpose.
+                implementation(libs.kotlinx.serialization.json)
             }
             targets.all {
                 testTask.configure {
@@ -638,21 +649,14 @@ require(acceptanceMode in setOf("full", "smoke", "none")) {
 // already provides. It names only the commands whose cases are still Groovy; the Kotlin tier's Smoke
 // tag covers the rest. Each case earns its place:
 val smokeCases = listOf(
-    // fetch-episodes: loopback HTTP, both metadata files written.
-    "35_fetch_episodes_stub",
-    // rename: the episodes.yaml load, i.e. snakeyaml in the image.
-    "94_rename_prefers_yaml",
     // inspect: both modes off one mkvmerge -J scan.
     "74_check_and_identify_combined",
     // mux: a real mkvmerge invocation end to end.
     "01_one_audio_one_subtitle",
-    // Cyrillic through fetch, rename and file names — where a native image's stdout and filesystem
-    // encodings would differ from the JVM's if they differ anywhere.
-    "38_non_ascii_titles_round_trip",
 )
 
 // Refuse rather than skip, and name the fix. The project's skip discipline is about individual
-// cases whose prerequisites are missing (mkvpropedit, a TheMovieDB key); a whole tier that quietly
+// cases whose prerequisites are missing (mkvpropedit, say); a whole tier that quietly
 // did not run is the one outcome worse than a red one.
 fun requireHarnessTools(groovy: String) {
     require(NativeVerify.isRunnable(launcherFor(groovy) + "--version")) {

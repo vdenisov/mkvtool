@@ -629,10 +629,20 @@ deliberately not part of `./gradlew build`:
 `-PmkvtoolBin` takes any executable, which is how one tier covers all three
 packagings — the `installDist` launcher, the native binary and the fat jar. Cases
 needing a tool that is absent skip themselves with a reason rather than failing.
-`-Pe2eTags=Smoke` narrows a run to one representative case per command it covers:
+`-Pe2eTags=Smoke` narrows a run to one representative case per command it covers,
+plus the Cyrillic `fetch-episodes`-to-`rename` round trip:
 
 ```
 ./gradlew e2eTest -PmkvtoolBin=build/jar-launcher/mkvtool -Pe2eTags=Smoke
+```
+
+One case calls the real TheMovieDB API, to check it has not changed shape. It is
+left out unless a tag expression names it, so an ordinary run never touches the
+network. Without `TMDB_API_KEY` it skips, and a run selecting only that case then
+fails for having run nothing. Run it on purpose with:
+
+```
+TMDB_API_KEY=<your key> ./gradlew e2eTest -Pe2eTags=Live
 ```
 
 There is a **second** end-to-end suite, in Groovy under `src/test/`, which the
@@ -646,11 +656,10 @@ groovy src/test/run_tests.groovy --filter 01 --keep
 ```
 
 `--app-bin` is its equivalent of `-PmkvtoolBin`. It needs `mkvmerge` (auto-detected
-from PATH, or `--mkvmerge-exe`) and Groovy 3 or newer, and the case that needs a
-TheMovieDB API key skips itself with a printed note. Run
-only one copy of *it* at a time: its work directories are keyed by case name, so a
-second run wipes the first one's fixtures mid-test. The Kotlin tier has no such
-rule — each case gets a temp directory of its own — so the two can run together.
+from PATH, or `--mkvmerge-exe`) and Groovy 3 or newer. Run only one copy of *it*
+at a time: its work directories are keyed by case name, so a second run wipes the
+first one's fixtures mid-test. The Kotlin tier has no such rule — each case gets a
+temp directory of its own — so the two can run together.
 
 ## Under the hood
 
