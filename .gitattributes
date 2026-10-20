@@ -1,6 +1,7 @@
 * text=auto eol=lf
 *.mkv binary
 
-# Batch files misbehave with LF line endings
-*.bat text eol=crlf
-*.cmd text eol=crlf
+# Batch files misbehave with LF line endings. Stored as-is rather than converted: Gradle generates
+# gradlew.bat with CRLF and Dependabot commits those bytes unconverted.
+*.bat -text
+*.cmd -text
