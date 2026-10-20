@@ -2,6 +2,7 @@ package org.plukh.mkvtool.core
 
 import java.io.File
 import java.io.IOException
+import java.nio.file.InvalidPathException
 
 /**
  * External-file discovery: finding the audio and subtitle files that belong to a main media file but do
@@ -112,20 +113,21 @@ data class TreeEntry(
  *
  * One recursive walk, reused by every mode. Directories starting with `.` are skipped, as is anything in
  * [excluded] — canonical paths, the output directory above all, since muxed results carry the same base
- * names as their sources and would come back as externals of themselves. Canonical paths are remembered
- * as directories are entered, so a symlink or junction loop on a network share cannot spin forever.
+ * names as their sources and would come back as externals of themselves. Real paths are remembered as
+ * directories are entered, so a symlink or junction loop on a network share cannot spin forever.
  *
  * Two v1 details reproduced deliberately: a subdirectory recurses **in its sorted position** rather than
  * after all sibling files, because the resulting order decides which entry names a variant; and [root]
  * itself is never tested against [excluded], so excluding the very directory being walked does nothing.
- * A path that cannot be canonicalized, and a directory that cannot be listed, are skipped silently.
+ * A path that cannot be resolved, and a directory that cannot be listed, are skipped silently.
  */
 fun walkTree(root: File, excluded: Set<String> = emptySet()): List<TreeEntry> {
     val out = ArrayList<TreeEntry>()
     val visited = HashSet<String>()
 
     fun recurse(dir: File, prefix: String) {
-        if (!visited.add(canonicalOrNull(dir) ?: return)) return
+        // Not canonicalPath: on Windows it resolves neither symlinks nor junctions, so a loop never repeats.
+        if (!visited.add(realPathOrNull(dir) ?: return)) return
         val kids = dir.listFiles() ?: return
 
         for (child in kids.sortedBy { it.name }) {
@@ -475,6 +477,18 @@ private fun canonicalOrNull(file: File): String? =
     } catch (_: IOException) {
         null
     } catch (_: SecurityException) {
+        null
+    }
+
+/** [file]'s path with every link and junction resolved, or null on the same failures as [canonicalOrNull]. */
+private fun realPathOrNull(file: File): String? =
+    try {
+        file.toPath().toRealPath().toString()
+    } catch (_: IOException) {
+        null
+    } catch (_: SecurityException) {
+        null
+    } catch (_: InvalidPathException) {
         null
     }
 
