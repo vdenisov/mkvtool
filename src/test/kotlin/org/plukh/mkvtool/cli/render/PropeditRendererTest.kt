@@ -9,7 +9,7 @@ import org.plukh.mkvtool.core.PropeditRun
 
 /**
  * Pins the v1 text of every `propedit` result line, rendered over captured streams. The per-file failure
- * carries the `*** Error:` prefix the harness pins (case 89); the summary reads
+ * carries the `*** Error:` prefix the end-to-end tier pins; the summary reads
  * `<succeeded> processed, <failed> failed`, matching v1's `total - failed` arithmetic.
  */
 class PropeditRendererTest : FunSpec({

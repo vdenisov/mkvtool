@@ -646,11 +646,9 @@ require(acceptanceMode in setOf("full", "smoke", "none")) {
 // One representative case per command, rather than the whole suite. This subset exists to catch what
 // differs *per platform* in a native image, which is a different question from whether the tool is
 // correct — and the full suite on every platform would triple the cost for coverage one platform
-// already provides. It names only the commands whose cases are still Groovy; the Kotlin tier's Smoke
-// tag covers the rest. Each case earns its place:
+// already provides. A command is listed here only while it has no Smoke-tagged case in the Kotlin tier,
+// which covers the rest. Each case earns its place:
 val smokeCases = listOf(
-    // inspect: both modes off one mkvmerge -J scan.
-    "74_check_and_identify_combined",
     // mux: a real mkvmerge invocation end to end.
     "01_one_audio_one_subtitle",
 )

@@ -840,23 +840,6 @@ runTest('27_dry_run_produces_no_output') { workDir ->
     check(!new File(workDir, 'mkv').exists(), 'destination dir not created')
 }
 
-// ─── 28. --identify lists tracks without muxing ──────────────────────────────
-// Assertions are deliberately loose: column formatting is expected to drift.
-runTest('28_identify_lists_tracks') { workDir ->
-    stageInput(workDir)
-    writeConfig(workDir, cfg(
-        audioTracks: [[id: 2, language: 'en', title: 'English', default: true]],
-        trackOrder: '0:0,0:2'
-    ))
-
-    def (code, out) = runInspect(workDir, ['--identify'])
-    checkEquals(code, 0, 'exit code')
-    check(out.contains('video'),     'lists the video track')
-    check(out.contains('subtitles'), 'lists subtitle tracks')
-    check(out.contains('jpn'),       'lists track languages')
-    check(!new File(workDir, 'mkv').exists(), 'destination dir not created')
-}
-
 // ─── 29. trackOrder omitted: derived from the configured tracks ──────────────
 runTest('29_derived_track_order') { workDir ->
     stageInput(workDir)
@@ -980,16 +963,6 @@ runTest('44_file_mask_literal_beats_glob') { workDir ->
     def (code, out) = runMkvGroovy(workDir, ['Odd[1].mkv'])
     checkEquals(code, 0, 'exit code')
     checkEquals(outputNames(workDir), ['Odd[1].mkv'], 'matched itself, not Odd1.mkv')
-}
-
-// ─── 45. masks apply to --identify too, not just muxing ──────────────────────
-runTest('45_file_mask_applies_to_identify') { workDir ->
-    stageBatch(workDir)
-    def (code, out) = runInspect(workDir, ['--identify', 'Show.S01E02.mkv'])
-    checkEquals(code, 0, 'exit code')
-    check(out.contains('Show.S01E02.mkv'),  'identifies the masked file')
-    check(!out.contains('Show.S01E01.mkv'), 'does not identify the others')
-    check(!new File(workDir, 'mkv').exists(), 'identify still muxes nothing')
 }
 
 // ─── Companion file pre-flight ───────────────────────────────────────────────
@@ -1314,18 +1287,6 @@ runTest('73_check_runs_by_default') { workDir ->
     checkEquals(outputNames(workDir), ['S01E01.mkv', 'S01E02.mkv'], 'files still muxed')
 }
 
-// ─── 74. --identify and --check combined print both, mux nothing, probe once ─
-runTest('74_check_and_identify_combined') { workDir ->
-    fullCopy(new File(workDir, 'S01E01.mkv'))
-    writeConfig(workDir, checkCfg())
-
-    def (code, out) = runInspect(workDir, ['--identify', '--check'])
-    checkEquals(code, 0, 'exit code')
-    check(out.contains('Consistency check'), 'cross-file report present')
-    check(out.contains('*** S01E01.mkv'), 'per-file identify table present')
-    check(!new File(workDir, 'mkv').exists(), 'combined mode muxes nothing')
-}
-
 // ─── 75. an unidentifiable file is excluded, not crashed on ──────────────────
 runTest('75_check_survives_unidentifiable_file') { workDir ->
     fullCopy(new File(workDir, 'good.mkv'))
@@ -1491,24 +1452,6 @@ runTest('83_color_never_and_no_color_precedence') { workDir ->
     def (c2, out2) = runScript('inspect.groovy', workDir, ['--check', '--color', 'always'], [NO_COLOR: '1'])
     checkEquals(c2, 0, 'exit code (always + NO_COLOR)')
     check(out2.contains("${esc}["), 'explicit --color always beats NO_COLOR')
-}
-
-// ─── 90. an empty batch says why instead of a bare "Done" ────────────────────
-// A green "Done" in an empty (or all-non-media) directory looks identical to a
-// successful run that had no work — e.g. after a typo'd cd.
-runTest('90_no_media_files_reported') { workDir ->
-    // Empty directory, no masks
-    def (c1, out1) = runInspect(workDir, ['--check'])
-    checkEquals(c1, 0, 'exit code (empty dir)')
-    check(out1.contains('No media files'), 'says the directory has nothing to work on')
-    check(out1.contains('mkv'), 'names the extensions it looked for')
-
-    // A mask that matches a file, just not a media file
-    new File(workDir, 'notes.txt').text = 'not media'
-    def (c2, out2) = runInspect(workDir, ['--identify', 'notes.txt'])
-    checkEquals(c2, 0, 'exit code (non-media match)')
-    check(out2.contains('No media files match: notes.txt'), 'names the fruitless pattern')
-    check(!new File(workDir, 'mkv').exists(), 'no output directory created')
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1703,25 +1646,6 @@ runTest('105_companion_substitution') { workDir ->
                 'companion title substituted from its own language and codec')
 }
 
-// ─── 106. --identify shows configured companions, missing ones included ─────
-runTest('106_identify_shows_companions') { workDir ->
-    def input = stageInput(workDir, 'My Show - S01E01 - Pilot.mkv')
-    extractTrack(input, new File(workDir, 'My Show - S01E01 - Pilot.rus.mka'), 'audio', 3)
-    stageInput(workDir, 'My Show - S01E02 - Second.mkv')     // no companion for this one
-    writeConfig(workDir, cfg(
-        audioTracks: [[id:2, language:'en', title:'English', default:true]],
-        additionalSources: [[file: '${fileName}.rus.mka',
-                             tracks: [[language:'ru', title:'Russian', default:false]]]],
-        trackOrder: '0:0,0:2,1:0'
-    ))
-
-    def (code, out) = runInspect(workDir, ['--identify'])
-    checkEquals(code, 0, "exit code (output was:\n$out\n)")
-    check(out.contains('+ My Show - S01E01 - Pilot.rus.mka'), 'shows the resolved companion path')
-    check(out.contains('(not found)'), 'reports the episode whose companion is absent')
-    check(!new File(workDir, 'mkv').exists(), '--identify muxed nothing')
-}
-
 // ─── 107. --dry-run resolves; --check keeps the raw template ────────────────
 runTest('107_dry_run_and_check_rendering') { workDir ->
     stageInput(workDir, 'My Show - S01E01 - Pilot.mkv')
@@ -1751,33 +1675,6 @@ runTest('107_dry_run_and_check_rendering') { workDir ->
     check(checkOut.contains('${languageName}'), "check prints the raw template; got:\n$checkOut")
 }
 
-// ─── 108. mkv-inspect: bare run checks, --identify identifies ────────────────
-// The default mode is the batch report, since that is the question one usually
-// arrives with; --identify is the per-file drill-down and suppresses the report
-// unless --check names it too. Neither writes anything, with or without a config.
-runTest('108_inspect_default_mode') { workDir ->
-    fullCopy(new File(workDir, 'a.mkv'))
-    fullCopy(new File(workDir, 'b.mkv'))
-
-    def (bareCode, bareOut) = runInspect(workDir)
-    checkEquals(bareCode, 0, 'bare run exits 0')
-    check(bareOut.contains('Consistency check'), 'bare run prints the check report')
-    check(!bareOut.contains('*** a.mkv'), 'bare run prints no per-file table')
-
-    def (idCode, idOut) = runInspect(workDir, ['--identify'])
-    checkEquals(idCode, 0, '--identify exits 0')
-    check(idOut.contains('*** a.mkv'), '--identify prints the per-file table')
-    check(!idOut.contains('Consistency check'), '--identify alone skips the report')
-
-    def (bothCode, bothOut) = runInspect(workDir, ['--identify', '--check'])
-    checkEquals(bothCode, 0, 'combined exits 0')
-    check(bothOut.contains('Consistency check') && bothOut.contains('*** a.mkv'),
-          'naming both runs both')
-
-    check(!new File(workDir, 'mkv').exists(), 'inspection creates no output directory')
-    check(!new File(workDir, 'config.yaml').exists(), 'no config was needed at all')
-}
-
 // ─── 109. mux.groovy rejects the inspection flags it no longer owns ──────────
 // They moved to mkv-inspect outright rather than living on as aliases: two entry
 // points for one report is surface to keep in sync, and picocli already rejects
@@ -1797,43 +1694,6 @@ runTest('109_mux_rejects_inspection_flags') { workDir ->
     // setting an exit code, so this — like every unknown option in every picocli
     // script here — still exits 0. Asserted on the message and the absence of
     // output instead, rather than pinning behaviour worth changing separately.
-}
-
-// ─── 111. --identify bundles discovered external files under each episode ────
-runTest('111_identify_external_files') { workDir ->
-    stageTree(workDir)
-
-    def (code, out) = runInspect(workDir, ['--identify'])
-    checkEquals(code, 0, 'exit code')
-
-    check(out.contains('External files:'), 'the legend is printed')
-    check(out.contains('Rus sound/[GroupA]/<name>.mka'), 'legend shows the path pattern')
-    check(out.contains('Rus subs/[GroupA]/<name>.ass'),
-          'a merged variant lists both kinds of file it holds')
-    check(out.contains('<name>.rus.srt'), 'the suffix layout is a variant too')
-
-    // A probed .mka reports the language it actually carries; an unprobed .ass
-    // falls back to the directory guess, marked as a guess.
-    check(out.contains('[GroupA]'), 'variants are labelled by their directory')
-    check(out.contains('rus?'), 'a guessed language is marked with a question mark')
-    check(out.contains('ASS'), 'codec of an unprobed file comes from its extension')
-
-    // A merged variant is one block with both its files under it, not two
-    // blocks that happen to share a label.
-    check(out.contains('[GroupA] (.mka, .ass)'), "the merged variant is one block; got:\n${out}")
-
-    // The [GroupB] fixture is staged with no language, so mkvmerge reports 'und'
-    // — Matroska's only way of saying "untagged" — which has to fall back to the
-    // folder's guess. Matched as a whole track row: the fixture's own video track
-    // is genuinely undefined, and "Rus sound" contains the letters too.
-    def untagged = out.readLines().findAll { it ==~ /^\s+\d+\s+audio\s+\S+\s+und\s.*/ }
-    check(untagged.isEmpty(), "an untagged external file falls back to the guess; got: ${untagged}")
-
-    check(out.contains('Unmatched external files'), 'the leftovers are reported')
-    check(out.contains('Bonus.ass'), 'and named')
-    check(out.contains('Extras:'), 'main-type files in subdirectories are reported')
-    check(out.contains('Sample.mkv'), 'and named')
-    check(!out.contains('*** extras/Sample.mkv'), 'but never inspected as a source')
 }
 
 // ─── 112. external files are part of the layout, so they split the groups ────
@@ -1902,92 +1762,6 @@ runTest('112c_external_value_split_reported') { workDir ->
     check(out.contains('informational'), 'an external difference never blocks')
 }
 
-// ─── 113. discovery skips dot-directories and the output directory ───────────
-// Muxed output carries the same base names as its sources, so an output folder
-// left in place would come back as an external file of the episode it was made
-// from.
-runTest('113_discovery_excludes_output_and_dot_dirs') { workDir ->
-    stageInput(workDir, 'Show - S01E01 - Title.mkv')
-    stageExternalTrack(workDir, 'mkv/Show - S01E01 - Title.mka', 'audio', 3)
-    stageExternalText(workDir, '.stash/Show - S01E01 - Title.srt')
-    stageExternalText(workDir, 'Rus subs/[Real]/Show - S01E01 - Title.ass')
-    writeConfig(workDir, cfg(audioTracks: [[id: 1, language: 'jpn', title: 'JP', default: true]]))
-
-    def (code, out) = runInspect(workDir, ['--identify'])
-    checkEquals(code, 0, 'exit code')
-    check(out.contains('[Real]'), 'a real external file is still found')
-    check(!out.contains('mkv/'), 'destinationDir is not scanned')
-    check(!out.contains('.stash'), 'dot-directories are not scanned')
-}
-
-// ─── 114. a .sub is never probed, and an idx/sub pair covers its episode once ─
-// On its own a .sub identifies as a zero-track MPEG stream, so probing it would
-// report nothing useful and cost a subprocess to do it.
-runTest('114_sub_never_probed') { workDir ->
-    stageInput(workDir, 'Show - S01E01 - Title.mkv')
-    // Deliberately not a valid VobSub pair: if anything probed these, it would
-    // show in the output as an error rather than as a clean VobSub row.
-    stageExternalText(workDir, 'Subs/[Group]/Show - S01E01 - Title.idx', 'not really an index\n')
-    stageExternalText(workDir, 'Subs/[Group]/Show - S01E01 - Title.sub', 'not really a stream\n')
-
-    def (code, out) = runInspect(workDir, ['--identify'])
-    checkEquals(code, 0, 'exit code')
-    check(out.contains('VobSub'), 'both halves are described from their extension')
-    check(!out.contains('could not identify'), 'neither half is reported as unreadable')
-    check(!out.contains('Exception'), 'no stack trace')
-
-    def (checkCode, checkOut) = runInspect(workDir)
-    checkEquals(checkCode, 0, 'check exit code')
-    check(!checkOut.contains('Layout 2'), 'the pair is one episode\'s worth of external files, not two groups')
-}
-
-// ─── 115. masks narrow what is reported, not what is matched ─────────────────
-// Otherwise narrowing to one episode would dump the rest of the season's dubs
-// into "unmatched", which is exactly the opposite of what the mask asked for.
-runTest('115_masks_scope_external_display') { workDir ->
-    stageTree(workDir)
-
-    def (code, out) = runInspect(workDir, ['--identify', 'Show - S01E01 - Title.mkv'])
-    checkEquals(code, 0, 'exit code')
-    check(out.contains('*** Show - S01E01 - Title.mkv'), 'the named episode is inspected')
-    check(!out.contains('*** Show - S01E02 - Title.mkv'), 'the others are not')
-    check(!out.contains('Show - S01E02 - Title.mka'), "another episode's dub is not listed")
-    check(!out.contains('Show - S01E02 - Title.ass'), "nor mis-reported as unmatched")
-}
-
-// ─── 118. a broken config never stops mkv-inspect ────────────────────────────
-// The script reports on files; a config is an optional extra that adds
-// classification. A stale or half-written one in the directory must not stand
-// between the user and the track table — least of all when reading that table is
-// how they would fix the config.
-runTest('118_inspect_survives_broken_config') { workDir ->
-    stageInput(workDir, 'a.mkv')
-
-    def cases = [
-        'malformed' : "general:\n  destinationDir: mkv\n   bad indent: [\n",
-        'empty'     : "",
-        'not a map' : "- just\n- a list\n",
-        'bad token' : "mainSource:\n  videoTrack:\n    language: \"jpn\"\n    title: \"\${epsiodeName}\"\n",
-    ]
-
-    cases.each { label, text ->
-        new File(workDir, 'config.yaml').setText(text, 'UTF-8')
-
-        def (code, out) = runInspect(workDir, ['--identify'])
-        checkEquals(code, 0, "${label} config still exits 0")
-        check(out.contains('*** a.mkv'), "${label} config still prints the track table; got:\n${out}")
-        check(!out.contains('Exception'), "${label} config produces no stack trace")
-        check(out.contains('Warning'), "${label} config is reported as a warning; got:\n${out}")
-
-        // --strict is the one thing that turns any of it into a failure.
-        def (strictCode, strictOut) = runInspect(workDir, ['--strict'])
-        checkEquals(strictCode, 2, "${label} config exits 2 under --strict")
-        check(strictOut.contains('config problem'), "${label} config is named as the reason under --strict")
-    }
-
-    check(!new File(workDir, 'mkv').exists(), 'nothing was written at any point')
-}
-
 // ─── 119. a config that cannot be parsed is a clean error in mux ─────────────
 // mux cannot mux against a config it did not understand, so this stays fatal —
 // but as the same clean exit 2 a missing config gets, never a stack trace.
@@ -2002,21 +1776,6 @@ runTest('119_mux_rejects_unusable_config') { workDir ->
         check(!out.contains('Exception'), 'no stack trace')
         check(!new File(workDir, 'mkv').exists(), 'muxed nothing')
     }
-}
-
-// ─── 120. an external file mkvmerge cannot read is reported, not faked ───────
-// The never-probed formats and a failed probe are different things: describing a
-// truncated .mka from its extension would present the one file that cannot be
-// muxed as the healthiest row in the table.
-runTest('120_unreadable_external_reported') { workDir ->
-    stageInput(workDir, 'Show - S01E01 - Title.mkv')
-    stageExternalText(workDir, 'Rus sound/[Group]/Show - S01E01 - Title.mka', 'not a matroska file at all\n')
-
-    def (code, out) = runInspect(workDir, ['--identify'])
-    checkEquals(code, 0, 'exit code')
-    check(out.contains('could not read this file'), "the failure is stated; got:\n${out}")
-    check(!out.contains('0    audio      Matroska'), 'it is not dressed up as a healthy track')
-    check(!out.contains('Exception'), 'no stack trace')
 }
 
 // ─── 123. every layout group names its files, the largest included ───────────
@@ -2074,44 +1833,6 @@ runTest('124_video_title_shown_not_compared') { workDir ->
 
     // "-" is the one glyph for absent, everywhere.
     check(!out.contains('(no name)'), 'nothing invents a name for an unnamed track')
-}
-
-// ─── 118b. a broken episodes.yaml never stops a report either ────────────────
-// The same rule as 118, one file over. episodes.yaml is every bit as
-// hand-editable as config.yaml, and it fails the same ways — plus one of its
-// own, an episode number that is not a number, which throws inside normalizeYaml
-// rather than at parse time and so only stays caught while the transform runs
-// inside the guard.
-//
-// It is deliberately NOT counted into configProblems, which is what the --strict
-// leg pins: --strict says "treat the findings as a failure", and episode
-// metadata produces no findings. It only decorates the source paths --identify
-// resolves, so there is nothing here for a verdict to be about.
-runTest('118b_inspect_survives_broken_episodes_yaml') { workDir ->
-    stageInput(workDir, 'Show - S01E01 - Title.mkv')
-
-    def cases = [
-        'malformed' : "show: Test\nepisodes:\n  - episode: 1\n   name: [\n",
-        'empty'     : "",
-        'not a map' : "- just\n- a list\n",
-        'bad number': "show: Test\nepisodes:\n  - episode: \"one\"\n    name: Pilot\n",
-    ]
-
-    cases.each { label, text ->
-        new File(workDir, 'episodes.yaml').setText(text, 'UTF-8')
-
-        def (code, out) = runInspect(workDir, ['--identify'])
-        checkEquals(code, 0, "${label} episodes.yaml still exits 0")
-        check(out.contains('*** Show - S01E01 - Title.mkv'),
-              "${label} episodes.yaml still prints the track table; got:\n${out}")
-        check(!out.contains('Exception'), "${label} episodes.yaml produces no stack trace; got:\n${out}")
-        check(out.contains('Warning'), "${label} episodes.yaml is reported as a warning; got:\n${out}")
-
-        def (strictCode, strictOut) = runInspect(workDir, ['--strict'])
-        checkEquals(strictCode, 0, "${label} episodes.yaml does not fail --strict")
-        check(!strictOut.contains('config problem'),
-              "${label} episodes.yaml is not counted as a config problem; got:\n${strictOut}")
-    }
 }
 
 // ─── 119b. mux refuses a broken episodes.yaml, cleanly ───────────────────────

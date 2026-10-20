@@ -137,8 +137,6 @@ class InspectRendererTest : FunSpec({
                 identification(tracks = listOf(pt(0, "video")), externals = listOf(variantOf(unprobedAss()))),
             )
 
-            // The Groovy case `120_unreadable_external_reported` asserts the *negative* of this exact
-            // string, so a truncated file is never dressed up as a healthy track.
             out shouldContain "  0    subtitles  ASS                    rus?"
         }
 
