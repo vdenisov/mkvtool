@@ -31,16 +31,15 @@ docker compose run --rm build ./gradlew nativeLoop
 ```
 
 `nativeLoop` is the whole loop: compile the binary, run its built-in probes, check
-`find-unused-fonts`, run the acceptance suite against it, and measure startup against a ceiling.
-From cold that is about three minutes, most of it compilation — the full suite of 124 cases takes
-around half a minute, because the binary starts in roughly 13 ms where the Groovy scripts it
-replaced took seconds apiece. When the binary is already current, the whole thing is well under a
-minute.
+`find-unused-fonts`, run both end-to-end suites against it, and measure startup against a ceiling.
+From cold that is a few minutes, most of it compilation — the suites themselves are quick, because
+the binary starts in roughly 13 ms where the Groovy scripts it replaced took seconds apiece.
 
 To narrow it while iterating:
 
 ```
-docker compose run --rm build ./gradlew acceptanceTest -Pfilter=94_rename    # one case
+docker compose run --rm build ./gradlew acceptanceTest -Pfilter=94_rename    # one Groovy case
+docker compose run --rm build ./gradlew nativeE2e --tests '*ToUtf8Test'      # one Kotlin spec
 docker compose run --rm build ./gradlew nativeCheck -Pacceptance=smoke       # one case per command
 docker compose run --rm build bash                                           # a shell, to poke around
 ```
@@ -178,16 +177,22 @@ binary built somewhere else — a downloaded release asset, or a copy signed aft
 | Task | What it does |
 |---|---|
 | `nativeSmoke` | Runs the binary's built-in probes: charsets, locales, JSON, YAML, HTTPS. They self-assert, so running them is the check. |
-| `unusedFontsCheck` | End-to-end check of `find-unused-fonts`, the one command the acceptance suite has no case for. |
-| `acceptanceTest` | The full acceptance suite against the binary. `-Pfilter=<substring>` narrows it to matching cases. |
-| `acceptanceSmoke` | One representative case per command — what the per-platform CI legs run. |
+| `unusedFontsCheck` | End-to-end check of `find-unused-fonts`, the one command neither suite has a case for. |
+| `nativeE2e` | The Kotlin end-to-end tier against the binary: every case, or only the `Smoke`-tagged ones under `-Pacceptance=smoke`. |
+| `acceptanceTest` | The full Groovy acceptance suite against the binary. `-Pfilter=<substring>` narrows it to matching cases. |
+| `acceptanceSmoke` | One representative Groovy case per command not yet moved to the Kotlin tier — what the per-platform CI legs run. |
 | `startupCheck` | First and mean `--version` time, asserted against a ceiling. |
-| `nativeCheck` | All of the above. `-Pacceptance=full\|smoke\|none` picks which suite pass, if any. |
+| `nativeCheck` | All of the above. `-Pacceptance=full\|smoke\|none` picks which pass of both suites, if any. |
 | `nativeLoop` | `nativeCompile`, then `nativeCheck`. |
 
-Properties they accept: `-PnativeBinary` (which binary), `-Pfilter` (narrow the suite), `-Pacceptance`
-(which pass), `-PgroovyBin` and `-PmkvmergeExe` (tools not on `PATH`), `-PstartupRuns` and
-`-PstartupCeilingMs` (the measurement).
+Properties they accept: `-PnativeBinary` (which binary), `-Pfilter` (narrow the Groovy suite),
+`-Pe2eTags` (a Kotest tag expression narrowing the Kotlin one), `-Pacceptance` (which pass),
+`-PgroovyBin` and `-PmkvmergeExe` (tools not on `PATH`, for the Groovy suite only — the Kotlin tier finds
+MKVToolNix on `PATH` or in its default Windows location), `-PstartupRuns` and `-PstartupCeilingMs` (the
+measurement).
+
+`nativeE2e` fails a case that needs a missing `mkvmerge` or `mkvpropedit` rather than skipping it, since
+every environment it runs in carries both and a skip would be lost coverage reported green.
 
 None of these is wired into `check` or `build`, on purpose: an ordinary `./gradlew build` has to stay
 green on a machine with no GraalVM, no Groovy and no MKVToolNix.

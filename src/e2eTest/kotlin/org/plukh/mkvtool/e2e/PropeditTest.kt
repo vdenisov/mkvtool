@@ -3,6 +3,7 @@ package org.plukh.mkvtool.e2e
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import org.plukh.mkvtool.e2e.support.Smoke
 import org.plukh.mkvtool.e2e.support.mkvtool
 import org.plukh.mkvtool.e2e.support.needsMkvpropedit
 import org.plukh.mkvtool.e2e.support.probe
@@ -17,7 +18,8 @@ import org.plukh.mkvtool.e2e.support.stageInput
  */
 class PropeditTest : FunSpec({
 
-    test("arguments reach mkvpropedit unchanged").config(enabledOrReasonIf = needsMkvpropedit) {
+    test("arguments reach mkvpropedit unchanged")
+        .config(tags = setOf(Smoke), enabledOrReasonIf = needsMkvpropedit) {
         val workDir = tempdir()
         val input = stageInput(workDir)
 

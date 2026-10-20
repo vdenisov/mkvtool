@@ -948,22 +948,6 @@ runTest('31_propedit_no_args_is_noop') { workDir ->
     checkEquals(input.lastModified(), mtimeBefore, 'file mtime unchanged')
 }
 
-// ─── 32. propedit passes its arguments through to mkvpropedit ────────────────
-runTest('32_propedit_passthrough') { workDir ->
-    if (!mkvpropeditExe) {
-        println "  (skipped: mkvpropedit not available)"
-        return
-    }
-
-    def input = stageInput(workDir)
-    def (code, out) = runScript('propedit.groovy', workDir,
-                                ['--edit', 'info', '--set', 'title=SmokeTest'])
-    checkEquals(code, 0, 'exit code')
-
-    checkEquals(identify(input).container.get('properties').title, 'SmokeTest',
-                'title set via passthrough')
-}
-
 // ─── 33. rename aborts before touching anything when a title is missing ──────
 // The data-loss guard: renaming destroys the sXXeYY pattern that links a file
 // to its episode, so a partial rename is expensive to untangle by hand.
@@ -1355,20 +1339,6 @@ def writeBytes = { File workDir, String name, byte[] bytes ->
 
 def runToUtf8 = { File workDir, List extraArgs = [] ->
     runScript('to_utf8.groovy', workDir, extraArgs)
-}
-
-// ─── 50. converts windows-1251 in place, keeping the file's line endings ─────
-runTest('50_to_utf8_converts_in_place') { workDir ->
-    def lf   = writeBytes(workDir, 'lf.srt',   'Привет, мир!\n'.getBytes('windows-1251'))
-    def crlf = writeBytes(workDir, 'crlf.srt', 'Привет\r\nмир\r\n'.getBytes('windows-1251'))
-
-    def (code, out) = runToUtf8(workDir)
-    checkEquals(code, 0, "exit code (output was:\n$out\n)")
-    check(out.contains('windows-1251'), 'states the source encoding it used')
-
-    checkEquals(lf.getText('UTF-8'), 'Привет, мир!\n', 'LF file converted')
-    checkEquals(crlf.getText('UTF-8'), 'Привет\r\nмир\r\n',
-                'CRLF preserved — writing line by line would normalise these')
 }
 
 // ─── 51. already-UTF-8 input is left alone, so a re-run is a no-op ───────────

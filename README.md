@@ -629,6 +629,11 @@ deliberately not part of `./gradlew build`:
 `-PmkvtoolBin` takes any executable, which is how one tier covers all three
 packagings — the `installDist` launcher, the native binary and the fat jar. Cases
 needing a tool that is absent skip themselves with a reason rather than failing.
+`-Pe2eTags=Smoke` narrows a run to one representative case per command it covers:
+
+```
+./gradlew e2eTest -PmkvtoolBin=build/jar-launcher/mkvtool -Pe2eTags=Smoke
+```
 
 There is a **second** end-to-end suite, in Groovy under `src/test/`, which the
 tier above is replacing case by case. Both run until that finishes:

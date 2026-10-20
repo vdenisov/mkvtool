@@ -164,6 +164,55 @@ val mkvtoolBinPath: String = providers.gradleProperty("mkvtoolBin").orNull
     // `cmd /c` exactly as the Groovy harness does.
     ?: if (hostIsWindows) "build/install/mkvtool/bin/mkvtool.bat" else "build/install/mkvtool/bin/mkvtool"
 
+// A Kotest tag expression narrowing a run, `Smoke` above all: one representative case per command, for
+// the packagings where the whole tier would cost more than it tells.
+val e2eTags: String? = providers.gradleProperty("e2eTags").orNull
+
+/**
+ * Aims this task at one mkvtool binary. Shared by the suite's own task and by nativeE2e, which differ
+ * only in which binary they run and which cases they select.
+ *
+ * @param binary the mkvtool executable under test
+ * @param tags a Kotest tag expression selecting the cases, or null for all of them
+ * @param requireBinary refuses a missing binary before any case runs, naming the step that builds it
+ */
+fun Test.e2eTier(binary: File, tags: String?, requireBinary: (File) -> Unit) {
+    group = "verification"
+    // Nothing here produces a file, and every run has to actually run.
+    outputs.upToDateWhen { false }
+    // A suite that discovers nothing passes, which is the failure mode this project has already been
+    // bitten by twice in workflow shell — a filter matching no case ran no case and exited 0. A tier
+    // whose specs stopped being found would go the same way.
+    failOnNoDiscoveredTests = true
+    systemProperty("mkvtool.bin", binary.absolutePath)
+    // The fixture every media case is built from, named rather than discovered so the suite does not
+    // have to know where it runs from.
+    systemProperty("mkvtool.testMkv", File(projectDir, "src/test/test.mkv").absolutePath)
+    tags?.let { systemProperty("kotest.tags", it) }
+    // A missing binary is a setup mistake, not a test failure, so it is refused here naming the step
+    // that fixes it — rather than reaching the cases and surfacing as an ENOENT from ProcessBuilder once
+    // per case, which says nothing useful.
+    doFirst { requireBinary(binary) }
+    // failOnNoDiscoveredTests cannot see a tag filter that matches nothing: Kotest reports every case it
+    // filtered out as skipped, and a skipped test counts as discovered. So a misspelt tag would run a
+    // green suite of no cases unless the executed ones are counted.
+    var executed = 0L
+    afterSuite(KotlinClosure2<TestDescriptor, TestResult, Unit>({ suite, result ->
+        if (suite.parent == null) executed = result.testCount - result.skippedTestCount
+    }))
+    doLast {
+        logger.lifecycle("$name: $executed tests ran")
+        if (executed == 0L) {
+            throw GradleException("$name ran no tests (kotest.tags=${tags ?: "none"}) - every case was skipped")
+        }
+    }
+    // Per-case temp directories make the cases independent, so they can run at once — which is the
+    // whole reason this tier does not inherit the Groovy suite's one-run-at-a-time rule. Held below the
+    // core count: each case spawns subprocesses of its own, and mkvmerge is the thing actually competing
+    // for the machine.
+    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
+}
+
 testing {
     suites {
         val e2eTest by registering(JvmTestSuite::class) {
@@ -182,35 +231,17 @@ testing {
             }
             targets.all {
                 testTask.configure {
-                    group = "verification"
-                    description = "Runs the end-to-end tier against a real binary. -PmkvtoolBin=<path> selects it."
-                    // Nothing here produces a file, and every run has to actually run.
-                    outputs.upToDateWhen { false }
-                    // A suite that discovers nothing passes, which is the failure mode this project has
-                    // already been bitten by twice in workflow shell — a filter matching no case ran no
-                    // case and exited 0. A tier whose specs stopped being found would go the same way.
-                    failOnNoDiscoveredTests = true
+                    description = "Runs the end-to-end tier against a real binary. -PmkvtoolBin=<path> " +
+                        "selects it, -Pe2eTags=<expression> narrows it."
                     val binary = File(mkvtoolBinPath).let {
                         if (it.isAbsolute) it else File(projectDir, mkvtoolBinPath)
                     }
-                    systemProperty("mkvtool.bin", binary.absolutePath)
-                    // The fixture every media case is built from, named rather than discovered so the
-                    // suite does not have to know where it runs from.
-                    systemProperty("mkvtool.testMkv", File(projectDir, "src/test/test.mkv").absolutePath)
-                    // A missing binary is a setup mistake, not a test failure, so it is refused here
-                    // naming the step that fixes it — rather than reaching the cases and surfacing as
-                    // an ENOENT from ProcessBuilder once per case, which says nothing useful.
-                    doFirst {
-                        require(binary.isFile) {
-                            "no mkvtool binary at $binary - run './gradlew installDist' first, or pass " +
+                    e2eTier(binary, e2eTags) {
+                        require(it.isFile) {
+                            "no mkvtool binary at $it - run './gradlew installDist' first, or pass " +
                                 "-PmkvtoolBin=<path> to aim this tier at the fat jar or the native binary"
                         }
                     }
-                    // Per-case temp directories make the cases independent, so they can run at once —
-                    // which is the whole reason this tier does not inherit the Groovy suite's
-                    // one-run-at-a-time rule. Held below the core count: each case spawns subprocesses
-                    // of its own, and mkvmerge is the thing actually competing for the machine.
-                    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
                 }
             }
         }
@@ -605,15 +636,11 @@ require(acceptanceMode in setOf("full", "smoke", "none")) {
 // One representative case per command, rather than the whole suite. This subset exists to catch what
 // differs *per platform* in a native image, which is a different question from whether the tool is
 // correct — and the full suite on every platform would triple the cost for coverage one platform
-// already provides. Each case earns its place:
+// already provides. It names only the commands whose cases are still Groovy; the Kotlin tier's Smoke
+// tag covers the rest. Each case earns its place:
 val smokeCases = listOf(
-    // to-utf8: a windows-1251 decode through the CLI, i.e. -H:+AddAllCharsets with teeth.
-    "50_to_utf8_converts_in_place",
     // fix-srt: the reformat state machine over a charset-detected read.
     "87_fix_srt_fixes_valid_file",
-    // propedit: real mkvpropedit argv passthrough (31 is a no-op, so it proves less). This is the only
-    // case here that runs mkvpropedit, so it carries that tool's whole native coverage.
-    "32_propedit_passthrough",
     // fetch-episodes: loopback HTTP, both metadata files written.
     "35_fetch_episodes_stub",
     // rename: the episodes.yaml load, i.e. snakeyaml in the image.
@@ -753,6 +780,23 @@ val unusedFontsCheck = tasks.register("unusedFontsCheck") {
     }
 }
 
+// The Kotlin tier aimed at the binary every task here inspects. Its own task rather than e2eTest
+// re-aimed: e2eTest's binary is fixed when the build is configured, and keeping the two apart keeps
+// -PnativeBinary meaning what it means for every other task here, and gives each its own report.
+val nativeE2e = tasks.register<Test>("nativeE2e") {
+    description = "Runs the Kotlin end-to-end tier against the native binary (its Smoke cases under " +
+        "-Pacceptance=smoke)."
+    afterNativeCompile()
+    val e2eSources = sourceSets["e2eTest"]
+    testClassesDirs = e2eSources.output.classesDirs
+    classpath = e2eSources.runtimeClasspath
+    useJUnitPlatform()
+    e2eTier(nativeBinaryFile, e2eTags ?: "Smoke".takeIf { acceptanceMode == "smoke" }, ::requireNativeBinary)
+    // Every leg and the container carry MKVToolNix, so a case skipping for a missing tool there is lost
+    // coverage reported green; the propedit case is the only native mkvpropedit coverage there is.
+    systemProperty("mkvtool.requireTools", "true")
+}
+
 val acceptanceTest = tasks.register("acceptanceTest") {
     description = "Runs the acceptance suite against the native binary. -Pfilter=<substring> narrows it."
     afterNativeCompile()
@@ -841,21 +885,26 @@ val startupCheck = tasks.register("startupCheck") {
 }
 
 // Cheapest and highest-signal first: the probes catch a dropped native-image flag in milliseconds
-// rather than eight minutes into a suite. Startup runs last, when the binary is warm on disk, which
-// is what the number is meant to describe. mustRunAfter only orders tasks that are both in the
-// graph, so naming both acceptance passes here costs nothing when only one of them runs.
+// rather than eight minutes into a suite, and the Kotlin tier, parallel and quick, comes before the
+// Groovy one. Startup runs last, when the binary is warm on disk, which is what the number is meant to
+// describe. mustRunAfter only orders tasks that are both in the graph, so naming both acceptance passes
+// here costs nothing when only one of them runs.
 unusedFontsCheck { mustRunAfter(nativeSmoke) }
-acceptanceTest { mustRunAfter(unusedFontsCheck) }
-acceptanceSmoke { mustRunAfter(unusedFontsCheck) }
-startupCheck { mustRunAfter(unusedFontsCheck, acceptanceTest, acceptanceSmoke) }
+nativeE2e { mustRunAfter(unusedFontsCheck) }
+acceptanceTest { mustRunAfter(nativeE2e) }
+acceptanceSmoke { mustRunAfter(nativeE2e) }
+startupCheck { mustRunAfter(unusedFontsCheck, nativeE2e, acceptanceTest, acceptanceSmoke) }
 
 val nativeCheck = tasks.register("nativeCheck") {
     group = "verification"
-    description = "Verifies an existing native binary: probes, fonts, acceptance (-Pacceptance=full|smoke|none), startup."
+    description = "Verifies an existing native binary: probes, fonts, both end-to-end tiers " +
+        "(-Pacceptance=full|smoke|none), startup."
     dependsOn(nativeSmoke, unusedFontsCheck, startupCheck)
+    // One switch for both tiers, because they answer one question between them while the cases move
+    // from the Groovy suite to the Kotlin one.
     when (acceptanceMode) {
-        "full" -> dependsOn(acceptanceTest)
-        "smoke" -> dependsOn(acceptanceSmoke)
+        "full" -> dependsOn(nativeE2e, acceptanceTest)
+        "smoke" -> dependsOn(nativeE2e, acceptanceSmoke)
     }
 }
 
