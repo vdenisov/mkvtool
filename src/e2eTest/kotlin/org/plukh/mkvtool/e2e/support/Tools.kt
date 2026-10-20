@@ -45,15 +45,20 @@ private fun findMkvTool(name: String): String? {
 val mkvmergeExe: String? by lazy { findMkvTool("mkvmerge") }
 val mkvpropeditExe: String? by lazy { findMkvTool("mkvpropedit") }
 
-/** Skip a case that needs mkvmerge, saying why. */
-val needsMkvmerge: (TestCase) -> Enabled = {
-    if (mkvmergeExe != null) Enabled.enabled else Enabled.disabled("mkvmerge not available")
-}
+// Set by runs whose environment always carries both tools, where a skip could only mean that environment
+// broke — and a skipped case is one the run still reports green.
+private val toolsRequired = System.getProperty("mkvtool.requireTools").toBoolean()
 
-/** Skip a case that needs mkvpropedit, saying why. */
-val needsMkvpropedit: (TestCase) -> Enabled = {
-    if (mkvpropeditExe != null) Enabled.enabled else Enabled.disabled("mkvpropedit not available")
-}
+/** Skip a case that needs mkvmerge, saying why; under `mkvtool.requireTools`, run it to fail instead. */
+val needsMkvmerge: (TestCase) -> Enabled = { needs("mkvmerge", mkvmergeExe) }
+
+/** Skip a case that needs mkvpropedit, saying why; under `mkvtool.requireTools`, run it to fail instead. */
+val needsMkvpropedit: (TestCase) -> Enabled = { needs("mkvpropedit", mkvpropeditExe) }
+
+// Kotest reports an exception thrown from here as a plain skip, so a required tool that is missing lets the
+// case run and fail at the first step that needs it.
+private fun needs(tool: String, exe: String?): Enabled =
+    if (exe != null || toolsRequired) Enabled.enabled else Enabled.disabled("$tool not available")
 
 /**
  * Probe [file] with the real mkvmerge and return the typed record.

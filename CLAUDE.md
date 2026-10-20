@@ -102,15 +102,17 @@ inherited from the filesystem, and the whole thing runs on a developer machine b
   the thin `jar` task already owns `build/libs/mkvtool-<version>.jar`.
 - `printVersion` — how CI learns the version, so nothing parses `gradle.properties` as a second
   implementation of the single source of truth.
-- `jarLauncher` — see Testing: the fat jar's only way into the acceptance harness.
+- `jarLauncher` — see Testing: the fat jar's way into both end-to-end tiers.
 
 ### Verifying a native binary
 
-`nativeSmoke`, `unusedFontsCheck`, `acceptanceTest`, `acceptanceSmoke` and `startupCheck`, gathered by
-`nativeCheck` (`-Pacceptance=full|smoke|none`), with `nativeLoop` chaining `nativeCompile` in front of
-it. They exist as tasks rather than as workflow shell for the reason the release packaging does: a
-developer can run them before pushing, and CI calling the same task means local and CI verification
-cannot drift into two answers.
+`nativeSmoke`, `unusedFontsCheck`, `nativeE2e`, `acceptanceTest`, `acceptanceSmoke` and `startupCheck`,
+gathered by `nativeCheck` (`-Pacceptance=full|smoke|none`, one switch for both end-to-end tiers), with
+`nativeLoop` chaining `nativeCompile` in front of it. `nativeE2e` is the Kotlin tier as a task of its own,
+aimed at `-PnativeBinary` like the rest — every case under `full`, the `Smoke`-tagged ones under `smoke`.
+They exist as tasks rather than as workflow shell for the reason the release packaging does: a developer
+can run them before pushing, and CI calling the same task means local and CI verification cannot drift
+into two answers.
 
 The rule they share, extending `releaseArchive`'s: **a task that inspects a binary reads what is on
 disk, and only `nativeCompile` produces one.** Each takes `-PnativeBinary` and none depends on the
@@ -260,6 +262,15 @@ one-run-at-a-time rule. A missing *tool* skips a case with a reason, while a mis
 fails the task naming the build step — the first is a developer machine, the second is a mistake.
 And `failOnNoDiscoveredTests` is on, because a suite that discovers nothing otherwise passes.
 
+One case per command moved to this tier carries the Kotest tag `Smoke`, and `-Pe2eTags=<expression>`
+selects by tag. That subset is what runs where the whole tier would cost more than it tells — the native
+binaries off Linux and the fat jar — and it is what the Groovy suite's smoke list shrinks into as its
+cases move. A tag filter fails open in a way `failOnNoDiscoveredTests` cannot see: Kotest reports every
+case it filtered out as *skipped*, and a skipped case counts as discovered, so a misspelt tag would pass
+having run nothing. The task therefore counts the cases that actually ran and fails on zero. `nativeE2e`
+also sets `mkvtool.requireTools`, under which a case needing a missing tool fails instead of skipping:
+every environment it runs in carries MKVToolNix, so there a skip is lost coverage reported green.
+
 The support code lives in `e2e/support/`: the subprocess invoker, tool resolution, and the fixture layer —
 which has specs of its own, because a builder that silently produces the wrong MKV would be a defect every
 case inherits without any of them naming it. `cfg`, the `config.yaml` builder most `mux` cases rest on,
@@ -276,10 +287,10 @@ id — so an override written against the ids the *result* reports lands on a tr
 mkvmerge accepts that in silence. `fullCopy` keeps all seven tracks and so collapses the two spaces into
 one, which is why nearly every check-report fixture uses it.
 
-**Acceptance (`src/test/run_tests.groovy`, 124 cases).** The **only** end-to-end coverage in the project:
-it runs the binary as a subprocess against real MKV fixtures and asserts via `mkvmerge -J`. It defaults to
-the `installDist` launcher; `--app-bin`/`MKVTOOL_APP_BIN` points it at any other packaging — the native
-binary and the fat jar both go through it.
+**Acceptance (`src/test/run_tests.groovy`).** The Groovy half of the end-to-end coverage, shrinking as its
+cases move: it runs the binary as a subprocess against real MKV fixtures and asserts via `mkvmerge -J`. It
+defaults to the `installDist` launcher; `--app-bin`/`MKVTOOL_APP_BIN` points it at any other packaging —
+the native binary and the fat jar both go through it.
 
 It was the port's **oracle** against the v1 scripts and was frozen for that reason. It is not frozen any
 more — the scripts are gone, so there is nothing left for it to be an oracle against. What replaces the
@@ -317,26 +328,26 @@ code. Each one covers something that fails silently in a misconfigured native im
 and no external tool.
 
 **The fat jar** gets a fourth, smaller pass, in the same CI job as the JVM launcher: `--version`,
-`native-smoke`, and three harness cases through the launcher `jarLauncher` generates. It is the published
-JVM fallback, and what only *it* can break is its own packaging — the `Main-Class` manifest and the
-resources merged from several dependencies — which is most of what `native-smoke` probes anyway. The full
-suite would add minutes to re-run bytecode that job has already run through `installDist`. The launcher is
-generated rather than committed because it has to name the versioned jar, and because the harness needs an
-executable to point `--app-bin` at: hence a shebang and the executable bit on POSIX, a `.bat` on Windows
-(the harness routes those through `cmd /c` and launches anything else directly), argv forwarded, the exit
-code passed through, nothing of its own printed, and the jar addressed relative to the script, since each
-case runs in a fresh working directory.
+`native-smoke`, a few Groovy harness cases and the Kotlin tier's `Smoke` cases through the launcher
+`jarLauncher` generates. It is the published JVM fallback, and what only *it* can break is its own
+packaging — the `Main-Class` manifest and the resources merged from several dependencies — which is most
+of what `native-smoke` probes anyway. The full suites would add minutes to re-run bytecode that job has
+already run through `installDist`. The launcher is generated rather than committed because it has to name
+the versioned jar, and because both tiers need an executable to point at: hence a shebang and the
+executable bit on POSIX, a `.bat` on Windows (both tiers route those through `cmd /c` and launch anything
+else directly), argv forwarded, the exit code passed through, nothing of its own printed, and the jar
+addressed relative to the script, since each case runs in a fresh working directory.
 
-CI runs the unit tier and both JVM acceptance tiers on every push and PR; a 4-OS native leg (compile, the
-smoke probes, the acceptance suite in full on Linux and a representative case per command elsewhere, a
-`--version` startup measurement asserted under 200 ms, and the release archive for that platform) on
-merge, a pushed `v*` tag, a weekly schedule and manual dispatch; and the live TheMovieDB contract case on
-the schedule only, so network flakiness cannot redden the badge. Everything a native leg does to the
-binary it just built is the `nativeCheck` task rather than workflow shell, so CI and a developer run one
-implementation of it.
+CI runs the unit tier and both end-to-end tiers against the JVM launcher on every push and PR; a 4-OS
+native leg (compile, the smoke probes, both end-to-end tiers in full on Linux and a representative case
+per command elsewhere, a `--version` startup measurement asserted under 200 ms, and the release archive
+for that platform) on merge, a pushed `v*` tag, a weekly schedule and manual dispatch; and the live
+TheMovieDB contract case on the schedule only, so network flakiness cannot redden the badge. Everything a
+native leg does to the binary it just built is the `nativeCheck` task rather than workflow shell, so CI
+and a developer run one implementation of it.
 
 Two axes cross there. The **OS** axis is those four legs at one mkvmerge version each. The **mkvmerge**
-axis is Linux-only and lives on the JVM tier: the acceptance harness runs once against the distro
+axis is Linux-only and lives on the JVM launcher: both end-to-end tiers run once against the distro
 package — the same version class the build-environment image pins — and once, on merge and the weekly
 schedule, against the newest upstream MKVToolNix — a canary for mkvmerge's own output, which has
 already paid for itself once (`${codec}` keys on `codec_id` because the display string changed between
@@ -919,4 +930,5 @@ this section outlives its subject:
   config is planned work.
 
 One artifact of the era is still in the tree: `src/test/run_tests.groovy`, the acceptance suite, which
-was the oracle the port was built against and is now the project's only end-to-end coverage. See Testing.
+was the oracle the port was built against and is now the Groovy half of the end-to-end coverage, being
+translated into the Kotlin tier. See Testing.

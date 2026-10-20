@@ -4,9 +4,9 @@ name: Native and release
 # scripts' own legs; those scripts are gone and so is that file. Seven jobs with different cadences:
 #   build            - fast Linux JVM build + unit tests, on every push-to-main and PR. Also
 #                      reads the project version, which the release job consumes.
-#   harness-app      - the acceptance suite against the JVM launcher, plus a smaller pass over
+#   harness-app      - both end-to-end tiers against the JVM launcher, plus a smaller pass over
 #                      the fat jar, on every push-to-main and PR.
-#   harness-upstream - the same suite against the newest MKVToolNix instead of the distro
+#   harness-upstream - the same tiers against the newest MKVToolNix instead of the distro
 #                      package: the canary for mkvmerge's own output. Merge, weekly schedule
 #                      and dispatch, never a PR - a new mkvmerge release is not something a
 #                      pull request caused, and a check that reddens for reasons the author
@@ -15,7 +15,7 @@ name: Native and release
 #                      dispatch only. Same reasoning as harness-upstream, one step further: it
 #                      answers "has the API changed shape", which no commit asks.
 #   native           - the slow GraalVM native-image build for Windows x64 and both macOS
-#                      architectures, its smoke probes, the acceptance runs against the
+#                      architectures, its smoke probes, the end-to-end runs against the
 #                      resulting binary and the packaging of that binary into its release
 #                      archive; only on merge (push to main), a pushed v* tag, the weekly
 #                      schedule and manual dispatch. Native config rarely changes and each
@@ -41,8 +41,10 @@ name: Native and release
 # unpinned, and `harness-app` is a JVM tier whose environment is not part of what it tests -
 # any JDK 21, mkvmerge and Groovy will do, and nothing a user receives is built there.
 #
-# The acceptance harness is still Groovy, which is why four jobs install it; that is the last
-# Groovy in the repository and it is being translated to a Kotlin end-to-end tier.
+# Two end-to-end tiers run side by side while the cases move from one to the other: the Groovy
+# acceptance harness, the last Groovy in the repository and the reason four jobs install it, and the
+# Kotlin tier replacing it. Wherever the Groovy suite runs, the Kotlin tier runs beside it against the
+# same binary - in full, or its Smoke-tagged cases where the Groovy suite runs its smoke subset.
 #
 # Nothing here ever publishes: a tag creates a draft, and a draft's assets need a token to
 # download, so a human sees every asset first. The Windows leg uploads the bare exe on its own
@@ -221,7 +223,7 @@ jobs:
         run: ./gradlew acceptanceTest -PnativeBinary=build/install/mkvtool/bin/mkvtool "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"
 
       # The Kotlin end-to-end tier, which is replacing the Groovy suite above case by case. Both run
-      # for the duration of that migration: two suites in parallel is the cost of moving 124 cases
+      # for the duration of that migration: two suites in parallel is the cost of moving the cases
       # without a window where neither covers something. No Groovy and no extra install - it drives
       # the same launcher the step above does, and takes its temp directories from Kotest rather than
       # from the harness's shared scratch directory, so the two do not contend.
@@ -233,11 +235,12 @@ jobs:
       # compiled. What only the jar can break is its own packaging — the Main-Class manifest
       # and the resources merged from several dependencies — so native-smoke does most of the
       # work here (it decodes a charset, reads a CLDR name, parses JSON and round-trips YAML
-      # inside the process), and three cases put real files, a real mkvmerge call and
-      # non-ASCII names through the CLI. Run after the full suite, never beside it: the
-      # harness keys its work directories by case name and recreates them at case start, so
-      # two concurrent suites wipe each other's fixtures — which the task's lock enforces
-      # rather than leaving to the order of these steps.
+      # inside the process), and a few cases put real files, a real mkvmerge call and
+      # non-ASCII names through the CLI: the Groovy ones below, and the Kotlin tier's Smoke
+      # cases in the next step. Run after the full suite, never beside it: the harness keys
+      # its work directories by case name and recreates them at case start, so two
+      # concurrent suites wipe each other's fixtures — which the task's lock enforces rather
+      # than leaving to the order of these steps.
       - name: Smoke-test the fat jar
         run: |
           launcher=build/jar-launcher/mkvtool
@@ -246,8 +249,6 @@ jobs:
           cases=(
             # a real mkvmerge invocation end to end
             01_one_audio_one_subtitle
-            # a windows-1251 decode through the CLI, i.e. the charset resources survived shading
-            50_to_utf8_converts_in_place
             # Cyrillic through fetch, rename and file names
             38_non_ascii_titles_round_trip
           )
@@ -265,6 +266,12 @@ jobs:
             echo "*** Fat-jar cases failed:$failed"
             exit 1
           fi
+
+      # The Kotlin tier's share of the fat-jar pass: its Smoke cases, one per command, through the
+      # same launcher. A step of its own rather than a line in the loop above, where a failure
+      # would end the step before the Groovy cases had all run.
+      - name: Smoke-test the fat jar with the end-to-end tier
+        run: ./gradlew e2eTest -PmkvtoolBin=build/jar-launcher/mkvtool -Pe2eTags=Smoke
 
       # The jar attached to a release is the one this job just tested, for the same reason
       # each native archive is packaged in the leg that tested its binary.
@@ -361,6 +368,11 @@ jobs:
       # spawns, while a property arrives with each invocation.
       - name: Run the acceptance harness against the app
         run: ./gradlew acceptanceTest -PnativeBinary=build/install/mkvtool/bin/mkvtool "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"
+
+      # The Kotlin tier on the same mkvmerge, so a case moved out of the Groovy suite stays on this
+      # end of the axis rather than dropping off it.
+      - name: Run the end-to-end tier
+        run: ./gradlew e2eTest
 
   live-contract:
     # The one case that calls the real TheMovieDB API. It answers "has the API changed shape", which
@@ -595,7 +607,7 @@ jobs:
       # Everything done to the binary just built, as one Gradle task rather than four steps of
       # workflow shell: the built-in probes (which prove -H:+AddAllCharsets and
       # -H:+IncludeAllLocales survived into this OS's image), the find-unused-fonts check that no
-      # oracle case covers, the acceptance suite against the binary, and the `--version` startup
+      # oracle case covers, both end-to-end tiers against the binary, and the `--version` startup
       # measurement against its ceiling. The point of it being a task is that the same
       # verification runs on a developer machine, so local and CI cannot drift into two answers.
       # The task also guards two failures that fail *open* in hand-rolled shell: a `--filter`
@@ -603,8 +615,9 @@ jobs:
       # `--version`'s exit code lets a binary that fails fast beat the ceiling.
       #
       # -Pacceptance=smoke on all three: one representative case per command rather than the whole
-      # suite, because these legs exist to catch what differs *per OS* in a native image, and 124
-      # cases apiece would triple them for coverage native-linux already provides in full.
+      # suites - the Groovy smoke list and the Kotlin tier's Smoke tag - because these legs exist to
+      # catch what differs *per OS* in a native image, and every case on every leg would triple them
+      # for coverage native-linux already provides in full.
       #
       # $GROOVY is read by the task, exported by the Install Groovy step above. No -PnativeBinary:
       # the default is host-aware (mkvtool.exe on Windows), which keeps this the same command a
@@ -672,8 +685,8 @@ jobs:
     # harness's Grape cache all come from the image, so this leg runs the same suite against the
     # same versions a developer's `docker compose run --rm build ./gradlew nativeLoop` does.
     #
-    # It runs the *whole* oracle where the other three run one case per command: mkvtoolnix is
-    # already in the image and the binary starts in about 13 ms, so 124 cases cost half a minute.
+    # It runs both tiers *whole* where the other three run one case per command: mkvtoolnix is
+    # already in the image and the binary starts in about 13 ms, so running every case is cheap.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     container:

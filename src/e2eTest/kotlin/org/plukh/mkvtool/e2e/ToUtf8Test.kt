@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import org.plukh.mkvtool.e2e.support.Smoke
 import org.plukh.mkvtool.e2e.support.mkvtool
 import org.plukh.mkvtool.e2e.support.writeText
 import java.nio.charset.Charset
@@ -20,7 +21,7 @@ class ToUtf8Test : FunSpec({
 
     val windows1251: Charset = Charset.forName("windows-1251")
 
-    test("windows-1251 becomes UTF-8 in place, and line endings survive") {
+    test("windows-1251 becomes UTF-8 in place, and line endings survive").config(tags = setOf(Smoke)) {
         val workDir = tempdir()
         val lf = writeText(workDir, "lf.srt", "Привет, мир!\n", windows1251)
         val crlf = writeText(workDir, "crlf.srt", "Привет\r\nмир\r\n", windows1251)
