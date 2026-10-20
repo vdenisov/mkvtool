@@ -540,8 +540,8 @@ jobs:
           file -b "${{ matrix.binary }}"
           file -b "${{ matrix.binary }}" | grep -q "$want"
 
-      # The harness needs mkvmerge at startup and asserts output via mkvmerge -J; mkvpropedit
-      # is what keeps the propedit cases from self-skipping.
+      # The harness needs mkvmerge at startup and asserts output via mkvmerge -J; the Kotlin
+      # tier's propedit cases need mkvpropedit, and fail rather than skip without it here.
       - name: Install MKVToolNix
         run: |
           case "$RUNNER_OS" in
@@ -604,12 +604,12 @@ jobs:
           restore-keys: |
             grapes-${{ env.GROOVY_VERSION }}-${{ matrix.label }}-
 
-      # Everything done to the binary just built, as one Gradle task rather than four steps of
-      # workflow shell: the built-in probes (which prove -H:+AddAllCharsets and
-      # -H:+IncludeAllLocales survived into this OS's image), the find-unused-fonts check that no
-      # oracle case covers, both end-to-end tiers against the binary, and the `--version` startup
-      # measurement against its ceiling. The point of it being a task is that the same
-      # verification runs on a developer machine, so local and CI cannot drift into two answers.
+      # Everything done to the binary just built, as one Gradle task rather than steps of workflow
+      # shell: the built-in probes (which prove -H:+AddAllCharsets and -H:+IncludeAllLocales
+      # survived into this OS's image), both end-to-end tiers against the binary, and the
+      # `--version` startup measurement against its ceiling. The point of it being a task is that
+      # the same verification runs on a developer machine, so local and CI cannot drift into two
+      # answers.
       # The task also guards two failures that fail *open* in hand-rolled shell: a `--filter`
       # matching nothing runs no cases and exits 0, and a startup measurement that does not check
       # `--version`'s exit code lets a binary that fails fast beat the ceiling.
@@ -634,9 +634,9 @@ jobs:
           echo "::notice title=Unsigned Windows binary::The zip holds mkvtool.exe as built, unsigned. A release replaces it with a zip around the signed exe before publishing."
 
       # Packaged in the leg that just tested this binary rather than centrally, so the archive
-      # holds the exact file the smoke probes, the acceptance cases, the fonts check and the
-      # startup measurement all ran. The Gradle task reads what is on disk and does not depend
-      # on nativeCompile, so nothing is rebuilt here.
+      # holds the exact file the smoke probes, the end-to-end cases and the startup measurement
+      # all ran. The Gradle task reads what is on disk and does not depend on nativeCompile, so
+      # nothing is rebuilt here.
       - name: Package the release archive
         run: |
           ./gradlew releaseArchive

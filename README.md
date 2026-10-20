@@ -646,8 +646,8 @@ groovy src/test/run_tests.groovy --filter 01 --keep
 ```
 
 `--app-bin` is its equivalent of `-PmkvtoolBin`. It needs `mkvmerge` (auto-detected
-from PATH, or `--mkvmerge-exe`) and Groovy 3 or newer, and cases that need
-`mkvpropedit` or a TheMovieDB API key skip themselves with a printed note. Run
+from PATH, or `--mkvmerge-exe`) and Groovy 3 or newer, and the case that needs a
+TheMovieDB API key skips itself with a printed note. Run
 only one copy of *it* at a time: its work directories are keyed by case name, so a
 second run wipes the first one's fixtures mid-test. The Kotlin tier has no such
 rule — each case gets a temp directory of its own — so the two can run together.

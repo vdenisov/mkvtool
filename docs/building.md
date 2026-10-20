@@ -30,8 +30,8 @@ docker build -t mkvtool-buildenv:local .
 docker compose run --rm build ./gradlew nativeLoop
 ```
 
-`nativeLoop` is the whole loop: compile the binary, run its built-in probes, check
-`find-unused-fonts`, run both end-to-end suites against it, and measure startup against a ceiling.
+`nativeLoop` is the whole loop: compile the binary, run its built-in probes, run both end-to-end
+suites against it, and measure startup against a ceiling.
 From cold that is a few minutes, most of it compilation — the suites themselves are quick, because
 the binary starts in roughly 13 ms where the Groovy scripts it replaced took seconds apiece.
 
@@ -177,12 +177,11 @@ binary built somewhere else — a downloaded release asset, or a copy signed aft
 | Task | What it does |
 |---|---|
 | `nativeSmoke` | Runs the binary's built-in probes: charsets, locales, JSON, YAML, HTTPS. They self-assert, so running them is the check. |
-| `unusedFontsCheck` | End-to-end check of `find-unused-fonts`, the one command neither suite has a case for. |
 | `nativeE2e` | The Kotlin end-to-end tier against the binary: every case, or only the `Smoke`-tagged ones under `-Pacceptance=smoke`. |
 | `acceptanceTest` | The full Groovy acceptance suite against the binary. `-Pfilter=<substring>` narrows it to matching cases. |
 | `acceptanceSmoke` | One representative Groovy case per command not yet moved to the Kotlin tier — what the per-platform CI legs run. |
 | `startupCheck` | First and mean `--version` time, asserted against a ceiling. |
-| `nativeCheck` | All of the above. `-Pacceptance=full\|smoke\|none` picks which pass of both suites, if any. |
+| `nativeCheck` | All of the above. `-Pacceptance=full\|smoke\|none` picks which pass of both suites, if any; `none` leaves only the probes and the startup measurement. |
 | `nativeLoop` | `nativeCompile`, then `nativeCheck`. |
 
 Properties they accept: `-PnativeBinary` (which binary), `-Pfilter` (narrow the Groovy suite),

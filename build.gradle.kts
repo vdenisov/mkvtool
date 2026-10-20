@@ -492,9 +492,8 @@ tasks.register("jarLauncher") {
 
 // Native binary verification.
 //
-// Everything done to a freshly compiled binary — the self-asserting probes, the acceptance suite,
-// the one command with no oracle case behind it, the startup measurement — as tasks rather than as
-// workflow shell. That knowledge used to exist only as YAML, which cannot be run on a developer
+// Everything done to a freshly compiled binary — the self-asserting probes, both end-to-end tiers, the
+// startup measurement — as tasks rather than as workflow shell. That knowledge used to exist only as YAML, which cannot be run on a developer
 // machine, so local verification and CI verification were two implementations of one idea, free to
 // disagree. `nativeLoop` is the whole loop in one command; docs/building.md is how to run it.
 //
@@ -510,7 +509,7 @@ tasks.register("jarLauncher") {
 // jar.
 
 // Process plumbing, in an object so a task action that reaches for it captures no build-script
-// state, and the four tasks share one implementation of "run this and tell me what it said".
+// state, and the tasks below share one implementation of "run this and tell me what it said".
 object NativeVerify {
     /**
      * Runs a command, echoing its merged output line by line as it arrives, and returns the exit
@@ -639,8 +638,6 @@ require(acceptanceMode in setOf("full", "smoke", "none")) {
 // already provides. It names only the commands whose cases are still Groovy; the Kotlin tier's Smoke
 // tag covers the rest. Each case earns its place:
 val smokeCases = listOf(
-    // fix-srt: the reformat state machine over a charset-detected read.
-    "87_fix_srt_fixes_valid_file",
     // fetch-episodes: loopback HTTP, both metadata files written.
     "35_fetch_episodes_stub",
     // rename: the episodes.yaml load, i.e. snakeyaml in the image.
@@ -753,33 +750,6 @@ val nativeSmoke = tasks.register("nativeSmoke") {
     }
 }
 
-val unusedFontsCheck = tasks.register("unusedFontsCheck") {
-    description = "End-to-end check of find-unused-fonts, the one command no acceptance case covers."
-    afterNativeCompile()
-    val binary = nativeBinaryFile
-    val stagingDir = layout.buildDirectory.dir("font-check")
-    doLast {
-        requireNativeBinary(binary)
-        val staging = stagingDir.get().asFile
-        staging.deleteRecursively()
-        staging.resolve("fonts").mkdirs()
-        staging.resolve("subs.ass").writeText("Style: Default,Cuprum,20\n", Charsets.UTF_8)
-        staging.resolve("fonts/Cuprum.ttf").writeText("", Charsets.UTF_8)
-        staging.resolve("fonts/Unused Font.otf").writeText("", Charsets.UTF_8)
-        val (code, lines) = NativeVerify.run(
-            listOf(binary.absolutePath, "find-unused-fonts"),
-            staging,
-            emptyMap(),
-        ) { logger.lifecycle(it) }
-        require(code == 0) { "find-unused-fonts exited $code" }
-        // One font the subtitle references, one it does not, and the unreferenced base name - no
-        // extension, no prefix, no summary - is the whole of the output.
-        require(lines == listOf("Unused Font")) {
-            "find-unused-fonts reported $lines, expected exactly [Unused Font]"
-        }
-    }
-}
-
 // The Kotlin tier aimed at the binary every task here inspects. Its own task rather than e2eTest
 // re-aimed: e2eTest's binary is fixed when the build is configured, and keeping the two apart keeps
 // -PnativeBinary meaning what it means for every other task here, and gives each its own report.
@@ -793,7 +763,7 @@ val nativeE2e = tasks.register<Test>("nativeE2e") {
     useJUnitPlatform()
     e2eTier(nativeBinaryFile, e2eTags ?: "Smoke".takeIf { acceptanceMode == "smoke" }, ::requireNativeBinary)
     // Every leg and the container carry MKVToolNix, so a case skipping for a missing tool there is lost
-    // coverage reported green; the propedit case is the only native mkvpropedit coverage there is.
+    // coverage reported green; the propedit cases are the only native mkvpropedit coverage there is.
     systemProperty("mkvtool.requireTools", "true")
 }
 
@@ -889,17 +859,16 @@ val startupCheck = tasks.register("startupCheck") {
 // Groovy one. Startup runs last, when the binary is warm on disk, which is what the number is meant to
 // describe. mustRunAfter only orders tasks that are both in the graph, so naming both acceptance passes
 // here costs nothing when only one of them runs.
-unusedFontsCheck { mustRunAfter(nativeSmoke) }
-nativeE2e { mustRunAfter(unusedFontsCheck) }
+nativeE2e { mustRunAfter(nativeSmoke) }
 acceptanceTest { mustRunAfter(nativeE2e) }
 acceptanceSmoke { mustRunAfter(nativeE2e) }
-startupCheck { mustRunAfter(unusedFontsCheck, nativeE2e, acceptanceTest, acceptanceSmoke) }
+startupCheck { mustRunAfter(nativeE2e, acceptanceTest, acceptanceSmoke) }
 
 val nativeCheck = tasks.register("nativeCheck") {
     group = "verification"
-    description = "Verifies an existing native binary: probes, fonts, both end-to-end tiers " +
+    description = "Verifies an existing native binary: probes, both end-to-end tiers " +
         "(-Pacceptance=full|smoke|none), startup."
-    dependsOn(nativeSmoke, unusedFontsCheck, startupCheck)
+    dependsOn(nativeSmoke, startupCheck)
     // One switch for both tiers, because they answer one question between them while the cases move
     // from the Groovy suite to the Kotlin one.
     when (acceptanceMode) {
