@@ -46,8 +46,8 @@ name: Native and release
 #
 # Nothing here ever publishes: a tag creates a draft, and a draft's assets need a token to
 # download, so a human sees every asset first. The Windows leg uploads the bare exe on its own
-# so a signature can later be appended to the binary that was actually tested; today it ships
-# unsigned, and the install instructions say so.
+# because signing happens there, by hand: the key is unlocked per session from a phone, so the
+# signature is appended afterwards to the binary that was actually tested.
 on:
   push:
     branches: [main]
@@ -612,16 +612,13 @@ jobs:
       - name: Verify the native binary
         run: ./gradlew nativeCheck -Pacceptance=smoke
 
-      # Releases ship an unsigned Windows binary for now, and the install instructions say so.
-      # When that changes, signing belongs here - before archiving, since the signature rides
-      # inside the exe and survives zipping - or as a step against the bare exe uploaded below,
-      # which is the same tested binary with a signature appended. Either way a published asset
-      # is never re-signed in place: the next version gets the signature, because anything that
-      # pinned the old checksum would start failing.
+      # The zip packaged below holds the exe as built, unsigned, beside a readme saying it is
+      # signed: signing needs the key holder present, so it happens after this run, against the
+      # bare exe uploaded below. The notice keeps that from reading as a finished asset.
       - name: Note the unsigned Windows binary
         if: matrix.label == 'windows-x64'
         run: |
-          echo "::notice title=Unsigned Windows binary::The zip holds an unsigned mkvtool.exe, which is the current release policy. The install instructions say so, and the checksums file is the verification path."
+          echo "::notice title=Unsigned Windows binary::The zip holds mkvtool.exe as built, unsigned. A release replaces it with a zip around the signed exe before publishing."
 
       # Packaged in the leg that just tested this binary rather than centrally, so the archive
       # holds the exact file the smoke probes, the acceptance cases, the fonts check and the
@@ -863,18 +860,16 @@ jobs:
           else
             gh release create "$TAG" --draft --verify-tag \
               --title "mkvtool $VERSION" \
-              --notes "Draft. Release notes are written by hand before publishing." \
+              --notes "Draft. The Windows zip is unsigned until it is replaced, and release notes are written by hand before publishing." \
               -- *
           fi
           {
             echo "### Draft release $TAG"
             echo
             echo "Still owed before publishing:"
+            echo "- [ ] sign the bare \`mkvtool.exe\` artifact from this run, rebuild its zip with"
+            echo "      \`releaseArchive -PnativeBinary=<signed exe>\`, upload it with \`--clobber\`, and"
+            echo "      regenerate \`mkvtool-$VERSION-checksums.txt\` over the final assets"
             echo "- [ ] write the release notes, with the codename"
             echo "- [ ] check the assets against the install instructions"
-            echo
-            echo "The Windows exe ships unsigned by current policy. If that changes for this"
-            echo "release, sign the bare exe from this run, rebuild its zip with"
-            echo "\`releaseArchive -PnativeBinary=<signed exe>\`, upload with \`--clobber\`, and"
-            echo "regenerate \`mkvtool-$VERSION-checksums.txt\` over the final assets."
           } >> "$GITHUB_STEP_SUMMARY"

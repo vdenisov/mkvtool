@@ -306,10 +306,10 @@ val releaseReadme = tasks.register("releaseReadme") {
         // reader with, and the answer to it.
         val platformNote = when {
             platform.startsWith("windows") -> listOf(
-                "This binary is not code-signed. Windows may therefore show a \"Windows protected",
-                "your PC\" prompt the first few times it is launched from Explorer - choose More",
-                "info, then Run anyway - and a browser may warn that it is not commonly",
-                "downloaded. The checksums file attached to the release is how to verify it.",
+                "This binary is code-signed: the Digital Signatures tab of mkvtool.exe's",
+                "Properties names Open Source Developer Victor Denisov, with a certificate issued",
+                "by Certum. A browser may still warn that the download is uncommon while that",
+                "certificate is new; the checksums file attached to the release verifies it.",
             )
             platform.startsWith("macos") -> listOf(
                 "macOS quarantines anything downloaded by a browser, and reports it as damaged or",
