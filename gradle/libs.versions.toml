@@ -7,11 +7,11 @@
 # a version held there is invisible to the bot that is supposed to bump it.
 
 [versions]
-kotlin = "2.4.10"
+kotlin = "2.4.21"
 picocli = "4.7.7"
-kotest = "6.2.3"
+kotest = "6.2.6"
 # YAML parsing (config.yaml, episodes.yaml). 2.x is the maintained line; v1 ran 1.30.
-snakeyaml = "2.6"
+snakeyaml = "2.7"
 # JSON parsing (mkvmerge -J, the TheMovieDB API), and the planned `--json` output. Only the runtime
 # library is pinned here — the serialization *plugin* ships with the Kotlin distribution, so it
 # takes the kotlin version above.
@@ -19,7 +19,7 @@ kotlinx-serialization = "1.11.0"
 shadow = "9.6.1"
 # GraalVM native-build-tools: provides the nativeCompile task. Needed to build the distributed
 # native binaries; ordinary build/test/installDist do not use it.
-graalvm-native = "1.1.6"
+graalvm-native = "1.1.14"
 
 [libraries]
 picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
