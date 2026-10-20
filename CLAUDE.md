@@ -106,8 +106,8 @@ inherited from the filesystem, and the whole thing runs on a developer machine b
 
 ### Verifying a native binary
 
-`nativeSmoke`, `unusedFontsCheck`, `nativeE2e`, `acceptanceTest`, `acceptanceSmoke` and `startupCheck`,
-gathered by `nativeCheck` (`-Pacceptance=full|smoke|none`, one switch for both end-to-end tiers), with
+`nativeSmoke`, `nativeE2e`, `acceptanceTest`, `acceptanceSmoke` and `startupCheck`, gathered by
+`nativeCheck` (`-Pacceptance=full|smoke|none`, one switch for both end-to-end tiers), with
 `nativeLoop` chaining `nativeCompile` in front of it. `nativeE2e` is the Kotlin tier as a task of its own,
 aimed at `-PnativeBinary` like the rest — every case under `full`, the `Smoke`-tagged ones under `smoke`.
 They exist as tasks rather than as workflow shell for the reason the release packaging does: a developer
@@ -308,7 +308,7 @@ Harness conventions worth knowing before touching anything it covers:
   names — so the layout and the two-id-spaces trap described above apply here unchanged. One difference
   worth knowing while both tiers exist: this suite's own comment on `buildVariant` claims the per-id
   overrides are keyed by the *output* id, which is wrong. Read the Kotlin version.
-- Cases needing `mkvpropedit` or a TheMovieDB key skip themselves with a printed note rather than
+- The live TheMovieDB case skips itself with a printed note when there is no API key, rather than
   failing.
 - `withStubServer` serves canned JSON from a JDK `HttpServer`, which is how `fetch-episodes` is tested
   offline through its hidden `--base-url`.

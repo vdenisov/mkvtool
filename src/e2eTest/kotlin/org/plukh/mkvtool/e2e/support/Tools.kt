@@ -10,10 +10,12 @@ import java.io.File
  * The external tools this tier needs, and the guards that skip a case rather than failing it when one is
  * missing.
  *
- * Skipping is the Groovy suite's behaviour and worth keeping: `mkvpropedit` is genuinely optional on a
- * developer machine, and a red case there says nothing about the code. A missing *binary under test* is
+ * Skipping is deliberate: `mkvpropedit` is genuinely optional on a developer machine, and a red case there
+ * says nothing about the code. A missing *binary under test* is
  * the opposite — that is a setup mistake, and it fails loudly, naming the build step.
  */
+
+private val onWindows = System.getProperty("os.name").lowercase().contains("win")
 
 /**
  * Resolve an MKVToolNix executable: the bare name if it runs, then the Windows default install location.
@@ -35,7 +37,7 @@ private fun findMkvTool(name: String): String? {
     }
     if (runnable) return name
 
-    if (System.getProperty("os.name").lowercase().contains("win")) {
+    if (onWindows) {
         val fallback = File("C:\\Program Files\\MKVToolNix\\$name.exe")
         if (fallback.isFile) return fallback.absolutePath
     }
@@ -59,6 +61,18 @@ val needsMkvpropedit: (TestCase) -> Enabled = { needs("mkvpropedit", mkvpropedit
 // case run and fail at the first step that needs it.
 private fun needs(tool: String, exe: String?): Enabled =
     if (exe != null || toolsRequired) Enabled.enabled else Enabled.disabled("$tool not available")
+
+/**
+ * Skip a case that has to hide MKVToolNix from mkvtool, which mkvtool's Windows default-location fallback
+ * rules out.
+ */
+val posixOnly: (TestCase) -> Enabled = {
+    if (onWindows) {
+        Enabled.disabled("the Windows default-location fallback cannot be hidden from findMkvTool")
+    } else {
+        Enabled.enabled
+    }
+}
 
 /**
  * Probe [file] with the real mkvmerge and return the typed record.
