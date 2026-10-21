@@ -340,6 +340,28 @@ class InspectTest : FunSpec({
         }
     }
 
+    // A split that only a loaded config can classify: a run that ignored --config would say "Add a config".
+    test("--config reads a config outside the working directory").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        fullCopy(File(workDir, "a.mkv"))
+        fullCopy(File(workDir, "b.mkv"), names = mapOf(2 to "Other Studio"))
+        File(workDir, "configs").mkdirs()
+        File(workDir, "configs/show.yaml").writeText(
+            cfg(audioTracks = listOf(TrackSpec(id = 1, language = "ja", title = "JP", default = true))),
+            StandardCharsets.UTF_8,
+        )
+
+        val run = inspect(workDir, "--check", "--config", "configs/show.yaml")
+
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldContain "informational"
+            run.output shouldNotContain "Add a config"
+            run.output shouldNotContain "Warning"
+        }
+        outputDir(workDir).exists() shouldBe false
+    }
+
     // A failed probe is not a never-probed format: describing a truncated .mka from its extension would
     // present the one file that cannot be muxed as the healthiest row in the table.
     test("an external file mkvmerge cannot read is reported, not faked").config(enabledOrReasonIf = needsMkvmerge) {
