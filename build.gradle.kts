@@ -622,8 +622,7 @@ val nativeBinaryFile: File = File(nativeBinaryPath).let {
     if (it.isAbsolute) it else File(projectDirFile, nativeBinaryPath)
 }
 
-// First hit wins. $GROOVY is what the native workflow already exports for its harness steps, so
-// pointing those legs at these tasks needs no change there.
+// First hit wins. $GROOVY lets a shell name the path once instead of passing -PgroovyBin every run.
 val groovyBin: String = providers.gradleProperty("groovyBin")
     .orElse(providers.environmentVariable("GROOVY"))
     .getOrElse("groovy")
@@ -642,16 +641,6 @@ val acceptanceMode: String = providers.gradleProperty("acceptance").getOrElse("f
 require(acceptanceMode in setOf("full", "smoke", "none")) {
     "-Pacceptance must be full, smoke or none (got '$acceptanceMode')"
 }
-
-// One representative case per command, rather than the whole suite. This subset exists to catch what
-// differs *per platform* in a native image, which is a different question from whether the tool is
-// correct — and the full suite on every platform would triple the cost for coverage one platform
-// already provides. A command is listed here only while it has no Smoke-tagged case in the Kotlin tier,
-// which covers the rest. Each case earns its place:
-val smokeCases = listOf(
-    // mux: a real mkvmerge invocation end to end.
-    "01_one_audio_one_subtitle",
-)
 
 // Refuse rather than skip, and name the fix. The project's skip discipline is about individual
 // cases whose prerequisites are missing (mkvpropedit, say); a whole tier that quietly
@@ -788,34 +777,6 @@ val acceptanceTest = tasks.register("acceptanceTest") {
     }
 }
 
-val acceptanceSmoke = tasks.register("acceptanceSmoke") {
-    description = "Runs one representative acceptance case per command against the native binary."
-    afterNativeCompile()
-    val binary = nativeBinaryFile
-    val groovy = groovyBin
-    val cases = smokeCases
-    val workDir = acceptanceWorkDir
-    doLast {
-        requireNativeBinary(binary)
-        requireHarnessTools(groovy)
-        // --filter takes a single substring, so each case is its own harness run. All of them run
-        // before the task fails, because which command broke is the whole answer.
-        val onCi = System.getenv("GITHUB_ACTIONS") != null
-        val failed = mutableListOf<String>()
-        withAcceptanceLock(workDir) {
-            cases.forEach { case ->
-                logger.lifecycle(if (onCi) "::group::$case" else "--- $case")
-                val (code, lines) = runHarness(binary, groovy, case) { logger.lifecycle(it) }
-                if (onCi) logger.lifecycle("::endgroup::")
-                // A case that self-skips still prints [PASS], so this asserts the case exists and
-                // was reached - not merely that the run was green.
-                if (code != 0 || lines.none { it == "[PASS] $case" }) failed += case
-            }
-        }
-        require(failed.isEmpty()) { "acceptance cases failed or did not run: ${failed.joinToString(" ")}" }
-    }
-}
-
 val startupCheck = tasks.register("startupCheck") {
     description = "Measures `mkvtool --version` startup and asserts it against a ceiling."
     afterNativeCompile()
@@ -859,12 +820,11 @@ val startupCheck = tasks.register("startupCheck") {
 // Cheapest and highest-signal first: the probes catch a dropped native-image flag in milliseconds
 // rather than eight minutes into a suite, and the Kotlin tier, parallel and quick, comes before the
 // Groovy one. Startup runs last, when the binary is warm on disk, which is what the number is meant to
-// describe. mustRunAfter only orders tasks that are both in the graph, so naming both acceptance passes
-// here costs nothing when only one of them runs.
+// describe. mustRunAfter only orders tasks that are both in the graph, so naming acceptanceTest here
+// costs nothing when the smoke pass leaves it out.
 nativeE2e { mustRunAfter(nativeSmoke) }
 acceptanceTest { mustRunAfter(nativeE2e) }
-acceptanceSmoke { mustRunAfter(nativeE2e) }
-startupCheck { mustRunAfter(nativeE2e, acceptanceTest, acceptanceSmoke) }
+startupCheck { mustRunAfter(nativeE2e, acceptanceTest) }
 
 val nativeCheck = tasks.register("nativeCheck") {
     group = "verification"
@@ -872,10 +832,11 @@ val nativeCheck = tasks.register("nativeCheck") {
         "(-Pacceptance=full|smoke|none), startup."
     dependsOn(nativeSmoke, startupCheck)
     // One switch for both tiers, because they answer one question between them while the cases move
-    // from the Groovy suite to the Kotlin one.
+    // from the Groovy suite to the Kotlin one. Smoke is the Kotlin tier's alone: every command has a
+    // Smoke-tagged case there, so the Groovy suite has no smoke subset left.
     when (acceptanceMode) {
         "full" -> dependsOn(nativeE2e, acceptanceTest)
-        "smoke" -> dependsOn(nativeE2e, acceptanceSmoke)
+        "smoke" -> dependsOn(nativeE2e)
     }
 }
 

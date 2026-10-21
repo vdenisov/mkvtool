@@ -42,9 +42,10 @@ name: Native and release
 # any JDK 21, mkvmerge and Groovy will do, and nothing a user receives is built there.
 #
 # Two end-to-end tiers run side by side while the cases move from one to the other: the Groovy
-# acceptance harness, the last Groovy in the repository and the reason four jobs install it, and the
-# Kotlin tier replacing it. Wherever the Groovy suite runs, the Kotlin tier runs beside it against the
-# same binary - in full, or its Smoke-tagged cases where the Groovy suite runs its smoke subset.
+# acceptance harness, the last Groovy in the repository and the reason three jobs carry it, and the
+# Kotlin tier replacing it. Wherever the Groovy suite runs, the Kotlin tier runs beside it in full
+# against the same binary. The other native legs and the fat jar run only the Kotlin tier's
+# Smoke-tagged cases: every command has one, so the Groovy suite has no smoke subset left.
 #
 # Nothing here ever publishes: a tag creates a draft, and a draft's assets need a token to
 # download, so a human sees every asset first. The Windows leg uploads the bare exe on its own
@@ -140,11 +141,11 @@ jobs:
     # Two suites do that here, deliberately, for as long as the migration takes: the Groovy harness
     # that was the port's oracle against the v1 scripts, and the Kotlin `e2eTest` tier replacing it
     # case by case. The cases outlived the scripts they pinned and are being moved rather than
-    # dropped. This job also carries the fat jar's only coverage, at the end.
+    # dropped.
     #
-    # It carries the fat jar's only coverage too, at the end: MKVToolNix, Groovy and the
-    # Grapes cache are already paid for here, and a job of its own would spend three minutes
-    # of setup to run bytecode this one already ran.
+    # It carries the fat jar's only coverage too, at the end: MKVToolNix is already paid for
+    # here, and a job of its own would spend three minutes of setup to run bytecode this one
+    # already ran.
     #
     # Plain host installs, not the build-environment image. This is a JVM tier: what it tests
     # is bytecode, any JDK 21 with any mkvmerge and Groovy will do, and nothing a user
@@ -235,39 +236,15 @@ jobs:
       # compiled. What only the jar can break is its own packaging — the Main-Class manifest
       # and the resources merged from several dependencies — so native-smoke does most of the
       # work here (it decodes a charset, reads a CLDR name, parses JSON and round-trips YAML
-      # inside the process), and a few cases put real files, a real mkvmerge call and
-      # non-ASCII names through the CLI: the Groovy one below, and the Kotlin tier's Smoke
-      # cases in the next step. Run after the full suite, never beside it: the harness keys
-      # its work directories by case name and recreates them at case start, so two
-      # concurrent suites wipe each other's fixtures — which the task's lock enforces rather
-      # than leaving to the order of these steps.
+      # inside the process), and the Kotlin tier's Smoke cases in the next step put real files,
+      # a real mkvmerge call and non-ASCII names through the CLI.
       - name: Smoke-test the fat jar
         run: |
           launcher=build/jar-launcher/mkvtool
           "$launcher" --version
           "$launcher" native-smoke
-          cases=(
-            # a real mkvmerge invocation end to end
-            01_one_audio_one_subtitle
-          )
-          failed=""
-          for case_name in "${cases[@]}"; do
-            echo "::group::$case_name"
-            # -Pfilter through the task, so a case renamed out from under this list fails here
-            # instead of running nothing and exiting 0.
-            if ! ./gradlew acceptanceTest -PnativeBinary="$launcher" -Pfilter="$case_name" "-PgroovyBin=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy"; then
-              failed="$failed $case_name"
-            fi
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "*** Fat-jar cases failed:$failed"
-            exit 1
-          fi
 
-      # The Kotlin tier's share of the fat-jar pass: its Smoke cases, one per command, through the
-      # same launcher. A step of its own rather than a line in the loop above, where a failure
-      # would end the step before the Groovy cases had all run.
+      # One case per command, through the same launcher.
       - name: Smoke-test the fat jar with the end-to-end tier
         run: ./gradlew e2eTest -PmkvtoolBin=build/jar-launcher/mkvtool -Pe2eTags=Smoke
 
@@ -450,8 +427,6 @@ jobs:
     # rather than fail on macOS x64, and the six-hour default would sit on a runner for the
     # rest of the day before saying so.
     timeout-minutes: 45
-    env:
-      GROOVY_VERSION: "5.0.6"
     defaults:
       run:
         # Git Bash is present on the Windows runner too, so one script runs everywhere.
@@ -502,8 +477,8 @@ jobs:
           file -b "${{ matrix.binary }}"
           file -b "${{ matrix.binary }}" | grep -q "$want"
 
-      # The harness needs mkvmerge at startup and asserts output via mkvmerge -J; the Kotlin
-      # tier's propedit cases need mkvpropedit, and fail rather than skip without it here.
+      # The Kotlin tier needs mkvmerge and asserts output via mkvmerge -J; its propedit cases
+      # need mkvpropedit, and fail rather than skip without it here.
       - name: Install MKVToolNix
         run: |
           case "$RUNNER_OS" in
@@ -533,57 +508,24 @@ jobs:
             echo "\`$(mkvmerge --version | head -n1)\` — whatever this platform's package manager ships"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Cache Groovy distribution
-        uses: actions/cache@v6
-        with:
-          path: ~/groovy
-          # Keyed on the leg's label, not on runner.os: the two macOS legs would otherwise
-          # share one key and race each other for it.
-          key: groovy-${{ env.GROOVY_VERSION }}-${{ matrix.label }}
-
-      - name: Install Groovy
-        run: |
-          if [ ! -d "$HOME/groovy/groovy-$GROOVY_VERSION" ]; then
-            curl -fsSL -o /tmp/groovy.zip "https://archive.apache.org/dist/groovy/$GROOVY_VERSION/distribution/apache-groovy-binary-$GROOVY_VERSION.zip"
-            mkdir -p "$HOME/groovy"
-            # `jar` rather than `unzip`: Git Bash on the Windows runner ships no unzip, while
-            # setup-graalvm guarantees a JDK (and its bin on PATH) on every leg.
-            (cd "$HOME/groovy" && jar xf /tmp/groovy.zip)
-          fi
-          # `jar` extracts without the zip entries' Unix modes, so the launchers come out
-          # non-executable and Linux/macOS fail with exit 126 (`unzip` would have kept them).
-          # Outside the guard above on purpose: the cache can hold a tree unpacked this way.
-          chmod +x "$HOME/groovy/groovy-$GROOVY_VERSION/bin"/*
-          # Named rather than put on PATH: the launcher is invoked from bash on all three
-          # runners, and a bash-style path in GITHUB_PATH would mean nothing to another shell.
-          echo "GROOVY=$HOME/groovy/groovy-$GROOVY_VERSION/bin/groovy" >> "$GITHUB_ENV"
-
-      - name: Cache Grapes
-        uses: actions/cache@v6
-        with:
-          path: ~/.groovy/grapes
-          key: grapes-${{ env.GROOVY_VERSION }}-${{ matrix.label }}-${{ hashFiles('src/**/*.groovy') }}
-          restore-keys: |
-            grapes-${{ env.GROOVY_VERSION }}-${{ matrix.label }}-
-
       # Everything done to the binary just built, as one Gradle task rather than steps of workflow
       # shell: the built-in probes (which prove -H:+AddAllCharsets and -H:+IncludeAllLocales
-      # survived into this OS's image), both end-to-end tiers against the binary, and the
+      # survived into this OS's image), the end-to-end tier against the binary, and the
       # `--version` startup measurement against its ceiling. The point of it being a task is that
       # the same verification runs on a developer machine, so local and CI cannot drift into two
       # answers.
-      # The task also guards two failures that fail *open* in hand-rolled shell: a `--filter`
+      # The task also guards two failures that fail *open* in hand-rolled shell: a tag selection
       # matching nothing runs no cases and exits 0, and a startup measurement that does not check
       # `--version`'s exit code lets a binary that fails fast beat the ceiling.
       #
-      # -Pacceptance=smoke on all three: one representative case per command rather than the whole
-      # suites - the Groovy smoke list and the Kotlin tier's Smoke tag - because these legs exist to
-      # catch what differs *per OS* in a native image, and every case on every leg would triple them
-      # for coverage native-linux already provides in full.
+      # -Pacceptance=smoke on all three: one representative case per command - the Kotlin tier's
+      # Smoke tag - rather than the whole suites, because these legs exist to catch what differs
+      # *per OS* in a native image, and every case on every leg would triple them for coverage
+      # native-linux already provides in full. The Groovy suite has no part in it, so these legs
+      # install no Groovy.
       #
-      # $GROOVY is read by the task, exported by the Install Groovy step above. No -PnativeBinary:
-      # the default is host-aware (mkvtool.exe on Windows), which keeps this the same command a
-      # developer types.
+      # No -PnativeBinary: the default is host-aware (mkvtool.exe on Windows), which keeps this the
+      # same command a developer types.
       - name: Verify the native binary
         run: ./gradlew nativeCheck -Pacceptance=smoke
 
