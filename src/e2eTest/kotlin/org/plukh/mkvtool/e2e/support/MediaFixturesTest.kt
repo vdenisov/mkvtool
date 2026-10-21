@@ -13,9 +13,7 @@ import java.io.File
  * The failure this spec exists to catch is a helper that builds a plausible command and produces the wrong
  * file - which every case resting on it would then inherit without any of them naming it. A spec asserting
  * on the argument list would pass on exactly that, so every case here **probes the result through the
- * production parser** and asserts on `ProbedTrack` fields. The Groovy originals had no tests of their own
- * at all: they were verified indirectly by the cases that used them, which was tolerable while they were
- * frozen and is not for a fresh implementation the remaining translations will rest on.
+ * production parser** and asserts on `ProbedTrack` fields.
  *
  * The source layout every id below indexes into, confirmed against the fixture rather than assumed:
  *
@@ -55,8 +53,8 @@ class MediaFixturesTest : FunSpec({
         test("an empty list is refused rather than selecting nothing") {
             val workDir = tempdir()
 
-            // Groovy emitted an empty --audio-tracks here and produced a file nobody meant. Refusing is
-            // the point: the caller wrote emptyList() meaning one of two things, and neither is this.
+            // An empty --audio-tracks produces a file nobody meant. Refusing is the point: the caller
+            // wrote emptyList() meaning one of two things, and neither is this.
             shouldThrow<IllegalArgumentException> {
                 buildVariant(File(workDir, "v.mkv"), audio = emptyList())
             }
@@ -92,8 +90,8 @@ class MediaFixturesTest : FunSpec({
             val tracks = probe(variant).allTracks
 
             // `--track-name` is a source-file option, so 2 means source 2 - the eng track, which the
-            // result reports at id 1. Measured against real mkvmerge rather than reasoned about: the
-            // Groovy suite documented this the other way round for the whole of the port.
+            // result reports at id 1. Measured against real mkvmerge rather than reasoned about, because
+            // the opposite reading is the natural one and is wrong.
             tracks.single { it.id == 1 }.language shouldBe "eng"
             tracks.single { it.id == 1 }.trackName shouldBe "Renamed"
             tracks.single { it.id == 2 }.language shouldBe "ger"

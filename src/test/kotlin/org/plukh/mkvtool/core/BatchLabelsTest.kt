@@ -6,9 +6,7 @@ import io.kotest.matchers.shouldBe
 import org.plukh.mkvtool.out.pluralize
 
 /**
- * The display-only half of the episodes library, transcribed value for value from the acceptance
- * harness's `122_batch_episode_labels` — which tested the v1 library in-process and retired with it —
- * plus the edges that case never reached.
+ * The display-only half of the episodes library.
  *
  * These labels are **batch-relative**: they need the other names to know where the number starts, which is
  * what makes them safe (`1080p` and `x264` sit inside the shared prefix) and exactly why they cannot answer
@@ -130,8 +128,7 @@ class BatchLabelsTest : FunSpec({
             membershipLabels(listOf("Show - S01E03 - T", "Show - S01E04 - T")) shouldBe listOf("03", "04")
         }
 
-        // The phrase itself belongs to the renderer (task 2.6); this pins that the data is enough to build
-        // it, and keeps the harness's own expected strings under test in the meantime.
+        // The phrase itself belongs to the renderer; this pins that the data is enough to build it.
         test("carries everything a renderer needs for the membership line") {
             fun line(names: List<String>): String? =
                 membershipLabels(names)?.let { "${pluralize(it.size, "episode")} ${formatRanges(it)}" }

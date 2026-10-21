@@ -11,7 +11,7 @@ import java.io.File
  * The mkvmerge command line, config permutation by config permutation.
  *
  * This is the whole product: everything else `mux` does exists to get one of these built and run. The
- * expectations are the argument lists v1 emits for the configs behind harness cases 01-24 and 96-105 —
+ * expectations are the argument lists v1 emits for the configs the `mux` end-to-end cases use —
  * taken as *lists*, not as a joined string, because a quoting bug in the dry-run printer would hide inside
  * one and every argument boundary here is one mkvmerge parses.
  *

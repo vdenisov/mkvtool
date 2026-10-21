@@ -7,7 +7,7 @@ import io.kotest.matchers.shouldBe
 /**
  * `findMkvTool`'s not-found path, which is deterministic on every OS: a clearly-bogus name is neither on
  * PATH nor at the Windows default location, so it throws with the exact v1 message. The positive path
- * (a real tool resolves) needs a real MKVToolNix install and is covered by the Groovy harness.
+ * (a real tool resolves) needs a real MKVToolNix install and is covered by the end-to-end tier.
  */
 class ToolsTest : FunSpec({
 

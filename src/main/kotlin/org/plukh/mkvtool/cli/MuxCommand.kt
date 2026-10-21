@@ -209,7 +209,7 @@ class MuxCommand : Callable<Int> {
          * resources, so the template is named where it actually lives rather than as a file to copy from
          * somewhere. `internal` rather than private so `ConfigDocsParityTest` can assert the path against
          * the repository: nothing else would notice this URL going stale, since it is only ever printed
-         * and the acceptance case covering the message asserts on the bare file name.
+         * and the end-to-end case covering the message asserts on the bare file name.
          */
         const val EXAMPLE_CONFIG_URL =
             "https://github.com/vdenisov/mkvtool/blob/main/docs/config.example.yaml"

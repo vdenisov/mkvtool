@@ -34,8 +34,7 @@ fun writeEpisodes(workDir: File, titles: List<String>): File =
  * name; everything else is show-level metadata.
  *
  * [show] and [season] have defaults rather than being nullable because an empty show name and season 0 are
- * both real inputs under test - the Groovy original drew that line with `containsKey`, and a Kotlin
- * default expresses it directly. [year], [seasonName] and [language] are genuinely optional and their keys
+ * both real inputs under test. [year], [seasonName] and [language] are genuinely optional and their keys
  * are omitted when null.
  *
  * `allowUnicode` is not decoration: without it snakeyaml escapes every Cyrillic character and produces

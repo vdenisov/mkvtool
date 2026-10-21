@@ -59,7 +59,7 @@ class MuxCommandTest : FunSpec({
 
         context("the inspection flags moved out and are not accepted back as aliases") {
             // Two entry points for one report is surface to keep in sync, and picocli already rejects an
-            // unknown option clearly. Harness case 109 pins each of these by name.
+            // unknown option clearly. The end-to-end tier pins each of these by name.
             withData("--identify", "--check", "--check-verbose") { flag ->
                 val thrown = shouldThrow<CommandLine.UnmatchedArgumentException> {
                     mkvtoolCommandLine().parseArgs("mux", flag)

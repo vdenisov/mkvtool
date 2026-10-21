@@ -32,8 +32,7 @@ val testMkv: File = File(
 /**
  * Run one mkvtool subcommand in [workDir].
  *
- * Four details here are load-bearing rather than incidental, and all four are inherited from the Groovy
- * suite this tier replaces:
+ * Four details here are load-bearing rather than incidental:
  *
  * - **stderr is merged into stdout**, so a case asserts on what a user would see in one stream, in order.
  *   The two are also drained on this thread *before* `waitFor`, because two undrained pipes is how a
@@ -43,9 +42,10 @@ val testMkv: File = File(
  *   tests do.
  * - **A `.bat` target is routed through `cmd /c`**, because `ProcessBuilder` cannot launch a batch file
  *   directly; anything else — a shell script, a native `.exe` — is launched as it stands.
- * - **The child's output is decoded as explicit UTF-8.** The Groovy suite used the platform default,
- *   which on a Windows console is a legacy codepage; this tier asserts on non-ASCII output, so the
- *   charset is a decision rather than an inheritance.
+ * - **The child's output is decoded as UTF-8**, which mkvmerge always writes and mkvtool writes where the
+ *   locale's encoding is UTF-8 (the usual Linux and macOS setup). Piped on Windows, mkvtool writes its
+ *   native encoding instead, which is why no case asserts on non-ASCII mkvtool output; one that does needs
+ *   mkvtool itself to write UTF-8 first.
  */
 fun mkvtool(
     subcommand: String,

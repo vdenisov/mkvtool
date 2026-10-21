@@ -9,9 +9,8 @@ package org.plukh.mkvtool.e2e.support
  *
  * One distinction here is load-bearing and easy to lose. A track list that is **absent** and one that is
  * **empty** mean different things to `mux`: an absent key leaves the type unconfigured, an empty list says
- * "copy none of these", and both are separately pinned by cases. Groovy expressed it with `containsKey`;
- * Kotlin expresses it as `null` versus `emptyList()`, the same shape `core/Config.kt` draws between a
- * missing template and a declared-but-empty one.
+ * "copy none of these", and both are separately pinned by cases. Here that is `null` versus `emptyList()`,
+ * the same shape `core/Config.kt` draws between a missing template and a declared-but-empty one.
  */
 
 /** A track selected out of the main source, by the id it carries there. */
@@ -127,8 +126,7 @@ fun checkCfg(
  * quietly smaller output - which is the situation the pre-flight exists to catch before the batch starts.
  *
  * Note the escape in the source pattern: the placeholder has to reach the YAML as literal text for the
- * tool to resolve it, and Kotlin's string interpolation is the new way to break what Groovy's
- * single-quoted literals protected.
+ * tool to resolve it, and Kotlin's string interpolation would otherwise swallow it.
  */
 fun companionCfg(
     mkvmergeExe: String = requireNotNull(org.plukh.mkvtool.e2e.support.mkvmergeExe) {

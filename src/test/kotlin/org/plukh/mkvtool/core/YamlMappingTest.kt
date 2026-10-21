@@ -12,9 +12,7 @@ import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 
 /**
- * The loader classifies, and only classifies. These six cases were transcribed from the acceptance
- * harness's `126_yaml_mapping_loader`, which asserted the same things in-process against the v1 loader;
- * that case retired with the scripts, and this spec is what carries its coverage.
+ * The loader classifies, and only classifies.
  * Every problem here is a bare fragment the caller finishes, so the text is pinned by `contains`, not by
  * equality: `mux` appends "; there is nothing to mux with." and exits, `inspect` appends "; continuing
  * without it." and does not.

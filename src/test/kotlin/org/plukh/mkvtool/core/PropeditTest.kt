@@ -8,7 +8,7 @@ import java.io.File
 /**
  * `buildPropeditCommand` is pure — the file name is reconstructed as `<baseName>.mkv` and the user's
  * args are forwarded verbatim, in order, after it. This is the unit-testable slice of `propedit`; the
- * actual mkvpropedit subprocess is exercised by the Groovy harness.
+ * actual mkvpropedit subprocess is exercised by the end-to-end tier.
  */
 class PropeditTest : FunSpec({
 

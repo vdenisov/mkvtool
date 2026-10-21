@@ -19,9 +19,8 @@ import java.nio.file.Files
  * aggregates, leftovers — is what the assertions pin. Discovery probes nothing, so the fixture files are
  * one byte of text each and no mkvmerge is involved.
  *
- * The matching cases were transcribed from the acceptance harness's `110_discovery_engine_matching`,
- * which retired with the scripts it tested in-process; the tree fixture mirrors the harness's shared
- * `stageTree`, whose rendered form cases 111-115 still assert.
+ * The tree fixture mirrors the end-to-end tier's `stageTree`, whose rendered form the `inspect` cases
+ * assert.
  */
 class DiscoveryTest : FunSpec({
 
@@ -129,8 +128,7 @@ class DiscoveryTest : FunSpec({
                 false
             }
             if (!linked) {
-                // Windows needs Developer Mode or elevation to create one; skip rather than fail, the
-                // same shape the Groovy harness uses for a missing mkvpropedit.
+                // Windows needs Developer Mode or elevation to create one; skip rather than fail.
                 println("  (skipped: this JVM cannot create a symbolic link here)")
                 return@test
             }
@@ -413,7 +411,7 @@ private fun stage(dir: File, relPath: String): File =
 private fun stageAll(dir: File, vararg relPaths: String) = relPaths.forEach { stage(dir, it) }
 
 /**
- * The harness's shared `stageTree` fixture, re-expressed: three episodes, two dub groups with different
+ * The end-to-end tier's `stageTree` fixture, re-expressed: three episodes, two dub groups with different
  * coverage, one of them also supplying subtitles from a second category directory (the merge case), a
  * suffixed sibling in the media directory itself, one file belonging to nothing, and an extras folder
  * holding a stray main-type file.
@@ -437,8 +435,8 @@ private fun stageTree(dir: File): File {
 }
 
 /**
- * Harness case 110's matching fixture: two main files for E01, one of which is a name-extension of the
- * other, plus a companion whose own name relates to no main file at all.
+ * The matching fixture: two main files for E01, one of which is a name-extension of the other, plus a
+ * companion whose own name relates to no main file at all.
  */
 private fun stageMatchingFixture(dir: File): File {
     stageAll(

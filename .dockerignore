@@ -1,8 +1,8 @@
-# The build context is the repository root, because the image resolves the acceptance harness's
-# @Grab dependencies and unpacks the Gradle wrapper's distribution - both need real files from the
-# tree. Everything else would be hundreds of megabytes uploaded to the daemon on every build.
+# The build context is the repository root, because the image unpacks the Gradle wrapper's
+# distribution, which needs real files from the tree. Everything else would be hundreds of megabytes
+# uploaded to the daemon on every build.
 #
-# Keep src/test/run_tests.groovy, gradlew and gradle/ - the Dockerfile copies them.
+# Keep gradlew and gradle/ - the Dockerfile copies them.
 
 build/
 .gradle/
@@ -11,8 +11,7 @@ build/
 .idea/
 .claude/
 out/
-src/test/work/
 
-# The media fixtures the suite derives everything from live in the bind mount at run time; nothing
-# in the image needs them.
+# The media fixture the end-to-end tier derives everything from lives in the bind mount at run time;
+# nothing in the image needs it.
 *.mkv

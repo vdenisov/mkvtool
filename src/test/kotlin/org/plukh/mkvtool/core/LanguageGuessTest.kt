@@ -12,9 +12,6 @@ import io.kotest.matchers.shouldBe
  * and native name, alone and inside a realistic folder name — plus the adversarial tokens below, and this
  * port reproduced all 295 answers. What is kept here is the subset that says *why* each rule exists; the
  * exhaustive sweep was a one-off differential, not something worth freezing as 295 cases.
- *
- * The positives and true negatives from the acceptance harness's `110_discovery_engine_matching` are
- * all present here; that case tested the v1 engine in-process and retired with it.
  */
 class LanguageGuessTest : FunSpec({
 

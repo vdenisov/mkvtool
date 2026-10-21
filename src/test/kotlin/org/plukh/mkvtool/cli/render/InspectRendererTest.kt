@@ -24,8 +24,8 @@ import org.plukh.mkvtool.core.VariantIdentity
 /**
  * What an identify page actually looks like.
  *
- * The column grid, the absence glyphs and the blank lines are all asserted by substring in the Groovy
- * oracle, so they are pinned here character for character rather than described. Where a value could
+ * The column grid, the absence glyphs and the blank lines are all asserted by substring in the end-to-end
+ * tier, so they are pinned here character for character rather than described. Where a value could
  * plausibly be composed on either side of the seam, the spec says which side won and why.
  */
 class InspectRendererTest : FunSpec({

@@ -11,9 +11,9 @@ import java.io.File
 /**
  * The extension rule and the file masks, in-process over temp directories.
  *
- * The mask cases mirror harness cases 39-45, which pass their patterns through `ProcessBuilder` precisely
- * so no shell pre-expands them — the same reason the expansion lives in [compileMasks] at all. Getting
- * this wrong passes a Unix-only CI and fails on Windows.
+ * The end-to-end mask cases pass their patterns through `ProcessBuilder` precisely so no shell pre-expands
+ * them — the same reason the expansion lives in [compileMasks] at all. Getting this wrong passes a Unix-only
+ * CI and fails on Windows.
  */
 class MediaFilesTest : FunSpec({
 
