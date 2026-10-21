@@ -154,7 +154,7 @@ fun writeChapters(workDir: File): File =
  * and above are failures. Note this is the opposite of [probe], which requires 0: a warning while reading
  * a file is a different thing from a warning while writing one.
  */
-private fun runMkvmerge(what: String, command: List<String>) {
+internal fun runMkvmerge(what: String, command: List<String>) {
     val exe = mkvmergeExe
         ?: error("mkvmerge is required to build fixtures - this spec should have been gated on needsMkvmerge")
 
