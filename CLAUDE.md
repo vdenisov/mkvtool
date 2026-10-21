@@ -106,11 +106,11 @@ inherited from the filesystem, and the whole thing runs on a developer machine b
 
 ### Verifying a native binary
 
-`nativeSmoke`, `nativeE2e`, `acceptanceTest`, `acceptanceSmoke` and `startupCheck`, gathered by
-`nativeCheck` (`-Pacceptance=full|smoke|none`, one switch for both end-to-end tiers), with
-`nativeLoop` chaining `nativeCompile` in front of it. `nativeE2e` is the Kotlin tier as a task of its own,
-aimed at `-PnativeBinary` like the rest — every case but `Live` under `full`, the `Smoke`-tagged ones under
-`smoke`.
+`nativeSmoke`, `nativeE2e`, `acceptanceTest` and `startupCheck`, gathered by `nativeCheck`
+(`-Pacceptance=full|smoke|none`, one switch for both end-to-end tiers; `smoke` is the Kotlin tier's alone),
+with `nativeLoop` chaining `nativeCompile` in front of it. `nativeE2e` is the Kotlin tier as a task of its
+own, aimed at `-PnativeBinary` like the rest — every case but `Live` under `full`, the `Smoke`-tagged ones
+under `smoke`.
 They exist as tasks rather than as workflow shell for the reason the release packaging does: a developer
 can run them before pushing, and CI calling the same task means local and CI verification cannot drift
 into two answers.
@@ -264,14 +264,14 @@ fails the task naming the build step — the first is a developer machine, the s
 And `failOnNoDiscoveredTests` is on, because a suite that discovers nothing otherwise passes.
 
 One case per command moved to this tier carries the Kotest tag `Smoke`, as does the Cyrillic
-`fetch-episodes`-to-`rename` round trip, and `-Pe2eTags=<expression>` selects by tag. That subset is what
-runs where the whole tier would cost more than it tells — the native binaries off Linux and the fat jar —
-and it is what the Groovy suite's smoke list shrinks into as its cases move. A tag filter fails open in a
+`fetch-episodes`-to-`rename` round trip, and `-Pe2eTags=<expression>` selects by tag. That subset is what runs
+where the whole tier would cost more than it tells — the native binaries off Linux and the fat jar — and it
+replaced the Groovy suite's smoke list, which emptied once every command had one. A tag filter fails open in a
 way `failOnNoDiscoveredTests` cannot see: Kotest reports every case it filtered out as *skipped*, and a
-skipped case counts as discovered, so a misspelt tag would pass having run nothing. The task therefore
-counts the cases that actually ran and fails on zero. `nativeE2e` also sets `mkvtool.requireTools`, under
-which a case needing a missing tool fails instead of skipping: every environment it runs in carries
-MKVToolNix, so there a skip is lost coverage reported green.
+skipped case counts as discovered, so a misspelt tag would pass having run nothing. The task therefore counts
+the cases that actually ran and fails on zero. `nativeE2e` also sets `mkvtool.requireTools`, under which a
+case needing a missing tool fails instead of skipping: every environment it runs in carries MKVToolNix, so
+there a skip is lost coverage reported green.
 
 `fetch-episodes` is tested offline: `withStubServer` serves canned JSON from a JDK `HttpServer`, reached
 through the command's hidden `--base-url`. The one exception is the case tagged `Live`, which calls the
@@ -300,7 +300,7 @@ one, which is why nearly every check-report fixture uses it.
 **Acceptance (`src/test/run_tests.groovy`).** The Groovy half of the end-to-end coverage, shrinking as its
 cases move: it runs the binary as a subprocess against real MKV fixtures and asserts via `mkvmerge -J`. It
 defaults to the `installDist` launcher; `--app-bin`/`MKVTOOL_APP_BIN` points it at any other packaging —
-the native binary and the fat jar both go through it.
+the Linux native leg runs the native binary through it.
 
 It was the port's **oracle** against the v1 scripts and was frozen for that reason. It is not frozen any
 more — the scripts are gone, so there is nothing left for it to be an oracle against. What replaces the
@@ -320,9 +320,9 @@ Harness conventions worth knowing before touching anything it covers:
   overrides are keyed by the *output* id, which is wrong. Read the Kotlin version.
 - **Never run two suites at once**, a `--filter` run alongside a full one included: work directories are
   keyed by case name and recreated at case start, so a second run wipes the first one's fixtures mid-test
-  and the failure surfaces somewhere unrelated to what is being worked on. Through `acceptanceTest` and
-  `acceptanceSmoke` this is enforced rather than remembered — they hold a lock on the work directory and
-  the second run refuses to start. Invoking the harness by hand still relies on discipline.
+  and the failure surfaces somewhere unrelated to what is being worked on. Through `acceptanceTest` this
+  is enforced rather than remembered — it holds a lock on the work directory and the second run refuses
+  to start. Invoking the harness by hand still relies on discipline.
 - Under the container the work directory is a named volume, so it is shared between containers (hence
   the lock) and `--keep` leaves nothing visible on the host — inspecting a failed case means a shell in
   the container. Against the native binary the whole suite takes about half a minute.
@@ -334,15 +334,15 @@ code. Each one covers something that fails silently in a misconfigured native im
 and no external tool.
 
 **The fat jar** gets a fourth, smaller pass, in the same CI job as the JVM launcher: `--version`,
-`native-smoke`, a Groovy harness case and the Kotlin tier's `Smoke` cases through the launcher
-`jarLauncher` generates. It is the published JVM fallback, and what only *it* can break is its own
-packaging — the `Main-Class` manifest and the resources merged from several dependencies — which is most
-of what `native-smoke` probes anyway. The full suites would add minutes to re-run bytecode that job has
-already run through `installDist`. The launcher is generated rather than committed because it has to name
-the versioned jar, and because both tiers need an executable to point at: hence a shebang and the
-executable bit on POSIX, a `.bat` on Windows (both tiers route those through `cmd /c` and launch anything
-else directly), argv forwarded, the exit code passed through, nothing of its own printed, and the jar
-addressed relative to the script, since each case runs in a fresh working directory.
+`native-smoke` and the Kotlin tier's `Smoke` cases through the launcher `jarLauncher` generates. It is the
+published JVM fallback, and what only *it* can break is its own packaging — the `Main-Class` manifest and the
+resources merged from several dependencies — which is most of what `native-smoke` probes anyway. The full
+suites would add minutes to re-run bytecode that job has already run through `installDist`. The launcher is
+generated rather than committed because it has to name the versioned jar, and because both tiers need an
+executable to point at: hence a shebang and the executable bit on POSIX, a `.bat` on Windows (both tiers route
+those through `cmd /c` and launch anything else directly), argv forwarded, the exit code passed through,
+nothing of its own printed, and the jar addressed relative to the script, since each case runs in a fresh
+working directory.
 
 CI runs the unit tier and both end-to-end tiers against the JVM launcher on every push and PR; a 4-OS
 native leg (compile, the smoke probes, both end-to-end tiers in full on Linux and a representative case
