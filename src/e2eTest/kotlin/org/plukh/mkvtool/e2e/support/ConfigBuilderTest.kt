@@ -44,7 +44,7 @@ class ConfigBuilderTest : FunSpec({
     }
 
     // The distinction the whole builder is shaped around. Absent and empty are different instructions,
-    // and four acceptance cases exist to pin exactly this.
+    // and four end-to-end cases exist to pin exactly this.
     context("an absent track list is not an empty one") {
         test("absent omits the key entirely") {
             val yaml = cfg(mkvmergeExe = fakeExe)
@@ -150,9 +150,8 @@ class ConfigBuilderTest : FunSpec({
         test("companionCfg carries the fileName placeholder as literal text") {
             val yaml = companionCfg(mkvmergeExe = fakeExe)
 
-            // The hazard the port introduces: Kotlin interpolates `$`, where Groovy's single-quoted
-            // literals could not. A resolved placeholder here would name a file that never exists, and
-            // every companion pre-flight case would report the wrong thing.
+            // Kotlin interpolates `$`. A resolved placeholder here would name a file that never exists,
+            // and every companion pre-flight case would report the wrong thing.
             yaml shouldContain "\${fileName}[Studio].mka"
             load(yaml).additionalSources.single().file shouldBe "\${fileName}[Studio].mka"
         }

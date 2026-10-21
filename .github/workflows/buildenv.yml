@@ -21,7 +21,6 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
-      - src/test/run_tests.groovy
       - gradlew
       - gradle/wrapper/**
       - .github/workflows/buildenv.yml
@@ -30,7 +29,6 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
-      - src/test/run_tests.groovy
       - gradlew
       - gradle/wrapper/**
       - .github/workflows/buildenv.yml
@@ -67,7 +65,7 @@ jobs:
         id: meta
         env:
           REPOSITORY: ${{ github.repository }}
-          INPUTS_HASH: ${{ hashFiles('Dockerfile', 'src/test/run_tests.groovy', 'gradlew', 'gradle/wrapper/gradle-wrapper.properties') }}
+          INPUTS_HASH: ${{ hashFiles('Dockerfile', 'gradlew', 'gradle/wrapper/gradle-wrapper.properties') }}
         run: |
           echo "name=ghcr.io/$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')-buildenv" >> "$GITHUB_OUTPUT"
           echo "tag=env-${INPUTS_HASH:0:12}" >> "$GITHUB_OUTPUT"

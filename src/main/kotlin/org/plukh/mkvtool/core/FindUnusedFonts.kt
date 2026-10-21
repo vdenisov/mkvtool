@@ -32,9 +32,8 @@ fun unusedFonts(subtitleLines: List<String>, fontBaseNames: List<String>): List<
  * auto-detection on the subtitle read ([readLinesDetected]). Font base names strip the last dot segment,
  * keeping dot-less names whole and (as in v1) listing any subdirectories of `fonts/` too.
  *
- * A missing `fonts/` directory made v1 crash (an NPE on `listFiles()` returning null). The Groovy test
- * oracle has no case for it, so this port fixes it: it reports the absence as an advisory and returns an
- * empty report (exit 0), rather than reproducing the crash.
+ * A missing `fonts/` directory made v1 crash (an NPE on `listFiles()` returning null). This reports the
+ * absence as an advisory and returns an empty report (exit 0) instead.
  */
 fun findUnusedFonts(dir: File, renderer: Renderer): FontUsageReport {
     val subtitleLines = (dir.listFiles() ?: emptyArray())

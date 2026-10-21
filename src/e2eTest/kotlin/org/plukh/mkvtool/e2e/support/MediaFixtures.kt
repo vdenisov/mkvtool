@@ -19,10 +19,7 @@ import java.nio.charset.StandardCharsets
  * mkvmerge accepts in silence: the fixture builds, the case runs, and it pins nothing.
  *
  * That is why [fullCopy] exists and why most check-report fixtures use it - keeping all seven tracks
- * collapses the two spaces into one, so an id means the same thing on both sides of the helper. (Worth
- * knowing: the Groovy suite's own comment on this helper claimed the overrides were keyed by the *output*
- * id. It was wrong, and nothing ever caught it, because every case that passes an override keeps all seven
- * tracks.)
+ * collapses the two spaces into one, so an id means the same thing on both sides of the helper.
  *
  * These helpers need mkvmerge but not the binary under test - they build what a case runs *against*. Gate
  * a spec that calls them on [needsMkvmerge].
@@ -31,8 +28,7 @@ import java.nio.charset.StandardCharsets
 /**
  * Which of the two selectable track types a helper is extracting.
  *
- * An enum rather than the Groovy suite's `'audio'`/anything-else string switch, which silently read every
- * value that was not exactly `audio` as a subtitle request.
+ * An enum rather than a string, which a misspelling would silently turn into the other type.
  */
 enum class TrackType(internal val selectFlag: String, internal val dropOtherFlag: String) {
     AUDIO("--audio-tracks", "--no-subtitles"),
@@ -47,8 +43,7 @@ enum class TrackType(internal val selectFlag: String, internal val dropOtherFlag
  * how Matroska spells "untagged" and therefore what forces discovery to fall back on its folder-name
  * language guess.
  *
- * Returns [dest]. (The Groovy original returned nothing, its last statement being an assertion, while its
- * sibling returned the file - normalised here.)
+ * Returns [dest].
  */
 fun extractTrack(src: File, dest: File, type: TrackType, trackId: Int, language: String? = null): File {
     dest.parentFile?.mkdirs()
@@ -72,12 +67,10 @@ fun extractTrack(src: File, dest: File, type: TrackType, trackId: Int, language:
  * type), and [names], [langs] and [defaults] name the tracks to override. What the *result* reports is
  * something else - see the two-id-spaces note on this file, which is the one thing to get right here.
  *
- * Two knobs the Groovy original carried are deliberately not here. Its track lists had a **third state** -
- * a key present with a null value emitted no flag at all, keeping every track of that type - which no case
- * ever used; if one needs it, it wants its own spelling rather than an overloaded null. And `--no-chapters`
- * cannot be observed through these fixtures at all: `test.mkv` carries no chapters, so suppressing them is
- * a no-op, which is presumably why no case ever passed it either. An empty list is refused rather than
- * dropped, because the original emitted an empty `--audio-tracks` there and produced a file nobody meant.
+ * There is no "keep every track of this type" state; a case needing one wants its own spelling rather than
+ * an overloaded null. There is no `--no-chapters` either: `test.mkv` carries no chapters, so suppressing
+ * them would be unobservable. An empty list is refused, because an empty `--audio-tracks` produces a file
+ * nobody meant.
  *
  * Returns [dest].
  */

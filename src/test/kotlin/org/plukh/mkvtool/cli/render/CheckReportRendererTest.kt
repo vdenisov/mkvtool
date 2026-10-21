@@ -9,7 +9,7 @@ import org.plukh.mkvtool.core.TrackSelection
 import java.io.File
 
 /**
- * The check report's text form. These pin the substrings the Groovy harness asserts on, plus the layout
+ * The check report's text form. These pin the substrings the end-to-end tier asserts on, plus the layout
  * rules that make the table readable.
  *
  * The whole report was verified byte-identical to v1 over eleven scenarios before these were written;
@@ -307,7 +307,7 @@ class CheckReportRendererTest : FunSpec({
             output shouldNotContain "${ESC}[90mrus? ${ESC}[0m"
         }
 
-        test("piped output carries no escapes at all, which is what the harness asserts against") {
+        test("piped output carries no escapes at all, which is what the end-to-end tier asserts against") {
             val infos = listOf(
                 probed("e01.mkv", t(0, "video"), t(1, "audio", language = "jpn")),
                 probed("e02.mkv", t(0, "video"), t(1, "audio", language = "rus")),

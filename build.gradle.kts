@@ -4,7 +4,6 @@
 // Imported rather than written out where used: inside a build script `java` names the Java plugin's
 // extension, so a fully qualified `java.io.…` does not resolve to the package at all.
 import java.io.IOException
-import java.io.RandomAccessFile
 import java.util.Locale
 
 plugins {
@@ -151,9 +150,9 @@ val hostIsWindows = System.getProperty("os.name").lowercase().startsWith("window
 // deliberately does not do — that one is in-process with faked probe data, and stays that way.
 //
 // Declared as a test suite so the source set and the task both come from the one name. Note what the
-// suite does *not* do: it is not wired into `check`, and therefore not into `build`, because those
-// two must stay green on a machine with no GraalVM, no Groovy and no MKVToolNix. That is the same
-// rule the native verification tasks below follow.
+// suite does *not* do: it is not wired into `check`, and therefore not into `build`, because those two
+// must stay green on a machine with no GraalVM and no MKVToolNix. That is the same rule the native
+// verification tasks below follow.
 //
 // The binary under test is named by a system property so one tier can be aimed at all three
 // packagings — the installDist launcher, the fat jar through its generated launcher, and the native
@@ -161,12 +160,16 @@ val hostIsWindows = System.getProperty("os.name").lowercase().startsWith("window
 val mkvtoolBinPath: String = providers.gradleProperty("mkvtoolBin").orNull
     // .bat on Windows, and it matters: the launcher installDist writes is a batch file there, so the
     // extensionless spelling names a file that does not exist. The suite routes a .bat through
-    // `cmd /c` exactly as the Groovy harness does.
+    // `cmd /c`.
     ?: if (hostIsWindows) "build/install/mkvtool/bin/mkvtool.bat" else "build/install/mkvtool/bin/mkvtool"
 
 // A Kotest tag expression narrowing a run, `Smoke` above all: one representative case per command, for
 // the packagings where the whole tier would cost more than it tells.
 val e2eTags: String? = providers.gradleProperty("e2eTags").orNull
+
+// A bare -PrequireTools turns it on, and so does =true; =false really means off.
+val requireTools: Boolean = providers.gradleProperty("requireTools").orNull
+    ?.let { it.isEmpty() || it.toBoolean() } == true
 
 /**
  * Aims this task at one mkvtool binary. Shared by the suite's own task and by nativeE2e, which differ
@@ -188,7 +191,7 @@ fun Test.e2eTier(binary: File, tags: String?, requireBinary: (File) -> Unit) {
     systemProperty("mkvtool.bin", binary.absolutePath)
     // The fixture every media case is built from, named rather than discovered so the suite does not
     // have to know where it runs from.
-    systemProperty("mkvtool.testMkv", File(projectDir, "src/test/test.mkv").absolutePath)
+    systemProperty("mkvtool.testMkv", File(projectDir, "src/e2eTest/resources/test.mkv").absolutePath)
     // The Live case calls the real TheMovieDB, so it runs only when the expression names it - an
     // ordinary run must not depend on the network, whatever happens to be in the environment.
     val expression = when {
@@ -214,8 +217,7 @@ fun Test.e2eTier(binary: File, tags: String?, requireBinary: (File) -> Unit) {
             throw GradleException("$name ran no tests (kotest.tags=$expression) - every case was skipped")
         }
     }
-    // Per-case temp directories make the cases independent, so they can run at once — which is the
-    // whole reason this tier does not inherit the Groovy suite's one-run-at-a-time rule. Held below the
+    // Per-case temp directories make the cases independent, so they can run at once. Held below the
     // core count: each case spawns subprocesses of its own, and mkvmerge is the thing actually competing
     // for the machine.
     maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
@@ -243,7 +245,8 @@ testing {
             targets.all {
                 testTask.configure {
                     description = "Runs the end-to-end tier against a real binary. -PmkvtoolBin=<path> " +
-                        "selects it, -Pe2eTags=<expression> narrows it."
+                        "selects it, -Pe2eTags=<expression> narrows it, -PrequireTools fails a case " +
+                        "needing a missing tool instead of skipping it."
                     val binary = File(mkvtoolBinPath).let {
                         if (it.isAbsolute) it else File(projectDir, mkvtoolBinPath)
                     }
@@ -252,6 +255,11 @@ testing {
                             "no mkvtool binary at $it - run './gradlew installDist' first, or pass " +
                                 "-PmkvtoolBin=<path> to aim this tier at the fat jar or the native binary"
                         }
+                    }
+                    // CI installs MKVToolNix itself, so there a case skipping for a missing tool is lost
+                    // coverage reported green; a developer machine without it still skips.
+                    if (requireTools) {
+                        systemProperty("mkvtool.requireTools", "true")
                     }
                 }
             }
@@ -394,7 +402,7 @@ val releaseReadme = tasks.register("releaseReadme") {
 //
 // This deliberately does *not* depend on nativeCompile. What gets archived is the binary as
 // it stands in build/native/nativeCompile, which in CI is the file the smoke probes and the
-// acceptance cases just ran - a fresh compile of the same sources would be an untested one.
+// end-to-end cases just ran - a fresh compile of the same sources would be an untested one.
 fun AbstractArchiveTask.configureReleaseArchive(extension: String) {
     val platform = releasePlatform
     val binary = file(nativeBinaryPath)
@@ -453,16 +461,16 @@ tasks.register<Copy>("releaseJar") {
     rename { releaseJarName }
 }
 
-// The fat jar is a published artifact that no test tier runs: the acceptance harness drives
-// the installDist launcher, and the native legs drive the binary. The harness needs an
-// *executable* to point --app-bin at, so this generates the smallest one that satisfies it -
-// every argument forwarded, the child's exit code passed through, nothing of its own printed,
-// and the jar addressed relative to the script, because the harness gives each case a fresh
-// working directory. JAVA_HOME is preferred because the harness pins it in the child
-// environment to the JVM running the suite.
+// The fat jar is a published artifact that no test tier would otherwise run: e2eTest drives the
+// installDist launcher, and the native legs drive the binary. The tier needs an *executable* to
+// point -PmkvtoolBin at, so this generates the smallest one that satisfies it - every argument
+// forwarded, the child's exit code passed through, nothing of its own printed, and the jar
+// addressed relative to the script, because each case runs in a fresh working directory.
+// JAVA_HOME is preferred because the tier pins it in the child environment to the JVM running
+// the suite.
 tasks.register("jarLauncher") {
     group = "verification"
-    description = "A launcher that runs the shadow jar, for --app-bin in the acceptance harness."
+    description = "A launcher that runs the shadow jar, for -PmkvtoolBin in the end-to-end tier."
     dependsOn(tasks.shadowJar)
     val jarName = "mkvtool-${project.version}-all.jar"
     val outputDir = layout.buildDirectory.dir("jar-launcher")
@@ -484,7 +492,7 @@ tasks.register("jarLauncher") {
             Charsets.UTF_8,
         )
         posix.setExecutable(true)
-        // Named .bat rather than .cmd on purpose: the harness routes a .bat through `cmd /c`
+        // Named .bat rather than .cmd on purpose: the tier routes a .bat through `cmd /c`
         // and launches anything else directly, so this is the Windows spelling of the same
         // seam - and it is what makes the fat-jar tier reproducible on a Windows machine.
         dir.resolve("mkvtool.bat").writeText(
@@ -503,10 +511,11 @@ tasks.register("jarLauncher") {
 
 // Native binary verification.
 //
-// Everything done to a freshly compiled binary — the self-asserting probes, both end-to-end tiers, the
-// startup measurement — as tasks rather than as workflow shell. That knowledge used to exist only as YAML, which cannot be run on a developer
-// machine, so local verification and CI verification were two implementations of one idea, free to
-// disagree. `nativeLoop` is the whole loop in one command; docs/building.md is how to run it.
+// Everything done to a freshly compiled binary — the self-asserting probes, the end-to-end tier, the
+// startup measurement — as tasks rather than as workflow shell. That knowledge used to exist only as
+// YAML, which cannot be run on a developer machine, so local verification and CI verification were two
+// implementations of one idea, free to disagree. `nativeLoop` is the whole loop in one command;
+// docs/building.md is how to run it.
 //
 // One rule holds all of it together: **a task that inspects a binary reads what is on disk, and
 // only nativeCompile produces one.** So every task below takes -PnativeBinary and none of them
@@ -516,53 +525,43 @@ tasks.register("jarLauncher") {
 // verifiable too. nativeLoop is the single place the compile and the checks are chained.
 //
 // Equally deliberate: none of this is wired into `check` or `build`. Those must stay green on a
-// machine with no GraalVM, no Groovy and no MKVToolNix, which is every machine that only wants the
-// jar.
+// machine with no GraalVM and no MKVToolNix, which is every machine that only wants the jar.
 
-// Process plumbing, in an object so a task action that reaches for it captures no build-script
-// state, and the tasks below share one implementation of "run this and tell me what it said".
+// Process plumbing shared by the tasks below, in an object so a task action that reaches for it
+// captures no build-script state.
 object NativeVerify {
     /**
      * Runs a command, echoing its merged output line by line as it arrives, and returns the exit
-     * code alongside those lines.
+     * code.
      *
-     * Streaming is not a nicety: the acceptance suite runs for minutes, and `inheritIO()` would
-     * hand the child the Gradle daemon's own stdout, where nothing ever displays it.
+     * Streamed rather than `inheritIO()`, which would hand the child the Gradle daemon's own
+     * stdout, where nothing ever displays it.
+     *
+     * @param command the executable and its arguments
+     * @param workingDir the directory the command runs in
+     * @param echo receives each output line as it arrives
+     *
+     * @return the command's exit code
+     *
+     * @throws GradleException if the command cannot be started
      */
     fun run(
         command: List<String>,
         workingDir: File,
-        env: Map<String, String>,
         echo: (String) -> Unit,
-    ): Pair<Int, List<String>> {
+    ): Int {
         val builder = ProcessBuilder(command)
             .directory(workingDir)
             // One stream, drained on this thread. Two undrained streams is how a chatty child fills
             // a pipe buffer and blocks forever.
             .redirectErrorStream(true)
-        builder.environment().putAll(env)
         val process = try {
             builder.start()
         } catch (e: IOException) {
             throw GradleException("could not run ${command.first()}: ${e.message}")
         }
-        val lines = mutableListOf<String>()
-        process.inputStream.bufferedReader().forEachLine { line ->
-            lines += line
-            echo(line)
-        }
-        return process.waitFor() to lines
-    }
-
-    /** Whether a command starts and exits 0 — i.e. the tool is present and runnable. */
-    fun isRunnable(command: List<String>): Boolean = try {
-        ProcessBuilder(command)
-            .redirectErrorStream(true)
-            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-            .start()
-            .waitFor() == 0
-    } catch (e: IOException) {
-        false
+        process.inputStream.bufferedReader(Charsets.UTF_8).forEachLine(echo)
+        return process.waitFor()
     }
 
     /**
@@ -590,31 +589,6 @@ object NativeVerify {
     fun meanMillis(nanos: List<Long>): Double = nanos.sum() / 1_000_000.0 / nanos.size
 }
 
-// The frozen harness resolves its own paths from its script location, so it can be launched from
-// anywhere; the binary and mkvmerge overrides, however, are resolved against the working directory,
-// which is why every invocation below runs in the project directory and passes absolute paths.
-val harnessScript = "src/test/run_tests.groovy"
-
-/**
- * Windows cannot start a script directly — `CreateProcess` runs executables, so a `.bat` or an
- * extension-less shell script needs an interpreter in front of it. Groovy ships as `groovy.bat`
- * there, and the CI legs name a `bin/groovy` shell script, so both forms turn up. The harness solves
- * the same problem the same way for the binary it launches.
- */
-fun launcherFor(command: String): List<String> =
-    if (hostIsWindows && !command.lowercase().endsWith(".exe")) listOf("cmd", "/c", command) else listOf(command)
-
-// The acceptance suite keys its scratch directories by case name and recreates them at case start,
-// so two concurrent runs delete each other's fixtures mid-test and the failure surfaces somewhere
-// unrelated. That used to be a rule people remembered; it is now a lock, because the container makes
-// it easy to start a second run without noticing (two `docker compose run` invocations share the
-// scratch volume). The lock file lives in the scratch directory on purpose: that is the shared
-// storage, and it is a real filesystem rather than a bind mount, where advisory locks are unreliable.
-//
-// No in-build guard beside it: this is a single-project build with no intra-project task
-// parallelism, so Gradle cannot run two of these at once by itself.
-val acceptanceWorkDir = layout.projectDirectory.dir("src/test/work").asFile
-
 val projectDirFile: File = layout.projectDirectory.asFile
 
 // -PnativeBinary may name a path anywhere; the default is relative to the project.
@@ -622,39 +596,15 @@ val nativeBinaryFile: File = File(nativeBinaryPath).let {
     if (it.isAbsolute) it else File(projectDirFile, nativeBinaryPath)
 }
 
-// First hit wins. $GROOVY lets a shell name the path once instead of passing -PgroovyBin every run.
-val groovyBin: String = providers.gradleProperty("groovyBin")
-    .orElse(providers.environmentVariable("GROOVY"))
-    .getOrElse("groovy")
-
-// Passed straight through to the harness, which also writes it into every config.yaml it generates.
-val mkvmergeExeOverride: String? = providers.gradleProperty("mkvmergeExe").orNull
-
-val acceptanceFilter: String? = providers.gradleProperty("filter").orNull
-
 val startupRuns: Int = providers.gradleProperty("startupRuns").map(String::toInt).getOrElse(50)
 val startupCeilingMs: Int = providers.gradleProperty("startupCeilingMs").map(String::toInt).getOrElse(200)
 
-// Which acceptance pass nativeCheck includes. The native workflow's matrix already carries exactly
-// this distinction per leg, so it maps onto one property rather than onto separate task names.
+// Which pass of the end-to-end tier nativeCheck includes: every case but Live, the Smoke-tagged ones, or
+// none. The native workflow's matrix already carries exactly this distinction per leg, so it maps onto
+// one property rather than onto separate task names.
 val acceptanceMode: String = providers.gradleProperty("acceptance").getOrElse("full")
 require(acceptanceMode in setOf("full", "smoke", "none")) {
     "-Pacceptance must be full, smoke or none (got '$acceptanceMode')"
-}
-
-// Refuse rather than skip, and name the fix. The project's skip discipline is about individual
-// cases whose prerequisites are missing (mkvpropedit, say); a whole tier that quietly
-// did not run is the one outcome worse than a red one.
-fun requireHarnessTools(groovy: String) {
-    require(NativeVerify.isRunnable(launcherFor(groovy) + "--version")) {
-        "groovy not found at '$groovy' - tried -PgroovyBin, then \$GROOVY, then PATH. " +
-            "The acceptance suite cannot run without it; see docs/building.md."
-    }
-    val mkvmerge = mkvmergeExeOverride ?: "mkvmerge"
-    require(NativeVerify.isRunnable(launcherFor(mkvmerge) + "--version")) {
-        "mkvmerge not found at '$mkvmerge' - put MKVToolNix on PATH or pass -PmkvmergeExe=<path>. " +
-            "The acceptance suite needs it at startup and asserts through it; see docs/building.md."
-    }
 }
 
 // The wording is releaseArchive's, deliberately: the same mistake produces the same sentence
@@ -662,54 +612,6 @@ fun requireHarnessTools(groovy: String) {
 fun requireNativeBinary(binary: File) {
     require(binary.isFile) {
         "no native binary at $binary - run nativeCompile first, or pass -PnativeBinary=<path>"
-    }
-}
-
-/** Holds the acceptance scratch directory for the duration of a suite run, or refuses to start. */
-fun <T> withAcceptanceLock(workDir: File, body: () -> T): T {
-    workDir.mkdirs()
-    val lockFile = File(workDir, ".lock")
-    RandomAccessFile(lockFile, "rw").use { file ->
-        val lock = file.channel.tryLock()
-            ?: throw GradleException(
-                "another acceptance run holds $workDir - the suite keys its scratch directories by " +
-                    "case name, so two runs would delete each other's fixtures mid-test",
-            )
-        lock.use { return body() }
-    }
-}
-
-/** Runs the harness once and returns its output lines, failing on a non-zero exit. */
-fun runHarness(
-    binary: File,
-    groovy: String,
-    filter: String?,
-    echo: (String) -> Unit,
-): Pair<Int, List<String>> {
-    val command = buildList {
-        addAll(launcherFor(groovy))
-        add(harnessScript)
-        add("--app-bin")
-        add(binary.absolutePath)
-        mkvmergeExeOverride?.let { add("--mkvmerge-exe"); add(it) }
-        filter?.let { add("--filter"); add(it) }
-    }
-    // NO_COLOR so the assertions below read plain text whether or not a terminal is attached.
-    return NativeVerify.run(command, projectDirFile, mapOf("NO_COLOR" to "1"), echo)
-}
-
-/**
- * The suite's own verdict, plus the one it cannot give: a filter matching no case runs nothing,
- * prints `0 passed, 0 failed` and exits 0, so a renamed case would leave a green run that tested
- * nothing at all.
- */
-fun requireCasesRan(exitCode: Int, lines: List<String>) {
-    val summary = lines.lastOrNull { it.matches(Regex("""\d+ passed, \d+ failed""")) }
-        ?: throw GradleException("the acceptance suite printed no summary line - it did not finish")
-    require(exitCode == 0) { "the acceptance suite reported $summary" }
-    val passed = summary.substringBefore(" passed").toInt()
-    require(passed > 0) {
-        "the acceptance suite ran no cases at all ($summary) - check the -Pfilter value"
     }
 }
 
@@ -732,20 +634,16 @@ val nativeSmoke = tasks.register("nativeSmoke") {
     doLast {
         requireNativeBinary(binary)
         // The probes self-assert and exit non-zero on any mismatch, so running them is the assertion.
-        val (code, _) = NativeVerify.run(
-            listOf(binary.absolutePath, "native-smoke"),
-            dir,
-            emptyMap(),
-        ) { logger.lifecycle(it) }
+        val code = NativeVerify.run(listOf(binary.absolutePath, "native-smoke"), dir) { logger.lifecycle(it) }
         require(code == 0) { "native-smoke exited $code" }
     }
 }
 
-// The Kotlin tier aimed at the binary every task here inspects. Its own task rather than e2eTest
+// The end-to-end tier aimed at the binary every task here inspects. Its own task rather than e2eTest
 // re-aimed: e2eTest's binary is fixed when the build is configured, and keeping the two apart keeps
 // -PnativeBinary meaning what it means for every other task here, and gives each its own report.
 val nativeE2e = tasks.register<Test>("nativeE2e") {
-    description = "Runs the Kotlin end-to-end tier against the native binary (its Smoke cases under " +
+    description = "Runs the end-to-end tier against the native binary (its Smoke cases under " +
         "-Pacceptance=smoke)."
     afterNativeCompile()
     val e2eSources = sourceSets["e2eTest"]
@@ -756,25 +654,6 @@ val nativeE2e = tasks.register<Test>("nativeE2e") {
     // Every leg and the container carry MKVToolNix, so a case skipping for a missing tool there is lost
     // coverage reported green; the propedit cases are the only native mkvpropedit coverage there is.
     systemProperty("mkvtool.requireTools", "true")
-}
-
-val acceptanceTest = tasks.register("acceptanceTest") {
-    description = "Runs the acceptance suite against the native binary. -Pfilter=<substring> narrows it."
-    afterNativeCompile()
-    val binary = nativeBinaryFile
-    val groovy = groovyBin
-    val filter = acceptanceFilter
-    val workDir = acceptanceWorkDir
-    doLast {
-        requireNativeBinary(binary)
-        requireHarnessTools(groovy)
-        val started = System.nanoTime()
-        withAcceptanceLock(workDir) {
-            val (code, lines) = runHarness(binary, groovy, filter) { logger.lifecycle(it) }
-            requireCasesRan(code, lines)
-        }
-        logger.lifecycle("acceptance suite: ${NativeVerify.millis(System.nanoTime() - started)} ms")
-    }
 }
 
 val startupCheck = tasks.register("startupCheck") {
@@ -818,26 +697,18 @@ val startupCheck = tasks.register("startupCheck") {
 }
 
 // Cheapest and highest-signal first: the probes catch a dropped native-image flag in milliseconds
-// rather than eight minutes into a suite, and the Kotlin tier, parallel and quick, comes before the
-// Groovy one. Startup runs last, when the binary is warm on disk, which is what the number is meant to
-// describe. mustRunAfter only orders tasks that are both in the graph, so naming acceptanceTest here
-// costs nothing when the smoke pass leaves it out.
+// rather than minutes into a suite. Startup runs last, when the binary is warm on disk, which is what
+// the number is meant to describe. mustRunAfter only orders tasks that are both in the graph, so naming
+// nativeE2e here costs nothing when -Pacceptance=none leaves it out.
 nativeE2e { mustRunAfter(nativeSmoke) }
-acceptanceTest { mustRunAfter(nativeE2e) }
-startupCheck { mustRunAfter(nativeE2e, acceptanceTest) }
+startupCheck { mustRunAfter(nativeSmoke, nativeE2e) }
 
 val nativeCheck = tasks.register("nativeCheck") {
     group = "verification"
-    description = "Verifies an existing native binary: probes, both end-to-end tiers " +
+    description = "Verifies an existing native binary: probes, the end-to-end tier " +
         "(-Pacceptance=full|smoke|none), startup."
     dependsOn(nativeSmoke, startupCheck)
-    // One switch for both tiers, because they answer one question between them while the cases move
-    // from the Groovy suite to the Kotlin one. Smoke is the Kotlin tier's alone: every command has a
-    // Smoke-tagged case there, so the Groovy suite has no smoke subset left.
-    when (acceptanceMode) {
-        "full" -> dependsOn(nativeE2e, acceptanceTest)
-        "smoke" -> dependsOn(nativeE2e)
-    }
+    if (acceptanceMode != "none") dependsOn(nativeE2e)
 }
 
 tasks.register("nativeLoop") {

@@ -129,8 +129,8 @@ fun yamlDumpProbeValue(): String? {
  * What it proves: the TLS stack is in the image (without the security services `SSLContext.getDefault()`
  * throws), the HTTP client builds, and a request over `https` gets as far as the network before failing.
  * What it cannot prove offline is a completed handshake — that needs a server with a certificate, which
- * is more machinery than a build probe should carry. The remaining risk is covered by the live contract
- * test in the Groovy suite.
+ * is more machinery than a build probe should carry. Nothing tests a completed handshake in the native
+ * image: the live contract case runs against the JVM launcher.
  *
  * Returns the scheme it got through on, so the expected value reads like the other probes.
  */

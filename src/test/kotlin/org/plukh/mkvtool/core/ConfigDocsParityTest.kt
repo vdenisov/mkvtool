@@ -101,7 +101,7 @@ class ConfigDocsParityTest : FunSpec({
 
     /**
      * The no-config error names the template by URL, because a binary on `PATH` has no directory to
-     * point at. Nothing else can notice that URL going stale: it is only ever printed, and the harness
+     * point at. Nothing else can notice that URL going stale: it is only ever printed, and the end-to-end
      * case covering the message asserts on the bare file name rather than on a path. So the one thing
      * that can rot — where in the repository the file sits — is checked here against the file itself.
      */

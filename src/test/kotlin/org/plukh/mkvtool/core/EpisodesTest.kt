@@ -12,9 +12,8 @@ import java.nio.charset.StandardCharsets
 
 /**
  * The identity half of the episodes library: the SxxEyy join key, the canonical-name parser, the file-name
- * sanitizer and the two `episodes.*` shapes. The Groovy suite pins none of these directly — they are only
- * observable there through `rename`/`mux`/`inspect` subprocess runs — so the cases that came from the
- * harness name the case they came from, and the rest close a gap the oracle never covered.
+ * sanitizer and the two `episodes.*` shapes. The end-to-end tier sees these only through `rename`, `mux`
+ * and `inspect` subprocess runs, so they are pinned directly here.
  *
  * The display-only half (batch labels, ranges, membership) lives in `BatchLabelsTest`, following the line
  * the library itself draws: identity must be answerable for one file, display is batch-relative.
@@ -30,7 +29,7 @@ class EpisodesTest : FunSpec({
 
         withData(
             nameFn = { it.label },
-            // harness 104: the fixtures are lower-case with dot separators
+            // Lower case with dot separators, as hand-named files often are.
             Case("a dotted lower-case name", "Show.s01e02", SeasonEpisode("01", "02")),
             Case("the canonical upper-case name", "My Show - S01E04 - Title", SeasonEpisode("01", "04")),
             Case("the s01.e01 spelling", "Show.s01.e01", SeasonEpisode("01", "01")),
@@ -56,12 +55,12 @@ class EpisodesTest : FunSpec({
 
         withData(
             nameFn = { it.label },
-            // harness 94: the characters are deleted, not replaced — no space is invented before "Question"
+            // The characters are deleted, not replaced — no space is invented before "Question"
             Case("illegal characters are removed, not substituted", "Slash/Colon: Question?", "SlashColon Question"),
             Case("every character Windows rejects", """a\b/c:d*e?f"g<h>i|j""", "abcdefghij"),
-            // harness 38: a Cyrillic title keeps every letter and loses only the colon
+            // A Cyrillic title keeps every letter and loses only the colon
             Case("non-ASCII text is untouched", "Тест: второй эпизод", "Тест второй эпизод"),
-            // harness 95: a legacy episodes.txt line is already clean and must stay so
+            // A legacy episodes.txt line is already clean and must stay so
             Case("an already-clean name is unchanged", "Already Sanitized", "Already Sanitized"),
             Case("trailing dots are cut", "Episode One...", "Episode One"),
             Case("trailing spaces are cut", "Episode One   ", "Episode One"),
@@ -89,7 +88,7 @@ class EpisodesTest : FunSpec({
 
         withData(
             nameFn = { it.label },
-            // harness 97: what ${episodeName} falls back to when there is no episodes.yaml
+            // What ${episodeName} falls back to when there is no episodes.yaml
             Case(
                 "rename's own output",
                 "My Show - S01E04 - From Name",
@@ -143,14 +142,14 @@ class EpisodesTest : FunSpec({
     }
 
     context("indexFromLines") {
-        // harness 94b: the offset is the episode number of the FIRST LINE, not an amount added to an index.
+        // The offset is the episode number of the FIRST LINE, not an amount added to an index.
         // A season downloaded in halves is what it exists for.
         test("the offset is the episode number of the first line") {
             indexFromLines(listOf("Eleventh", "Twelfth"), 11) shouldBe
                 mapOf("11" to "Eleventh", "12" to "Twelfth")
         }
 
-        // harness 104: the join key is the string parseSeasonEpisode returns, and titles stay raw
+        // The join key is the string parseSeasonEpisode returns, and titles stay raw
         test("keys are two-digit strings and names are verbatim") {
             indexFromLines(listOf("First One", "Second: With Colon?"), 1) shouldBe
                 mapOf("01" to "First One", "02" to "Second: With Colon?")
@@ -309,8 +308,8 @@ class EpisodesTest : FunSpec({
             }
         }
 
-        // The 2.1 seam: the transform runs inside loadMapping's guard, which is the only reason this
-        // function is allowed to throw at all. Harness 118b/119b turn exactly this into a warning and an
+        // The loader seam: the transform runs inside loadMapping's guard, which is the only reason this
+        // function is allowed to throw at all. inspect and mux turn exactly this into a warning and an
         // exit 2 respectively.
         context("through the loader") {
             test("a hand-edited episode number becomes a classified problem, not a stack trace") {

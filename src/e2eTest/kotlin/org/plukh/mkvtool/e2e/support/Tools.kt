@@ -77,11 +77,9 @@ val posixOnly: (TestCase) -> Enabled = {
 /**
  * Probe [file] with the real mkvmerge and return the typed record.
  *
- * This is where the tier is straightforwardly better than the Groovy suite rather than merely tidier:
- * that one parsed `-J` into untyped maps and asserted `map.get('properties').language`, which is both
- * unreadable and unchecked. Here the *production* parser runs, so a case asserts `ProbedTrack.language`
- * and any drift between what mkvmerge emits and what the tool understands shows up as a test failure
- * rather than as a map lookup quietly returning null.
+ * The *production* parser runs, so a case asserts `ProbedTrack.language` and any drift between what
+ * mkvmerge emits and what the tool understands shows up as a test failure rather than as a map lookup
+ * quietly returning null.
  */
 fun probe(file: File): ProbeResult.Probed {
     val exe = mkvmergeExe ?: error("mkvmerge is required to probe $file")

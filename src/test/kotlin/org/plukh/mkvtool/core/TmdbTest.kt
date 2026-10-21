@@ -11,8 +11,9 @@ import java.net.URI
 
 /**
  * The HTTP half, against a stub server on a loopback port — in-process, offline and deterministic, the
- * same trick the Groovy harness uses. What is under test is how a failure is *reported*: the API answers
- * "invalid key" as a status message in the body, and that sentence is what the user needs to see.
+ * same trick the end-to-end tier's `withStubServer` uses. What is under test is how a failure is
+ * *reported*: the API answers "invalid key" as a status message in the body, and that sentence is what the
+ * user needs to see.
  */
 class TmdbTest : FunSpec({
 

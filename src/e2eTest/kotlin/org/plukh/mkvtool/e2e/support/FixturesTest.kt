@@ -104,8 +104,7 @@ class FixturesTest : FunSpec({
             File(workDir, "mkv").mkdirs()
             File(workDir, "mkv/notes.txt").writeText("stray", StandardCharsets.UTF_8)
 
-            // The one divergence from the Groovy original, which listed every name it found. Every
-            // assertion resting on this helper is about muxed output; a case wanting to prove the
+            // Every assertion resting on this helper is about muxed output; a case wanting to prove the
             // directory holds nothing else needs a plain listing.
             outputNames(workDir) shouldContainExactly emptyList()
         }

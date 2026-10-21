@@ -221,8 +221,8 @@ fun resolveUiLanguage(mkvmergeExe: String): String? =
  *
  * Only the fields the command line cannot be built without are here — this is not schema validation. Each
  * of them is something v1 dereferenced unconditionally and either crashed on or turned into the literal
- * text `null` (a directory named `null`, a `--language 0:null`), which no oracle case covers. Refusing up
- * front, in the same sentence shape an unreadable config gets, is the honest version of the same answer.
+ * text `null` (a directory named `null`, a `--language 0:null`). Refusing up front, in the same sentence
+ * shape an unreadable config gets, is the honest version of the same answer.
  *
  * Deliberately *not* here: a track with no `language` or no `title`. Both are genuinely optional — mkvmerge
  * keeps whatever the source track carries — so the builder omits the option instead of inventing a value.
