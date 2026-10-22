@@ -6,7 +6,7 @@ import io.kotest.matchers.shouldBe
 import java.io.File
 
 /**
- * `buildPropeditCommand` is pure — the file name is reconstructed as `<baseName>.mkv` and the user's
+ * `buildPropeditCommand` is pure — the file name is passed as it is and the user's
  * args are forwarded verbatim, in order, after it. This is the unit-testable slice of `propedit`; the
  * actual mkvpropedit subprocess is exercised by the end-to-end tier.
  */
@@ -35,10 +35,10 @@ class PropeditTest : FunSpec({
                 listOf("mkvpropedit", "Show.mkv"),
             ),
             Case(
-                "reconstructs the name with a lower-case .mkv (v1 quirk on an upper-case extension)",
+                "keeps an upper-case extension as it is",
                 File("Show.MKV"),
                 listOf("--add-track-statistics-tags"),
-                listOf("mkvpropedit", "Show.mkv", "--add-track-statistics-tags"),
+                listOf("mkvpropedit", "Show.MKV", "--add-track-statistics-tags"),
             ),
             Case(
                 "a multi-dot base name keeps everything before the last dot",

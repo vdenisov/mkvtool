@@ -29,17 +29,11 @@ data class FileProped(val fileName: String, val outcome: PropeditOutcome) : Comm
 data class PropeditRun(val files: List<FileProped>, val total: Int, val failed: Int) : CommandResult
 
 /**
- * Build the mkvpropedit command line for one file: `[exe, "<baseName>.mkv", <args...>]`. The user's
- * [args] are forwarded verbatim, after the file name.
- *
- * The name is *reconstructed* as `nameWithoutExtension + ".mkv"` rather than taken from the file, which
- * lower-cases the extension. For the ordinary `Show.mkv` that is identical to the real name; on an
- * upper-case `Show.MKV` it names a file that does not exist, and the command selects files
- * case-insensitively, so the two disagree exactly there. Inherited from v1 and pinned as it stands;
- * fixing it is issue #12.
+ * Build the mkvpropedit command line for one file: `[exe, <file name>, <args...>]`. The user's [args] are
+ * forwarded verbatim, after the file name.
  */
 fun buildPropeditCommand(exe: String, file: File, args: List<String>): List<String> =
-    listOf(exe, "${file.nameWithoutExtension}.mkv") + args
+    listOf(exe, file.name) + args
 
 /**
  * Run mkvpropedit ([exe]) with [args] against every `.mkv` in [dir]. Each file gets a `*** Processing`
