@@ -9,12 +9,12 @@ import org.plukh.mkvtool.core.StrictVerdict
 import org.plukh.mkvtool.core.SubstitutionEngine
 import org.plukh.mkvtool.core.additionalSourceIdProblems
 import org.plukh.mkvtool.core.collectTemplateFields
-import org.plukh.mkvtool.core.findMkvTool
 import org.plukh.mkvtool.core.inspectDirectory
 import org.plukh.mkvtool.core.loadConfig
 import org.plukh.mkvtool.core.loadEpisodeMetadata
 import org.plukh.mkvtool.core.probeFile
 import org.plukh.mkvtool.core.reportTemplateProblems
+import org.plukh.mkvtool.core.resolveMkvmerge
 import org.plukh.mkvtool.core.validateTemplates
 import org.plukh.mkvtool.out.Error
 import org.plukh.mkvtool.out.RenderHints
@@ -158,8 +158,9 @@ class InspectCommand : Callable<Int> {
         reportTemplateProblems(validation, renderer, fatal = false)
         configProblems += validation.problems
 
-        val mkvmergeExe = config?.general?.mkvmergeExe ?: try {
-            findMkvTool("mkvmerge")
+        // The one config problem inspect stops on: with no mkvmerge to run there is nothing to report.
+        val mkvmergeExe = try {
+            resolveMkvmerge(config?.general?.mkvmergeExe)
         } catch (e: MkvToolNotFoundException) {
             renderer.render(Error(e.message.orEmpty()))
             return 2

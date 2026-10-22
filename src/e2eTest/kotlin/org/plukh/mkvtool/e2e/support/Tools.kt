@@ -5,6 +5,7 @@ import io.kotest.core.test.TestCase
 import org.plukh.mkvtool.core.ProbeResult
 import org.plukh.mkvtool.core.parseProbe
 import java.io.File
+import java.nio.charset.StandardCharsets
 
 /**
  * The external tools this tier needs, and the guards that skip a case rather than failing it when one is
@@ -72,6 +73,21 @@ val posixOnly: (TestCase) -> Enabled = {
     } else {
         Enabled.enabled
     }
+}
+
+/**
+ * A `PATH` value that puts a [name] exiting 1 ahead of the real tool, written into [dir]. That is the same
+ * "not usable" branch an absent tool takes; `PATH` cannot simply be emptied, because the POSIX launchers
+ * need sed, xargs and dirname. Pair it with [posixOnly].
+ */
+fun pathShadowing(name: String, dir: File): String {
+    val stub = File(dir, name)
+    stub.writeText("#!/bin/sh\nexit 1\n", StandardCharsets.UTF_8)
+    check(stub.setExecutable(true)) { "could not make $stub executable" }
+    // A stub the system will not execute (a noexec temp directory) is passed over silently in favour of the
+    // real tool, which would fail the case for a reason that has nothing to do with mkvtool.
+    check(exec(listOf(stub.absolutePath)).exitCode == 1) { "$stub does not run; is $dir mounted noexec?" }
+    return dir.absolutePath + File.pathSeparator + System.getenv("PATH")
 }
 
 /**

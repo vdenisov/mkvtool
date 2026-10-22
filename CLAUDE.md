@@ -218,7 +218,7 @@ hand-assembled `episodes.txt` — use `core/CharsetDetection.kt` rather than qui
 |---|---|
 | `Utf8Conversion.kt` | `to-utf8`: the charset decision table (`classify` → `Utf8Verdict`), strict decoding, the run |
 | `SrtFix.kt` | `fix-srt`: the pure reformatter and its state machine, plus the batch |
-| `Tools.kt` | `findMkvTool`: PATH resolution with the Windows default-location fallback |
+| `Tools.kt` | `findMkvTool`: PATH resolution with the Windows default-location fallback; `resolveMkvmerge`: a configured `mkvmergeExe`, probed and never replaced by auto-detection |
 | `Propedit.kt` | the mkvpropedit loop and `buildPropeditCommand` |
 | `FindUnusedFonts.kt` | the `.ass`-versus-`fonts/` matcher |
 | `YamlMapping.kt` | `loadMapping`: "read this file, get a mapping or a named reason why not" |
@@ -448,12 +448,13 @@ These describe the *tool* and are the specification. Where one looks arbitrary, 
 ### Exit codes
 
 Every batch command exits non-zero if any file failed, so all are usable from a shell script. Environment
-and setup errors exit 2 before touching anything: an unusable `--encoding`, a missing mkvpropedit, an
-unusable config. `fetch-episodes` exits 2 on API-key problems and 3 on network or API failures. `mux`
-keeps continue-on-error and **always exits 0** — a partially successful batch mux is a normal outcome —
-except under `--strict`, which exits 2 when a discrepancy affects a selected track. `inspect` writes
-nothing and **exits 0 whatever it finds**; `--strict` is its only non-zero path, a `--config` path that
-does not exist very much included (it warns and carries on, because a stale config must never stand
+and setup errors exit 2 before touching anything: an unusable `--encoding`, a missing mkvpropedit or
+mkvmerge, a `general.mkvmergeExe` that cannot be run, an unusable config. `fetch-episodes` exits 2 on API-key
+problems and 3 on network or API failures. `mux` keeps continue-on-error and **always exits 0** — a
+partially successful batch mux is a normal outcome — except under `--strict`, which exits 2 when a
+discrepancy affects a selected track. `inspect` writes nothing and **exits 0 whatever it finds**; besides
+having no mkvmerge to run, `--strict` is its only non-zero path, a `--config` path that does not exist very
+much included (it warns and carries on, because a stale config must never stand
 between the user and the track table, least of all when reading that table is how they would fix it).
 
 ### Episode metadata: `episodes.yaml` and `episodes.txt`
@@ -724,7 +725,9 @@ as mkvmerge intended.
 Everything that reports rather than muxes, and **nothing about a config can stop it**. The config may be
 absent: extensions fall back to defaults, mkvmerge to PATH auto-detection, selections to empty. Missing,
 empty, malformed, parsed-but-not-a-mapping, or valid with a template typo — each is counted, reported as a
-warning, and the run continues.
+warning, and the run continues. The one exception is a `general.mkvmergeExe` that cannot be run: it exits 2
+like a missing mkvmerge on PATH, rather than falling back to auto-detection, because a config naming a
+specific build means that build.
 
 Mode rule: `wantCheck = checkOnly || checkVerbose || !identifyOnly`. A bare run checks, `--identify` alone
 identifies, naming both runs both off one scan — `--identify` and the check share a single probe per file,

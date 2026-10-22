@@ -6,14 +6,13 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.plukh.mkvtool.e2e.support.Smoke
-import org.plukh.mkvtool.e2e.support.exec
 import org.plukh.mkvtool.e2e.support.mkvtool
 import org.plukh.mkvtool.e2e.support.needsMkvpropedit
+import org.plukh.mkvtool.e2e.support.pathShadowing
 import org.plukh.mkvtool.e2e.support.posixOnly
 import org.plukh.mkvtool.e2e.support.probe
 import org.plukh.mkvtool.e2e.support.stageInput
 import org.plukh.mkvtool.e2e.support.writeText
-import java.io.File
 import java.nio.charset.StandardCharsets
 
 /**
@@ -74,26 +73,16 @@ class PropeditTest : FunSpec({
         run.output shouldContain "0 processed, 1 failed"
     }
 
-    // A stub that fails `--version` shadows the real mkvpropedit, which is the same "not usable" branch an
-    // absent one takes. PATH cannot simply be emptied: the POSIX launchers need sed, xargs and dirname.
     test("a missing mkvpropedit exits 2 before touching any file").config(enabledOrReasonIf = posixOnly) {
         val workDir = tempdir()
         val input = stageInput(workDir)
         val size = input.length()
         val modified = input.lastModified()
 
-        val stub = File(tempdir(), "mkvpropedit")
-        stub.writeText("#!/bin/sh\nexit 1\n")
-        check(stub.setExecutable(true)) { "could not make $stub executable" }
-        // A stub the system will not execute (a noexec temp directory) is passed over silently in favour of
-        // the real tool, which would fail this case for a reason that has nothing to do with mkvtool.
-        exec(listOf(stub.absolutePath)).exitCode shouldBe 1
-
-        val path = stub.parentFile.absolutePath + File.pathSeparator + System.getenv("PATH")
         val run = mkvtool(
             "propedit", "--edit", "info", "--set", "title=X",
             workDir = workDir,
-            env = mapOf("PATH" to path),
+            env = mapOf("PATH" to pathShadowing("mkvpropedit", tempdir())),
         )
         run.exitCode shouldBe 2
         run.output shouldContain "*** Error: 'mkvpropedit' not found on PATH or in default install location"

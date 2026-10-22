@@ -42,7 +42,8 @@ general:
   title: "${showName} - S${seasonNum}E${episodeNum} - ${episodeName}"
 
   # Full path to mkvmerge. Omit it, as here, to resolve from PATH — with a fallback to the default
-  # Windows install location. Set it only when you need a specific build.
+  # Windows install location. Set it only when you need a specific build: one that cannot be run
+  # stops both `mux` and `inspect` rather than falling back to auto-detection.
   # mkvmergeExe: "C:\\Program Files\\MKVToolNix\\mkvmerge.exe"
 
 # Tracks taken from the main source file — the episode itself. IDs are what `inspect --identify`

@@ -201,20 +201,10 @@ data class MuxOptions(
  *
  * mkvmerge's UI language codes changed across versions — `en_US` up to at least v82, `en` afterwards — so
  * the accepted spelling is probed rather than assumed, and the option is dropped entirely when neither is
- * taken. A launch failure counts as a refusal, so a bogus `mkvmergeExe` fails at the mux rather than here.
+ * taken. A launch failure counts as a refusal.
  */
 fun resolveUiLanguage(mkvmergeExe: String): String? =
-    listOf("en", "en_US").firstOrNull { language ->
-        try {
-            ProcessBuilder(mkvmergeExe, "--ui-language", language, "--version")
-                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                .redirectError(ProcessBuilder.Redirect.DISCARD)
-                .start()
-                .waitFor() == 0
-        } catch (_: Exception) {
-            false
-        }
-    }
+    listOf("en", "en_US").firstOrNull { runs(mkvmergeExe, "--ui-language", it, "--version") }
 
 /**
  * Why [config] cannot be muxed with, or null when it can.

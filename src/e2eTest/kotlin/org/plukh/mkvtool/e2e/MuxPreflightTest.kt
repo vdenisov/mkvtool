@@ -20,6 +20,8 @@ import org.plukh.mkvtool.e2e.support.fullCopy
 import org.plukh.mkvtool.e2e.support.mkvtool
 import org.plukh.mkvtool.e2e.support.needsMkvmerge
 import org.plukh.mkvtool.e2e.support.outputNames
+import org.plukh.mkvtool.e2e.support.pathShadowing
+import org.plukh.mkvtool.e2e.support.posixOnly
 import org.plukh.mkvtool.e2e.support.probe
 import org.plukh.mkvtool.e2e.support.stageInput
 import org.plukh.mkvtool.e2e.support.testMkv
@@ -229,6 +231,48 @@ class MuxPreflightTest : FunSpec({
         }
     }
 
+    // An environment error: exit 2 before anything is read or written, as a message, not a trace.
+    test("a missing mkvmerge on PATH is a clean error").config(enabledOrReasonIf = posixOnly) {
+        val workDir = tempdir()
+        stageInput(workDir, "a.mkv")
+        // Hand-written, because cfg always sets mkvmergeExe and PATH must be the only route here.
+        writeConfig(workDir, "general:\n  destinationDir: mkv\nmainSource:\n  audioTracks:\n    - id: 1\n")
+
+        val run = mux(workDir, env = mapOf("PATH" to pathShadowing("mkvmerge", tempdir())))
+
+        withClue(run.output) {
+            run.exitCode shouldBe 2
+            run.output shouldContain "*** Error: 'mkvmerge' not found on PATH or in default install location"
+            run.output shouldNotContain "Exception"
+        }
+        File(workDir, "mkv").exists() shouldBe false
+    }
+
+    // A configured path is probed rather than trusted; --no-check would otherwise reach mkvmerge itself, after
+    // creating the output directory.
+    context("a mkvmergeExe that cannot be run is a clean error in every mode") {
+        withData(
+            nameFn = { it.first },
+            "a checked run" to emptyList(),
+            "--no-check" to listOf("--no-check"),
+            "--dry-run" to listOf("--dry-run"),
+        ) { (_, args) ->
+            val workDir = tempdir()
+            stageInput(workDir, "a.mkv")
+            val missing = File(tempdir(), "mkvmerge").absolutePath
+            writeConfig(workDir, cfg(mkvmergeExe = missing))
+
+            val run = mux(workDir, *args.toTypedArray())
+
+            withClue(run.output) {
+                run.exitCode shouldBe 2
+                run.output shouldContain "*** Error: general.mkvmergeExe '$missing' cannot be run"
+                run.output shouldNotContain "Exception"
+            }
+            File(workDir, "mkv").exists() shouldBe false
+        }
+    }
+
     // inspect warns about the same files and carries on; mux would stamp titles from metadata it could not read.
     context("an episodes.yaml mux cannot use is a clean error").config(enabledOrReasonIf = needsMkvmerge) {
         withData(
@@ -271,4 +315,5 @@ private val audioOneAndTwo = listOf(
 /** A hand-editable file in one of the ways it breaks. */
 private class UnusableFile(val label: String, val text: String)
 
-private fun mux(workDir: File, vararg args: String): Run = mkvtool("mux", *args, workDir = workDir)
+private fun mux(workDir: File, vararg args: String, env: Map<String, String> = emptyMap()): Run =
+    mkvtool("mux", *args, workDir = workDir, env = env)
