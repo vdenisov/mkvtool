@@ -4,6 +4,7 @@ import org.plukh.mkvtool.core.EpisodeFetch
 import org.plukh.mkvtool.core.ShowFetched
 import org.plukh.mkvtool.core.TranslationFallback
 import org.plukh.mkvtool.out.ResultTextRenderer
+import org.plukh.mkvtool.out.plural
 
 /**
  * The show, printed as soon as it is known — before the season fetch, so a slow link says something.
@@ -21,10 +22,7 @@ val TranslationFallbackRenderer = ResultTextRenderer<TranslationFallback> { resu
 /**
  * The count, and nothing else: the show line was already printed by [ShowFetchedRenderer] as its own
  * result, and repeating it here would say the same thing twice.
- *
- * "episode names" is not pluralized against the count — v1 writes it that way, and the text is what the
- * port reproduces.
  */
 val EpisodeFetchRenderer = ResultTextRenderer<EpisodeFetch> { result, s ->
-    s.out.println("*** Fetched ${result.episodes.size} episode names")
+    s.out.println("*** Fetched ${plural(result.episodes.size, "episode name")}")
 }
