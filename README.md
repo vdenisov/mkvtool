@@ -128,7 +128,7 @@ mkvtool fetch-episodes --show-id 1920 --season 1 --language ru-RU
 `--show-id` takes either the numeric id or the show's URL, so the address can be
 pasted straight from a browser. A URL that names a season supplies `--season`
 too; passing a `--season` that disagrees with the URL is an error rather than a
-silent choice between the two.
+silent choice between the two. `--season 0` fetches the show's specials.
 
 If `--api-key` is not supplied, the key is read from `apikey.txt` — the current
 directory first, then `~/.mkvtool/apikey.txt` (`%USERPROFILE%\.mkvtool\apikey.txt`
