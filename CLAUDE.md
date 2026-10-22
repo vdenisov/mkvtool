@@ -17,10 +17,10 @@ quick-start. User-facing depth (output and colour conventions, the check-report 
 `config.yaml` field reference) lives in `docs/reference.md`. This file holds implementation internals.
 When adding documentation, put it in the right layer instead of growing the README.
 
-Planning and design documents (direction, porting plan, workflow expansion, distribution, backlog) exist
-in the working tree but are **untracked**, and nothing tracked may reference them: code, comments, commit
-messages and PR descriptions have to be self-contained, because a reader of the repository cannot see
-those files. Say the thing, do not cite the plan.
+Planning and design documents (direction, porting history, workflow expansion, distribution, release
+checklist) exist in the working tree but are **untracked**, and nothing tracked may reference them: code,
+comments, commit messages and PR descriptions have to be self-contained, because a reader of the
+repository cannot see those files. Say the thing, do not cite the plan.
 
 ## Running it
 
