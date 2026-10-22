@@ -7,13 +7,13 @@ import org.plukh.mkvtool.core.MkvToolNotFoundException
 import org.plukh.mkvtool.core.MuxOptions
 import org.plukh.mkvtool.core.SubstitutionEngine
 import org.plukh.mkvtool.core.collectTemplateFields
-import org.plukh.mkvtool.core.findMkvTool
 import org.plukh.mkvtool.core.loadConfig
 import org.plukh.mkvtool.core.loadEpisodeMetadata
 import org.plukh.mkvtool.core.muxConfigProblem
 import org.plukh.mkvtool.core.muxDirectory
 import org.plukh.mkvtool.core.probeFile
 import org.plukh.mkvtool.core.reportTemplateProblems
+import org.plukh.mkvtool.core.resolveMkvmerge
 import org.plukh.mkvtool.core.resolveTrackOrder
 import org.plukh.mkvtool.core.resolveUiLanguage
 import org.plukh.mkvtool.core.validateTemplates
@@ -113,8 +113,8 @@ class MuxCommand : Callable<Int> {
             return 2
         }
 
-        val mkvmergeExe = config.general.mkvmergeExe ?: try {
-            findMkvTool("mkvmerge")
+        val mkvmergeExe = try {
+            resolveMkvmerge(config.general.mkvmergeExe)
         } catch (e: MkvToolNotFoundException) {
             renderer.render(Error(e.message.orEmpty()))
             return 2

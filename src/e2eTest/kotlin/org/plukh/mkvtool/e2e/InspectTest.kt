@@ -19,6 +19,8 @@ import org.plukh.mkvtool.e2e.support.extractTrack
 import org.plukh.mkvtool.e2e.support.fullCopy
 import org.plukh.mkvtool.e2e.support.mkvtool
 import org.plukh.mkvtool.e2e.support.needsMkvmerge
+import org.plukh.mkvtool.e2e.support.pathShadowing
+import org.plukh.mkvtool.e2e.support.posixOnly
 import org.plukh.mkvtool.e2e.support.stageBatch
 import org.plukh.mkvtool.e2e.support.stageExternalText
 import org.plukh.mkvtool.e2e.support.stageExternalTrack
@@ -193,6 +195,37 @@ class InspectTest : FunSpec({
                 run.output shouldContain "No media files"
                 run.output.contains("config problem") shouldBe (row.exitCode == 2)
             }
+        }
+    }
+
+    // With nothing to probe there is nothing to report, so this is inspect's one fatal exit - as a message.
+    test("a missing mkvmerge on PATH is a clean error").config(enabledOrReasonIf = posixOnly) {
+        val workDir = tempdir()
+        stageInput(workDir, "a.mkv")
+
+        val run = inspect(workDir, "--identify", env = mapOf("PATH" to pathShadowing("mkvmerge", tempdir())))
+
+        withClue(run.output) {
+            run.exitCode shouldBe 2
+            run.output shouldContain "*** Error: 'mkvmerge' not found on PATH or in default install location"
+            run.output shouldNotContain "Exception"
+        }
+    }
+
+    // Not replaced by auto-detection: a config naming a specific build means that build.
+    test("a mkvmergeExe that cannot be run is a clean error, not a fallback") {
+        val workDir = tempdir()
+        stageInput(workDir, "a.mkv")
+        val missing = File(tempdir(), "mkvmerge").absolutePath
+        writeConfig(workDir, cfg(mkvmergeExe = missing))
+
+        val run = inspect(workDir, "--identify")
+
+        withClue(run.output) {
+            run.exitCode shouldBe 2
+            run.output shouldContain "*** Error: general.mkvmergeExe '$missing' cannot be run"
+            run.output shouldNotContain "Exception"
+            run.output shouldNotContain "*** a.mkv"
         }
     }
 
@@ -440,6 +473,7 @@ private class EmptyStrictRow(val label: String, val config: String?, val args: L
 /** A hand-editable file in one of the ways it breaks. */
 private class BrokenFile(val label: String, val text: String)
 
-private fun inspect(workDir: File, vararg args: String): Run = mkvtool("inspect", *args, workDir = workDir)
+private fun inspect(workDir: File, vararg args: String, env: Map<String, String> = emptyMap()): Run =
+    mkvtool("inspect", *args, workDir = workDir, env = env)
 
 private fun outputDir(workDir: File): File = File(workDir, "mkv")

@@ -33,9 +33,11 @@ a one-line summary (`*** 4 converted, 2 skipped, 1 failed`) and exits non-zero
 if anything failed. The exception is `mux`, which continues on errors
 and always exits 0 — a partially-successful batch mux is a normal outcome —
 except under `--strict`, which exits 2 on a blocking discrepancy. `inspect`
-writes nothing at all and **exits 0 unless `--strict` is given**. A config that is
-missing, empty, malformed or otherwise unusable is reported as a warning and the
-run continues without it — inspection is the thing you reach for *because*
+writes nothing at all and **exits 0 unless `--strict` is given**, or there is no
+mkvmerge to run — none on `PATH`, or a `mkvmergeExe` that cannot be run — which
+exits 2. That `mkvmergeExe` is the one config problem that stops it. A config
+that is missing, empty, malformed or otherwise unusable is reported as a warning
+and the run continues without it — inspection is the thing you reach for *because*
 something is wrong, so it does not refuse to describe your files over a config it
 was not required to have in the first place. Under `--strict` those same problems
 exit 2, since the report was then classified without the selections the config
@@ -368,7 +370,8 @@ general:
   destinationDir: "mkv"                                # Output directory
   allowedExtensions: ["mkv", "avi", "mp4"]            # File extensions to process
   # mkvmergeExe is optional: omit it to auto-detect mkvmerge from PATH,
-  # or set it to a full path to override.
+  # or set it to a full path to override. One that cannot be run exits 2
+  # in both mux and inspect; it is never replaced by auto-detection.
   mkvmergeExe: "C:\\Program Files\\MKVToolNix\\mkvmerge.exe"
   # title is optional: the segment (container) title, defaulting to the file
   # name. Separate from the video track name in mainSource below.

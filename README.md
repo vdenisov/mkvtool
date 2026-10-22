@@ -307,11 +307,13 @@ there, which is what you read to *write* the config; with one, findings are also
 classified against the tracks it selects and configured sources are resolved per
 episode.
 
-Nothing about a config can stop it. Missing, empty, malformed, or valid with a
+Nothing about a config can stop it, except a `mkvmergeExe` that cannot be run.
+Missing, empty, malformed, or valid with a
 typo in a template — each is reported and the run continues without it, because a
 stale config in the directory should never stand between you and the track table,
 least of all when reading that table is how you would fix the config. The exit
-code is 0 unless you pass `--strict`.
+code is 0 unless you pass `--strict`, or there is no mkvmerge to run — none on
+`PATH`, or a `mkvmergeExe` that cannot be run — which exits 2.
 
 #### External files
 
