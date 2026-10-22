@@ -7,12 +7,15 @@ import java.io.File
 
 /**
  * The `find-unused-fonts` engine: report every font in a `fonts/` subdirectory whose base name is never
- * referenced in any `.ass` subtitle in the current directory.
+ * referenced in any `.ass` or `.ssa` subtitle in the current directory.
  *
  * "Referenced" is v1's deliberately loose test: a case-insensitive substring match of the font's base
  * name (extension stripped) against the subtitle text. It over-reports usage rather than under-reports,
  * so a font is only listed when its name appears literally nowhere.
  */
+
+/** The subtitle formats that declare fonts by name; compared against [extensionOf]. */
+private val FONT_SUBTITLE_EXTENSIONS = setOf("ass", "ssa")
 
 /** The run root: the base names of fonts that no subtitle references. */
 data class FontUsageReport(val unusedFonts: List<String>) : CommandResult
@@ -26,18 +29,17 @@ fun unusedFonts(subtitleLines: List<String>, fontBaseNames: List<String>): List<
     fontBaseNames.filter { font -> subtitleLines.none { it.contains(font.lowercase()) } }
 
 /**
- * Scan [dir] for `.ass` subtitles and a `fonts/` subdirectory, and report the unreferenced fonts.
+ * Scan [dir] for `.ass`/`.ssa` subtitles and a `fonts/` subdirectory, and report the unreferenced fonts.
  *
- * v1 matched subtitles with `name.endsWith("ass")` (no dot) — reproduced verbatim, as is its charset
- * auto-detection on the subtitle read ([readLinesDetected]). Font base names strip the last dot segment,
- * keeping dot-less names whole and (as in v1) listing any subdirectories of `fonts/` too.
+ * Subtitles are read with charset auto-detection ([readLinesDetected]). Font base names strip the last dot
+ * segment, keeping dot-less names whole and (as in v1) listing any subdirectories of `fonts/` too.
  *
  * A missing `fonts/` directory made v1 crash (an NPE on `listFiles()` returning null). This reports the
  * absence as an advisory and returns an empty report (exit 0) instead.
  */
 fun findUnusedFonts(dir: File, renderer: Renderer): FontUsageReport {
     val subtitleLines = (dir.listFiles() ?: emptyArray())
-        .filter { it.name.endsWith("ass") }
+        .filter { it.isFile && extensionOf(it.name) in FONT_SUBTITLE_EXTENSIONS }
         .flatMap { readLinesDetected(it) }
         .map { it.lowercase() }
 

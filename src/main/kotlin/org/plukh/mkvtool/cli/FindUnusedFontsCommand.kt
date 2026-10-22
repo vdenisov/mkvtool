@@ -7,15 +7,15 @@ import java.io.File
 import java.util.concurrent.Callable
 
 /**
- * `mkvtool find-unused-fonts` — list fonts in `fonts/` that no `.ass` subtitle in the current directory
- * references. Thin by design: takes its renderer from
+ * `mkvtool find-unused-fonts` — list fonts in `fonts/` that no `.ass` or `.ssa` subtitle in the current
+ * directory references. Thin by design: takes its renderer from
  * [OutputOptions] and delegates to [findUnusedFonts]. Always exits 0 — this is a reporter, not a batch
  * operation with a failure count.
  */
 @Command(
     name = "find-unused-fonts",
     mixinStandardHelpOptions = true,
-    description = ["List fonts in fonts/ not referenced by any .ass subtitle in the current directory."],
+    description = ["List fonts in fonts/ not referenced by any .ass or .ssa subtitle in the current directory."],
 )
 class FindUnusedFontsCommand : Callable<Int> {
 
