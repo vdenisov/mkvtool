@@ -27,6 +27,10 @@ exception and has no options of its own — every argument is passed through to
 `find-unused-fonts` prints bare file names meant for piping and is never
 coloured.
 
+In a legacy Windows console window (conhost, not Windows Terminal), colour
+prints as raw escape codes such as `←[33m`, because that console does not
+interpret them by default. Pass `--color never` or set `NO_COLOR` there.
+
 Errors and warnings go to **stderr**, progress and summaries to **stdout**, so
 either can be redirected without losing the other. Every batch command ends with
 a one-line summary (`*** 4 converted, 2 skipped, 1 failed`) and exits non-zero
