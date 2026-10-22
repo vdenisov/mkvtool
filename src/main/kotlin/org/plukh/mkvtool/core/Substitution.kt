@@ -323,9 +323,10 @@ fun validateTemplates(fields: List<TemplateField>): TemplateValidation {
 /**
  * Say what stage one found, in wording identical everywhere — but leave the verdict to the caller.
  * `mux` cannot mux against a config it did not understand and passes [fatal]; `inspect` reports on files
- * and can report on them just as well without one, so it does not.
+ * and can report on them just as well without one, so it does not. The summary line starts with
+ * [configName], the config file as the user named it.
  */
-fun reportTemplateProblems(validation: TemplateValidation, renderer: Renderer, fatal: Boolean) {
+fun reportTemplateProblems(validation: TemplateValidation, configName: String, renderer: Renderer, fatal: Boolean) {
     if (validation.problems == 0) return
 
     val details = buildString {
@@ -339,6 +340,6 @@ fun reportTemplateProblems(validation: TemplateValidation, renderer: Renderer, f
         }
     }.trimEnd('\n')
 
-    val message = "config.yaml has ${plural(validation.problems, "substitution problem")}:"
+    val message = "$configName has ${plural(validation.problems, "substitution problem")}:"
     renderer.render(if (fatal) Error(message, details) else Warning(message, details))
 }

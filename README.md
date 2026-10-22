@@ -402,7 +402,7 @@ value:
     1    video  AVC/H.264/MPEG-4p10  eng   yes  no   -
     2    audio  AC-3                 eng   yes  no   English (SDH)
 
-*** 1 discrepancy affects a track that config.yaml selects:
+*** 1 discrepancy affects a track that the config selects:
       2 files use a different track layout, at selected tracks 0, 1, 2
 *** 1 informational (does not affect what gets muxed):
       track 2 (subtitles, config title "Signs") - default differs across 2 groups

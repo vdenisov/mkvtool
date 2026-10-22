@@ -116,6 +116,8 @@ class InspectCommand : Callable<Int> {
 
         var configProblems = 0
         val configFile = configPath?.let(::File) ?: File(dir, "config.yaml")
+        // As the user wrote it: a bare name would make --config ../s1/config.yaml read as the local file.
+        val configName = configPath ?: "config.yaml"
         var config: Config? = null
 
         if (configFile.isFile) {
@@ -138,7 +140,7 @@ class InspectCommand : Callable<Int> {
         }
 
         // Fatal in mux; here the id simply has no effect on anything inspect reports.
-        config?.let(::additionalSourceIdProblems)?.forEach {
+        config?.let { additionalSourceIdProblems(it, configName) }?.forEach {
             renderer.render(Warning("$it; ignoring the id."))
             configProblems++
         }
@@ -155,7 +157,7 @@ class InspectCommand : Callable<Int> {
         // Diagnosed, never fatal — the same validation `mux` exits 2 on. A template typo would put a
         // wrong name on a whole season there; here it only means a path resolves to less than it should.
         val validation = validateTemplates(collectTemplateFields(config))
-        reportTemplateProblems(validation, renderer, fatal = false)
+        reportTemplateProblems(validation, configName, renderer, fatal = false)
         configProblems += validation.problems
 
         // The one config problem inspect stops on: with no mkvmerge to run there is nothing to report.

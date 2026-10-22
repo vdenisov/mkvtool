@@ -92,7 +92,7 @@ class CheckReportRendererTest : FunSpec({
 
             val output = render(infos, selection = withConfig)
 
-            output shouldContain "*** 1 discrepancy affects a track that config.yaml selects:"
+            output shouldContain "*** 1 discrepancy affects a track that the config selects:"
             output shouldContain "      track 1 (audio, config title \"Japanese\") - language differs across 2 groups"
         }
 
@@ -153,8 +153,8 @@ class CheckReportRendererTest : FunSpec({
 
             output shouldContain "*** Ambiguous track IDs"
             output shouldContain "    Tracks 1 and 2 are both audio / eng / AC-3 with no name, in 1 file."
-            output shouldContain "    ID-based selection cannot distinguish them; check which one config.yaml means."
-            output shouldContain "tracks 1, 2 are ambiguous and config.yaml selects track 1"
+            output shouldContain "    ID-based selection cannot distinguish them; check which one the config means."
+            output shouldContain "tracks 1, 2 are ambiguous and the config selects track 1"
         }
 
         test("a chapter split is reported with the minority named") {

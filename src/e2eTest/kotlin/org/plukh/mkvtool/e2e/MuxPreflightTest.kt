@@ -26,6 +26,7 @@ import org.plukh.mkvtool.e2e.support.probe
 import org.plukh.mkvtool.e2e.support.stageInput
 import org.plukh.mkvtool.e2e.support.testMkv
 import org.plukh.mkvtool.e2e.support.writeConfig
+import org.plukh.mkvtool.e2e.support.writeText
 import java.io.File
 import java.nio.charset.StandardCharsets
 
@@ -228,6 +229,22 @@ class MuxPreflightTest : FunSpec({
                 run.output shouldNotContain "Exception"
             }
             File(workDir, "mkv").exists() shouldBe false
+        }
+    }
+
+    // Named as passed: a bare "config.yaml" would send the reader to the local file, which was never read.
+    test("a refusal under --config names the file that was read, as it was given") {
+        val workDir = tempdir()
+        stageInput(workDir, "a.mkv")
+        // Hand-written rather than cfg(), which needs mkvmerge; this case never gets as far as running it.
+        writeConfig(workDir, "general:\n  destinationDir: mkv\n")
+        writeText(workDir, "s2/config.yaml", "general:\n  allowedExtensions: [\"mkv\"]\n", StandardCharsets.UTF_8)
+
+        val run = mux(workDir, "--config", "s2/config.yaml")
+
+        withClue(run.output) {
+            run.exitCode shouldBe 2
+            run.output shouldContain "*** Error: s2/config.yaml has no general.destinationDir"
         }
     }
 

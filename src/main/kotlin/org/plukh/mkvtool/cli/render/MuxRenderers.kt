@@ -124,7 +124,7 @@ val BlockingDiscrepanciesAbortRenderer = ResultTextRenderer<MuxAbort.BlockingDis
                 "affecting selected tracks).",
         ),
     )
-    s.err.println(s.red("*** Nothing was muxed. Fix config.yaml or the inputs, or drop --strict to continue."))
+    s.err.println(s.red("*** Nothing was muxed. Fix the config or the inputs, or drop --strict to continue."))
 }
 
 /**

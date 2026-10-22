@@ -198,6 +198,19 @@ class InspectTest : FunSpec({
         }
     }
 
+    test("a config problem under --config names the file that was read").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "a.mkv")
+        File(workDir, "season2.yaml").writeText("general:\n  title: \"\${epsiodeName}\"\n", StandardCharsets.UTF_8)
+
+        val run = inspect(workDir, "--config", "season2.yaml")
+
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldContain "*** Warning: season2.yaml has 1 substitution problem"
+        }
+    }
+
     // With nothing to probe there is nothing to report, so this is inspect's one fatal exit - as a message.
     test("a missing mkvmerge on PATH is a clean error").config(enabledOrReasonIf = posixOnly) {
         val workDir = tempdir()
