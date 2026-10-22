@@ -11,6 +11,7 @@ import org.plukh.mkvtool.core.AdditionalSource
 import org.plukh.mkvtool.core.Config
 import org.plukh.mkvtool.core.GeneralConfig
 import org.plukh.mkvtool.core.MainSourceConfig
+import org.plukh.mkvtool.core.SourceTrackConfig
 import org.plukh.mkvtool.core.Template
 import org.plukh.mkvtool.core.TrackConfig
 import org.plukh.mkvtool.core.VideoTrackConfig
@@ -108,6 +109,16 @@ class MuxCommandTest : FunSpec({
             muxConfigProblem(
                 config(sources = listOf(AdditionalSource(file = "a.mka"), AdditionalSource())),
             ) shouldBe "config.yaml has no file for additionalSources[1]"
+        }
+
+        test("an id on an additional-source track is refused, after a missing file") {
+            val withId = AdditionalSource(file = "a.mka", tracks = listOf(SourceTrackConfig(idDeclared = true)))
+
+            muxConfigProblem(config(sources = listOf(withId))) shouldBe
+                "config.yaml sets an id on additionalSources[0].tracks[0], which should be removed: " +
+                "an additional-source track is always track 0"
+            muxConfigProblem(config(sources = listOf(withId, AdditionalSource()))) shouldBe
+                "config.yaml has no file for additionalSources[1]"
         }
 
         test("a language or a title is genuinely optional, and neither is a problem") {

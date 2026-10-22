@@ -285,6 +285,11 @@ class InspectTest : FunSpec({
                 "bad token",
                 "mainSource:\n  videoTrack:\n    language: \"jpn\"\n    title: \"\${epsiodeName}\"\n",
             ),
+            // Refused outright by mux; here a counted warning like every other config problem.
+            BrokenFile(
+                "an id on an additional-source track",
+                "additionalSources:\n  - file: \"a.mka\"\n    tracks:\n      - id: 1\n        language: \"ru\"\n",
+            ),
         ) { row ->
             val workDir = tempdir()
             stageInput(workDir, "a.mkv")

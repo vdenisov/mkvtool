@@ -236,8 +236,8 @@ Where a file is not probed, or is probed but carries no language, the language i
 over a guess, field by field: an `.mka` with a language but no track name shows
 the real language and an empty name, not a guessed one. Codecs for unprobed files
 come from the extension, and the track id is `0`, which is what mkvmerge calls
-the single track of a raw subtitle or audio file — and therefore the id an
-`additionalSources` entry has to name.
+the single track of a raw subtitle or audio file — which is why an
+`additionalSources` track takes no `id`.
 
 `und` counts as *not tagged*, not as a language. Matroska has no other way to
 spell "no language set", and an untagged `.mka` is the common case in exactly the
@@ -465,7 +465,9 @@ visible effect at all.
 ### Additional sources
 
 Include tracks from extra files (audio dubs, external subtitles). Each
-additional source must contain exactly one track. Track ID is always 0.
+additional source must contain exactly one track. Track ID is always 0, so a
+track here takes no `id`: a config that sets one, even `id: 0`, is refused by
+`mux` and warned about by `inspect`.
 
 The `file` field takes the file-scope substitution variables above, resolved per
 episode. `${fileName}` — the base name, no extension, of the current main source

@@ -523,7 +523,7 @@ Omitting `audioTracks` or `subtitleTracks` (or setting them to `[]`) copies no t
 | `general.allowedExtensions` | Which file types count as main sources |
 | `mainSource.videoTrack` | Language and optional title override |
 | `mainSource.audioTracks[]`, `mainSource.subtitleTracks[]` | Track ids with language/title/default; `charset` is optional on subtitles |
-| `additionalSources[]` | Extra files to mux in; the track id is always 0 |
+| `additionalSources[]` | Extra files to mux in; the track id is always 0, and a config setting one is refused |
 | `trackOrder` | Optional `"sourceIndex:trackId"` CSV; see above |
 
 ### File selection and masks
@@ -634,8 +634,8 @@ is what gets *displayed*.
 Probed values win **field by field** over guesses: an `.mka` with a language but no track name shows the
 real language and an empty name, never a guessed one. **`und` counts as missing**, since Matroska has no
 other spelling for "untagged" and untagged dubs are the common case in exactly the releases this exists
-for. Unprobed files report track id **0**, which is what mkvmerge calls their single track and therefore
-what an `additionalSources` entry has to name.
+for. Unprobed files report track id **0**, which is what mkvmerge calls their single track, and which is
+why an `additionalSources` track takes no `id`.
 
 ### Language guessing
 
@@ -712,8 +712,9 @@ it found.
 Three config fields that were once dereferenced unconditionally are now refused or omitted rather than
 producing `null` in a command line: a missing `destinationDir` is a clean exit-2 error, a main-source
 track with no `id` is refused by config path, and a genuinely optional `videoTrack` field is *omitted* so
-mkvmerge keeps whatever the source carries. A **declared but empty** `title:` still emits
-`--track-name <id>:`, which clears the name deliberately.
+mkvmerge keeps whatever the source carries. An `id` on an additional-source track is refused as well,
+`id: 0` included: the value could only be ignored, so it would read as a decision that is not one. A
+**declared but empty** `title:` still emits `--track-name <id>:`, which clears the name deliberately.
 
 mkvmerge's own output is inherited rather than pumped through a reader, so its in-place progress line works
 as mkvmerge intended.

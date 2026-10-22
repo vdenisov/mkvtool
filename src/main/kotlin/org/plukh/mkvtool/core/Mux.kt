@@ -219,9 +219,10 @@ fun resolveUiLanguage(mkvmergeExe: String): String? =
 /**
  * Why [config] cannot be muxed with, or null when it can.
  *
- * Only the fields the command line cannot be built without are here — this is not schema validation. Each
- * of them is something v1 dereferenced unconditionally and either crashed on or turned into the literal
- * text `null` (a directory named `null`, a `--language 0:null`). Refusing up front, in the same sentence
+ * Only fields the command line cannot be built without, or would have to ignore, are here — this is not
+ * schema validation. The first kind v1 dereferenced unconditionally and either crashed on or turned into
+ * the literal text `null` (a directory named `null`, a `--language 0:null`); the second is an `id` on an
+ * additional-source track, which can only look like a decision. Refusing up front, in the same sentence
  * shape an unreadable config gets, is the honest version of the same answer.
  *
  * Deliberately *not* here: a track with no `language` or no `title`. Both are genuinely optional — mkvmerge
@@ -247,7 +248,7 @@ fun muxConfigProblem(config: Config): String? {
         if (source.file.isNullOrEmpty()) return "config.yaml has no file for additionalSources[$i]"
     }
 
-    return null
+    return additionalSourceIdProblems(config).firstOrNull()
 }
 
 /**
@@ -355,7 +356,7 @@ class MuxCommandBuilder(
         for (track in audio) {
             val id = track.id ?: continue
             command += languageOption(id, track.language)
-            command += trackNameOption(id, track) {
+            command += trackNameOption(id, track.title) {
                 expand(it, trackVarsFor(track.language, probedTrack(file, id)))
             }
             command += listOf("--default-track-flag", "$id:${flag(track.default)}")
@@ -364,7 +365,7 @@ class MuxCommandBuilder(
         for (track in subtitles) {
             val id = track.id ?: continue
             command += languageOption(id, track.language)
-            command += trackNameOption(id, track) {
+            command += trackNameOption(id, track.title) {
                 expand(it, trackVarsFor(track.language, probedTrack(file, id)))
             }
             if (track.charset != null) command += listOf("--sub-charset", "$id:${track.charset}")
@@ -376,10 +377,9 @@ class MuxCommandBuilder(
         for (source in config.additionalSources) {
             val path = expand(source.file)
             for (track in source.tracks) {
-                // Always 0, whatever the config wrote: mkvmerge sees a companion as a single-track file,
-                // and v1 hardcoded the id for that reason.
+                // Always 0, and the config cannot set it: mkvmerge sees a companion as a single-track file.
                 command += languageOption(COMPANION_TRACK_ID, track.language)
-                command += trackNameOption(COMPANION_TRACK_ID, track) {
+                command += trackNameOption(COMPANION_TRACK_ID, track.title) {
                     expand(it, trackVarsFor(track.language, companionTrack(path)))
                 }
                 if (track.charset != null) {
@@ -408,8 +408,8 @@ class MuxCommandBuilder(
      * value, which clears whatever name the source track carried — that distinction is what [Template]
      * exists for. v1 had no third case here: it called `toString()` on the absent title and threw.
      */
-    private fun trackNameOption(id: Int, track: TrackConfig, expand: (String?) -> String): List<String> {
-        val title = track.title ?: return emptyList()
+    private fun trackNameOption(id: Int, title: Template?, expand: (String?) -> String): List<String> {
+        if (title == null) return emptyList()
         return listOf("--track-name", "$id:${expand(title.text)}")
     }
 

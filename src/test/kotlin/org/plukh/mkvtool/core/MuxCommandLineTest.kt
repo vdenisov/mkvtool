@@ -165,9 +165,7 @@ class MuxCommandLineTest : FunSpec({
                 additionalSources = listOf(
                     AdditionalSource(
                         file = "\${fileName}[Studio].mka",
-                        // A declared id is ignored: mkvmerge sees a companion as a single-track file, and
-                        // v1 hardcoded 0 for that reason.
-                        tracks = listOf(TrackConfig(id = 7, language = "ru", title = Template("Studio Dub"))),
+                        tracks = listOf(SourceTrackConfig(language = "ru", title = Template("Studio Dub"))),
                         additionalOptions = listOf("--no-chapters"),
                     ),
                 ),
@@ -268,7 +266,7 @@ class MuxCommandLineTest : FunSpec({
                 additionalSources = listOf(
                     AdditionalSource(
                         file = "missing.mka",
-                        tracks = listOf(TrackConfig(language = "ru", title = Template("\${codec}"))),
+                        tracks = listOf(SourceTrackConfig(language = "ru", title = Template("\${codec}"))),
                     ),
                 ),
             ).commandFor(

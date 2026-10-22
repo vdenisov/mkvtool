@@ -7,6 +7,7 @@ import org.plukh.mkvtool.core.MappingLoad
 import org.plukh.mkvtool.core.MkvToolNotFoundException
 import org.plukh.mkvtool.core.StrictVerdict
 import org.plukh.mkvtool.core.SubstitutionEngine
+import org.plukh.mkvtool.core.additionalSourceIdProblems
 import org.plukh.mkvtool.core.collectTemplateFields
 import org.plukh.mkvtool.core.findMkvTool
 import org.plukh.mkvtool.core.inspectDirectory
@@ -133,6 +134,12 @@ class InspectCommand : Callable<Int> {
             }
         } else if (configPath != null) {
             renderer.render(Warning("Config file not found: ${configFile.absolutePath} - continuing without it."))
+            configProblems++
+        }
+
+        // Fatal in mux; here the id simply has no effect on anything inspect reports.
+        config?.let(::additionalSourceIdProblems)?.forEach {
+            renderer.render(Warning("$it; ignoring the id."))
             configProblems++
         }
 

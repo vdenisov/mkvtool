@@ -233,7 +233,7 @@ class InspectTest : FunSpec({
             row.guessed shouldBe false
         }
 
-        test("an unprobed file gets track id 0 — the id an additionalSources entry must name") {
+        test("an unprobed file gets track id 0 — the track an additionalSources entry refers to") {
             val listing = externalRowsOf("ass", languageGuess = null, probed = null)
 
             val row = listing.shouldBeInstanceOf<ExternalListing.Tracks>().tracks.single()
