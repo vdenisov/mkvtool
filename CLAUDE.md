@@ -736,8 +736,9 @@ printing the resolved path plus a probed sub-table. Never fatal: a source that i
 grouped **by variant, not by file**, and everything on the page shares one column grid at a two-space
 indent, so the columns line up straight down the report.
 
-An empty batch returns before the `--strict` gate, and that condition is explicit in the code rather than
-an accident of control flow.
+`--strict` fails on config problems whether or not the batch is empty: a problem belongs to the config, not
+to the files, so a script gating on `inspect --strict` must not pass a broken config because the directory
+held no media.
 
 ### `rename` and `--external`
 

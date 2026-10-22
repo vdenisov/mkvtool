@@ -180,11 +180,8 @@ class InspectCommand : Callable<Int> {
             probe = { probeFile(it, mkvmergeExe) },
         )
 
-        // An empty batch has already returned its own advisory, and there is nothing for strictness to be
-        // strict about — v1 returns before this point in that case, so a broken config there still exits 0.
-        if (strict && report.mediaFiles.isNotEmpty() &&
-            (report.blockingCount > 0 || report.configProblems > 0)
-        ) {
+        // Config problems count in an empty batch too: they belong to the config, not to the files.
+        if (strict && (report.blockingCount > 0 || report.configProblems > 0)) {
             renderer.render(StrictVerdict(report.blockingCount, report.configProblems))
             return 2
         }
