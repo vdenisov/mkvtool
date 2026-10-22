@@ -9,7 +9,7 @@ import org.plukh.mkvtool.e2e.support.mkvtool
 import org.plukh.mkvtool.e2e.support.stageExternalText
 import org.plukh.mkvtool.e2e.support.writeBytes
 
-/** `find-unused-fonts` lists the fonts under `fonts/` that no `.ass` subtitle in the directory mentions. */
+/** `find-unused-fonts` lists the fonts under `fonts/` that no `.ass` or `.ssa` subtitle in the directory mentions. */
 class FindUnusedFontsTest : FunSpec({
 
     test("only the font no subtitle references is listed").config(tags = setOf(Smoke)) {

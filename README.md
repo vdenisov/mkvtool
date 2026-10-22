@@ -115,7 +115,7 @@ documents one command's options.
 | `propedit` | Batch-runs `mkvpropedit` over every MKV in the current directory, passing your arguments through — fix any property (track names, forced/default flags, …) without a full remux. |
 | `to-utf8` | Converts `.srt`/`.ass`/`.ssa`/`.vtt` subtitles to UTF-8 in place, from `--encoding` (default Windows-1251). Skips files that are already UTF-8; `--backup` keeps the originals. |
 | `fix-srt` | Converts subtitles in a non-standard timing format into valid SRT (writes `<name>.srt.fixed`). A malformed file is reported and skipped rather than stopping the batch. |
-| `find-unused-fonts` | Lists font files in `fonts/` that are not referenced by any `.ass` subtitle in the current directory. |
+| `find-unused-fonts` | Lists font files in `fonts/` that are not referenced by any `.ass` or `.ssa` subtitle in the current directory. |
 
 ### fetch-episodes
 

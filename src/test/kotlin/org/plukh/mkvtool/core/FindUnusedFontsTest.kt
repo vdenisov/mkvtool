@@ -84,6 +84,38 @@ class FindUnusedFontsTest : FunSpec({
             report.unusedFonts shouldContainExactly listOf("Comic", "Verdana")
         }
 
+        context("a subtitle is selected by its extension, .ass or .ssa in any case") {
+            data class SelectionCase(val fileName: String, val scanned: Boolean)
+
+            withData(
+                nameFn = { "${it.fileName} is ${if (it.scanned) "" else "not "}scanned" },
+                SelectionCase("ep.ass", true),
+                SelectionCase("ep.ssa", true),
+                SelectionCase("EP.ASS", true),
+                SelectionCase("Ep.Ssa", true),
+                SelectionCase("bass", false),
+                SelectionCase("ep.ass.bak", false),
+                SelectionCase("notes.txt", false),
+            ) { (fileName, scanned) ->
+                val dir = tempdir()
+                File(dir, fileName).writeText("Style: Default,Arial,20\n")
+                File(dir, "fonts").mkdir()
+                File(dir, "fonts/Arial.ttf").writeText("x")
+
+                findUnusedFonts(dir, FontsSilentRenderer).unusedFonts shouldBe
+                    if (scanned) emptyList() else listOf("Arial")
+            }
+        }
+
+        test("a directory with a subtitle extension is skipped, not read") {
+            val dir = tempdir()
+            File(dir, "extras.ass").mkdir()
+            File(dir, "fonts").mkdir()
+            File(dir, "fonts/Arial.ttf").writeText("x")
+
+            findUnusedFonts(dir, FontsSilentRenderer).unusedFonts shouldContainExactly listOf("Arial")
+        }
+
         test("a missing fonts/ directory yields an advisory and an empty report, not a crash") {
             val dir = tempdir()
             File(dir, "ep.ass").writeText("Style: Default,Arial,20\n")
