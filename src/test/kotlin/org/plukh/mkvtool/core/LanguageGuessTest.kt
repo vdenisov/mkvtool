@@ -45,6 +45,8 @@ class LanguageGuessTest : FunSpec({
             Case("an English name", listOf("English subs"), "eng"),
             Case("an English name of a language written elsewhere", listOf("Chinese Simplified subs"), "chi"),
             Case("a German native name", listOf("Deutsch"), "ger"),
+            // Devanagari vowel signs and the virama are combining marks, not letters.
+            Case("a native name written with combining marks is one word", listOf("हिन्दी"), "hin"),
             // The only multi-word name in the curated set, and therefore the one case that exercises
             // matching runs of words after every single word has been tried.
             Case("a two-word native name matches as a run", listOf("Tiếng Việt subs"), "vie"),

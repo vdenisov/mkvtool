@@ -642,8 +642,9 @@ why an `additionalSources` track takes no `id`.
 
 Spellings are **derived from CLDR at load time** rather than typed out: for each of a curated list of
 codes, `Locale` supplies the three-letter code, the English name and the native name, which is what makes
-`Русский` and `日本語` work as folder names. Matching is whole-word over Unicode letters, with multi-word
-names tried as runs after single words.
+`Русский` and `日本語` work as folder names. Matching is whole-word over Unicode letters and their combining
+marks — without the marks, Devanagari's vowel signs split `हिन्दी` apart — with multi-word names tried as
+runs after single words.
 
 The list is curated because obscure codes collide with ordinary English words (`new` is Newari, `sun`
 Sundanese), and the bare two-letter form is withheld for codes that are ordinary words themselves — `No
