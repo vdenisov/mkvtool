@@ -786,10 +786,6 @@ Passthrough survives picocli via `unmatchedOptionsArePositionalParams`, set on t
 place; the command declares one catch-all parameter list and *no* options, not even `--color`. `-h`/
 `--help` is intercepted only when it is the sole argument.
 
-It reconstructs the target as `<base>.mkv` rather than using the file's own name, which lower-cases the
-extension — a quirk inherited from v1 and pinned as it stands, mattering on a case-sensitive filesystem
-holding `Show.MKV`, which the command's own case-insensitive selection will have picked up.
-
 ### `fetch-episodes`
 
 The API key resolves as `--api-key`, then `apikey.txt` in the current directory, then

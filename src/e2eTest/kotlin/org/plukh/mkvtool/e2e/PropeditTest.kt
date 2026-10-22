@@ -39,6 +39,16 @@ class PropeditTest : FunSpec({
         probe(input).containerTitle shouldBe "SmokeTest"
     }
 
+    test("a file with an upper-case extension is edited under its own name")
+        .config(enabledOrReasonIf = needsMkvpropedit) {
+        val workDir = tempdir()
+        val input = stageInput(workDir, "test.MKV")
+
+        val run = mkvtool("propedit", "--edit", "info", "--set", "title=Upper", workDir = workDir)
+        run.exitCode shouldBe 0
+        probe(input).containerTitle shouldBe "Upper"
+    }
+
     test("no arguments prints usage and touches nothing") {
         val workDir = tempdir()
         val input = stageInput(workDir)
