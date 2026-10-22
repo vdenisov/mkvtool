@@ -71,17 +71,20 @@ private val BIBLIOGRAPHIC = mapOf(
 /** Every spelling of every curated language, lower-cased, mapped to the code a match reports. */
 private val LANGUAGE_BY_TOKEN: Map<String, String> = buildLanguageTokens()
 
-/** Anything that is not a letter or a digit separates words. Splitting on this keeps Cyrillic and CJK
- *  names intact, which is the point of carrying native names at all. */
-private val WORD_SEPARATOR = Regex("""[^\p{L}\p{N}]+""")
+/** Anything that is not a letter, a combining mark or a digit separates words. Splitting on this keeps
+ *  Cyrillic, CJK and Devanagari (हिन्दी, whose vowel signs are marks) names intact, which is the point of
+ *  carrying native names at all. */
+private val WORD_SEPARATOR = Regex("""[^\p{L}\p{M}\p{N}]+""")
 
 /**
  * The language [texts] describe, or null when none of them says.
  *
  * Texts are tried **in order**, so the caller decides precedence: a suffix or the file's own directory
  * describes it better than a category directory three levels up. Within one text, single words are tried
- * first and only then runs of two and three, so a name of more than one word ("norsk bokmål") still
- * matches without a single word of a longer name winning first.
+ * first and only then runs of two and three, so a name of more than one word ("tiếng việt") still
+ * matches without a single word of a longer name winning first. On JDK 21's CLDR that Vietnamese name is
+ * the only curated one longer than a word, so the three-word run cannot fire today; it stays three wide on
+ * purpose, so a CLDR update that lengthens a name keeps matching with no change here.
  *
  * Matching is on whole words, never substrings: "Ru subs" and "Rus.subs" are Russian, "Rusubs" is not.
  * Without that rule a short code would fire on any release group or show title that happened to contain
