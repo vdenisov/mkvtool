@@ -226,7 +226,7 @@ class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRend
                     "${duplicate.language} / ${duplicate.codec} with $name, " +
                     "in ${plural(duplicate.fileNames.size, "file")}."
             )
-            out.println("    ID-based selection cannot distinguish them; check which one config.yaml means.")
+            out.println("    ID-based selection cannot distinguish them; check which one the config means.")
         }
         out.println()
     }
@@ -278,7 +278,7 @@ class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRend
                 style.yellow(
                     "*** ${plural(blocking.size, "discrepancy", "discrepancies")} " +
                         (if (blocking.size == 1) "affects a track" else "affect tracks") +
-                        " that config.yaml selects:"
+                        " that the config selects:"
                 )
             )
             blocking.forEach { out.println("      ${describe(it)}") }
@@ -310,7 +310,7 @@ class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRend
                 "${differs(finding.varying)} across ${finding.groupCount} groups"
         is AmbiguousTracksFinding -> {
             val selects = if (finding.selectedIds.isNotEmpty()) {
-                " and config.yaml selects ${pluralize(finding.selectedIds.size, "track")} " +
+                " and the config selects ${pluralize(finding.selectedIds.size, "track")} " +
                     finding.selectedIds.joinToString(", ")
             } else {
                 ""

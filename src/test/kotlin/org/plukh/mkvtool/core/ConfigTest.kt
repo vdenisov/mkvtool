@@ -6,6 +6,7 @@ import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.types.shouldBeInstanceOf
 import java.io.File
 
@@ -197,7 +198,7 @@ class ConfigTest : FunSpec({
                 ),
             )
 
-            additionalSourceIdProblems(config) shouldBe listOf(
+            additionalSourceIdProblems(config, "config.yaml") shouldBe listOf(
                 "config.yaml sets an id on additionalSources[0].tracks[0], which should be removed: " +
                     "an additional-source track is always track 0",
                 "config.yaml sets an id on additionalSources[1].tracks[1], which should be removed: " +
@@ -205,9 +206,21 @@ class ConfigTest : FunSpec({
             )
         }
 
+        test("a line names the file the config was read from") {
+            val config = Config(
+                additionalSources = listOf(
+                    AdditionalSource(file = "a.mka", tracks = listOf(SourceTrackConfig(idDeclared = true))),
+                ),
+            )
+
+            additionalSourceIdProblems(config, "season2.yaml").single() shouldStartWith
+                "season2.yaml sets an id on additionalSources[0].tracks[0]"
+        }
+
         test("a config with no ids on its additional sources has no problem") {
             additionalSourceIdProblems(
                 Config(additionalSources = listOf(AdditionalSource(file = "a.mka", tracks = listOf(SourceTrackConfig())))),
+                "config.yaml",
             ).shouldBeEmpty()
         }
     }

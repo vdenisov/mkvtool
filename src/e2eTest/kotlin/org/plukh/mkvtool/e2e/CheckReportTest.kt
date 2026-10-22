@@ -235,7 +235,7 @@ class CheckReportTest : FunSpec({
 
             withClue(run.output) {
                 run.exitCode shouldBe 0
-                run.output.contains("config.yaml selects:") shouldBe row.blocking
+                run.output.contains("the config selects:") shouldBe row.blocking
                 run.output.contains("informational") shouldBe !row.blocking
                 if (row.blocking) run.output shouldContain "track 2"
             }
@@ -351,7 +351,7 @@ class CheckReportTest : FunSpec({
             run.output shouldContain "difference"
             run.output shouldContain "across the batch"
             run.output shouldContain "Add a config"
-            run.output shouldNotContain "config.yaml selects"
+            run.output shouldNotContain "the config selects"
         }
         outputDir(workDir).exists() shouldBe false
     }

@@ -73,7 +73,7 @@ class MuxCommand : Callable<Int> {
         names = ["--strict"],
         description = [
             "Abort instead of warning when the consistency check finds a discrepancy affecting a track " +
-                "that config.yaml selects",
+                "that the config selects",
         ],
     )
     var strict: Boolean = false
@@ -103,12 +103,15 @@ class MuxCommand : Callable<Int> {
         val renderer = output.renderer()
         val dir = File(".")
 
-        val config = loadOrRefuse(dir, renderer) ?: return 2
+        val configFile = configPath?.let(::File) ?: File(dir, "config.yaml")
+        // As the user wrote it: a bare name would make --config ../s1/config.yaml read as the local file.
+        val configName = configPath ?: "config.yaml"
+        val config = loadOrRefuse(configFile, dir, renderer) ?: return 2
 
         // Fields the command line cannot be built without, or would have to ignore. Refused in the same
         // sentence shape an unreadable config gets, because it is the same answer: this config cannot be
         // muxed with.
-        muxConfigProblem(config)?.let {
+        muxConfigProblem(config, configName)?.let {
             renderer.render(Error("$it; there is nothing to mux with."))
             return 2
         }
@@ -135,7 +138,7 @@ class MuxCommand : Callable<Int> {
         // otherwise be stamped verbatim into the track names of an entire season. What comes back is which
         // variables the config actually uses, so everything derived from them stays gated.
         val validation = validateTemplates(collectTemplateFields(config))
-        reportTemplateProblems(validation, renderer, fatal = true)
+        reportTemplateProblems(validation, configName, renderer, fatal = true)
         if (validation.problems > 0) return 2
 
         // Resolved once rather than per file, so its warnings are printed once.
@@ -176,9 +179,7 @@ class MuxCommand : Callable<Int> {
     }
 
     /** The config, or null after saying why there is none to mux with. */
-    private fun loadOrRefuse(dir: File, renderer: Renderer): Config? {
-        val configFile = configPath?.let(::File) ?: File(dir, "config.yaml")
-
+    private fun loadOrRefuse(configFile: File, dir: File, renderer: Renderer): Config? {
         if (configFile.isFile) {
             return when (val load = loadConfig(configFile)) {
                 is MappingLoad.Loaded -> load.value

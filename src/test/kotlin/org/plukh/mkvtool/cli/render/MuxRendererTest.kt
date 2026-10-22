@@ -153,7 +153,7 @@ class MuxRendererTest : FunSpec({
             ).lf()
 
             err shouldBe "*** Strict mode: aborting (2 discrepancies affecting selected tracks).\n" +
-                "*** Nothing was muxed. Fix config.yaml or the inputs, or drop --strict to continue.\n"
+                "*** Nothing was muxed. Fix the config or the inputs, or drop --strict to continue.\n"
             out shouldBe ""
         }
 

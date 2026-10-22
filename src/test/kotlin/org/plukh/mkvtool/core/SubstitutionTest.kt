@@ -386,13 +386,20 @@ class SubstitutionTest : FunSpec({
         test("says nothing when there is nothing to say") {
             report(validateTemplates(emptyList()), fatal = true) shouldBe ""
         }
+
+        test("names the file the templates were read from") {
+            val validation = validateTemplates(fieldsOf(mapOf("general" to mapOf("title" to "\${nope}"))))
+
+            report(validation, fatal = false, configName = "season2.yaml") shouldContain
+                "*** Warning: season2.yaml has 1 substitution problem:"
+        }
     }
 })
 
-private fun report(validation: TemplateValidation, fatal: Boolean): String {
+private fun report(validation: TemplateValidation, fatal: Boolean, configName: String = "config.yaml"): String {
     val buffer = ByteArrayOutputStream()
     val stream = PrintStream(buffer, true, Charsets.UTF_8)
-    reportTemplateProblems(validation, TextRenderer(ColorMode.NEVER, stream, stream), fatal)
+    reportTemplateProblems(validation, configName, TextRenderer(ColorMode.NEVER, stream, stream), fatal)
     return buffer.toString(Charsets.UTF_8)
 }
 

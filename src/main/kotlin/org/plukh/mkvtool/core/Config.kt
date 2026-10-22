@@ -142,15 +142,16 @@ fun parseConfig(mapping: Map<*, *>): Config {
 }
 
 /**
- * One line per additional-source track that sets an `id`, naming it by config path. Any value is refused,
- * `0` included: the key cannot change what mkvmerge addresses, so it only ever looks like a decision. Each
- * caller applies its own config-problem policy.
+ * One line per additional-source track that sets an `id`, naming it by config path and starting with
+ * [configName], the config file as the user named it. Any value is refused, `0` included: the key cannot
+ * change what mkvmerge addresses, so it only ever looks like a decision. Each caller applies its own
+ * config-problem policy.
  */
-fun additionalSourceIdProblems(config: Config): List<String> =
+fun additionalSourceIdProblems(config: Config, configName: String): List<String> =
     config.additionalSources.flatMapIndexed { i, source ->
         source.tracks.mapIndexedNotNull { j, track ->
             if (track.idDeclared) {
-                "config.yaml sets an id on additionalSources[$i].tracks[$j], which should be removed: " +
+                "$configName sets an id on additionalSources[$i].tracks[$j], which should be removed: " +
                     "an additional-source track is always track 0"
             } else {
                 null

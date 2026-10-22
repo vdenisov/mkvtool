@@ -76,7 +76,7 @@ that carry it:
     1    video  AVC/H.264/MPEG-4p10  und   no   no   Video
     2    audio  AAC                  jpn   yes  no   Audio A
 
-*** 1 discrepancy affects a track that config.yaml selects:
+*** 1 discrepancy affects a track that the config selects:
       2 files use a different track layout, at selected tracks 0, 1, 2
 ```
 

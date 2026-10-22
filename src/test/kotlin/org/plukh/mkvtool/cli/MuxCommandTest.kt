@@ -7,6 +7,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
 import org.plukh.mkvtool.core.AdditionalSource
 import org.plukh.mkvtool.core.Config
 import org.plukh.mkvtool.core.GeneralConfig
@@ -80,17 +81,28 @@ class MuxCommandTest : FunSpec({
 
     context("fields the command line cannot be built without") {
         test("a config with everything it needs has no problem") {
-            muxConfigProblem(config()) shouldBe null
+            muxConfigProblem(config(), "config.yaml") shouldBe null
         }
 
         test("no destinationDir is refused, rather than writing into a directory named 'null'") {
             // v1 composed the output path from the absent value and created exactly that directory.
-            muxConfigProblem(config(destinationDir = null)) shouldBe "config.yaml has no general.destinationDir"
-            muxConfigProblem(config(destinationDir = "")) shouldBe "config.yaml has no general.destinationDir"
+            muxConfigProblem(config(destinationDir = null), "config.yaml") shouldBe
+                "config.yaml has no general.destinationDir"
+            muxConfigProblem(config(destinationDir = ""), "config.yaml") shouldBe
+                "config.yaml has no general.destinationDir"
+        }
+
+        test("a reason names the file the config was actually read from") {
+            // Under --config season2.yaml, "config.yaml" would send the reader to a file they did not pass.
+            muxConfigProblem(config(destinationDir = null), "season2.yaml") shouldBe
+                "season2.yaml has no general.destinationDir"
+            val withId = AdditionalSource(file = "a.mka", tracks = listOf(SourceTrackConfig(idDeclared = true)))
+            muxConfigProblem(config(sources = listOf(withId)), "season2.yaml")!! shouldStartWith
+                "season2.yaml sets an id"
         }
 
         test("a destination that is the current directory is the caller's business, not a problem") {
-            muxConfigProblem(config(destinationDir = ".")) shouldBe null
+            muxConfigProblem(config(destinationDir = "."), "config.yaml") shouldBe null
         }
 
         test("a track with no id is refused, and the offending entry is named by its config path") {
@@ -98,34 +110,37 @@ class MuxCommandTest : FunSpec({
             // addresses a number that is not there.
             muxConfigProblem(
                 config(audio = listOf(TrackConfig(id = 1), TrackConfig(language = "en"))),
+                "config.yaml",
             ) shouldBe "config.yaml has no id for mainSource.audioTracks[1]"
 
             muxConfigProblem(
                 config(subtitles = listOf(TrackConfig(language = "en"))),
+                "config.yaml",
             ) shouldBe "config.yaml has no id for mainSource.subtitleTracks[0]"
         }
 
         test("an additional source with no file is refused too") {
             muxConfigProblem(
                 config(sources = listOf(AdditionalSource(file = "a.mka"), AdditionalSource())),
+                "config.yaml",
             ) shouldBe "config.yaml has no file for additionalSources[1]"
         }
 
         test("an id on an additional-source track is refused, after a missing file") {
             val withId = AdditionalSource(file = "a.mka", tracks = listOf(SourceTrackConfig(idDeclared = true)))
 
-            muxConfigProblem(config(sources = listOf(withId))) shouldBe
+            muxConfigProblem(config(sources = listOf(withId)), "config.yaml") shouldBe
                 "config.yaml sets an id on additionalSources[0].tracks[0], which should be removed: " +
                 "an additional-source track is always track 0"
-            muxConfigProblem(config(sources = listOf(withId, AdditionalSource()))) shouldBe
+            muxConfigProblem(config(sources = listOf(withId, AdditionalSource())), "config.yaml") shouldBe
                 "config.yaml has no file for additionalSources[1]"
         }
 
         test("a language or a title is genuinely optional, and neither is a problem") {
             // mkvmerge keeps whatever the source track carries, so the builder omits the option instead of
             // inventing a value — which is why these are not in the refusal list.
-            muxConfigProblem(config(audio = listOf(TrackConfig(id = 1)))) shouldBe null
-            muxConfigProblem(config(videoTrack = null)) shouldBe null
+            muxConfigProblem(config(audio = listOf(TrackConfig(id = 1))), "config.yaml") shouldBe null
+            muxConfigProblem(config(videoTrack = null), "config.yaml") shouldBe null
         }
     }
 })

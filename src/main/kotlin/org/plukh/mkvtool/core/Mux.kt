@@ -207,7 +207,8 @@ fun resolveUiLanguage(mkvmergeExe: String): String? =
     listOf("en", "en_US").firstOrNull { runs(mkvmergeExe, "--ui-language", it, "--version") }
 
 /**
- * Why [config] cannot be muxed with, or null when it can.
+ * Why [config] cannot be muxed with, or null when it can. The reason starts with [configName], the config
+ * file as the user named it.
  *
  * Only fields the command line cannot be built without, or would have to ignore, are here — this is not
  * schema validation. The first kind v1 dereferenced unconditionally and either crashed on or turned into
@@ -218,8 +219,8 @@ fun resolveUiLanguage(mkvmergeExe: String): String? =
  * Deliberately *not* here: a track with no `language` or no `title`. Both are genuinely optional — mkvmerge
  * keeps whatever the source track carries — so the builder omits the option instead of inventing a value.
  */
-fun muxConfigProblem(config: Config): String? {
-    if (config.general.destinationDir.isNullOrEmpty()) return "config.yaml has no general.destinationDir"
+fun muxConfigProblem(config: Config, configName: String): String? {
+    if (config.general.destinationDir.isNullOrEmpty()) return "$configName has no general.destinationDir"
 
     for ((key, tracks) in listOf(
         "audioTracks" to config.mainSource.audioTracks,
@@ -228,17 +229,17 @@ fun muxConfigProblem(config: Config): String? {
         tracks.forEachIndexed { i, track ->
             // Without an id there is no track to select, name or order: every option mkvmerge would be
             // handed for it addresses a number that is not there.
-            if (track.id == null) return "config.yaml has no id for mainSource.$key[$i]"
+            if (track.id == null) return "$configName has no id for mainSource.$key[$i]"
         }
     }
 
     config.additionalSources.forEachIndexed { i, source ->
         // A source with no file is nothing to mux: v1 threw on it, and passing mkvmerge an empty argument
         // between its parentheses would be a worse answer than saying so.
-        if (source.file.isNullOrEmpty()) return "config.yaml has no file for additionalSources[$i]"
+        if (source.file.isNullOrEmpty()) return "$configName has no file for additionalSources[$i]"
     }
 
-    return additionalSourceIdProblems(config).firstOrNull()
+    return additionalSourceIdProblems(config, configName).firstOrNull()
 }
 
 /**
