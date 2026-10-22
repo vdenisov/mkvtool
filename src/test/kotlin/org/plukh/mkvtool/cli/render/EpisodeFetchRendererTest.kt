@@ -10,7 +10,7 @@ import org.plukh.mkvtool.core.ShowFetched
 import org.plukh.mkvtool.core.TranslationFallback
 
 /**
- * Pins the v1 text of every `fetch-episodes` line. All three go to stdout uncolored, as v1's bare
+ * Pins the text of every `fetch-episodes` line. All three go to stdout uncolored, as v1's bare
  * `println`s did — only the surrounding banner and the closing `*** Done` carry color, and both are
  * diagnostics rather than results.
  */
@@ -39,8 +39,9 @@ class EpisodeFetchRendererTest : FunSpec({
         out shouldNotContain "The show is"
     }
 
-    test("the count is not pluralized against its number, exactly as v1 writes it") {
-        renderResult(EpisodeFetchRenderer, fetch(episodes = 1)).first shouldContain "*** Fetched 1 episode names"
+    test("a single episode reads in the singular") {
+        renderResult(EpisodeFetchRenderer, fetch(episodes = 1)).first shouldContain
+            "*** Fetched 1 episode name${System.lineSeparator()}"
     }
 })
 
