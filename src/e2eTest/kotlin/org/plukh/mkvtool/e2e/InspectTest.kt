@@ -163,6 +163,39 @@ class InspectTest : FunSpec({
         }
     }
 
+    // A config problem belongs to the config, not to the batch, so an empty directory must not mask it from
+    // a script gating on --strict - nor turn into a failure of its own.
+    context("--strict in an empty directory fails on config problems alone").config(enabledOrReasonIf = needsMkvmerge) {
+        withData(
+            nameFn = { it.label },
+            EmptyStrictRow("no config", null, emptyList(), exitCode = 0),
+            EmptyStrictRow("a valid config", cfg(), emptyList(), exitCode = 0),
+            EmptyStrictRow(
+                "a malformed config",
+                "general:\n  destinationDir: mkv\n   bad indent: [\n",
+                emptyList(),
+                exitCode = 2,
+            ),
+            EmptyStrictRow(
+                "a --config path that does not exist",
+                null,
+                listOf("--config", "missing.yaml"),
+                exitCode = 2,
+            ),
+        ) { row ->
+            val workDir = tempdir()
+            row.config?.let { writeConfig(workDir, it) }
+
+            val run = inspect(workDir, "--strict", *row.args.toTypedArray())
+
+            withClue(run.output) {
+                run.exitCode shouldBe row.exitCode
+                run.output shouldContain "No media files"
+                run.output.contains("config problem") shouldBe (row.exitCode == 2)
+            }
+        }
+    }
+
     test("a mask matching only non-media files says so").config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()
         File(workDir, "notes.txt").writeText("not media", StandardCharsets.UTF_8)
@@ -400,6 +433,9 @@ class InspectTest : FunSpec({
 
 /** One mode of a bare-versus-`--identify` run: which of the two outputs it must print. */
 private class ModeRow(val label: String, val args: List<String>, val check: Boolean, val table: Boolean)
+
+/** An empty directory under `--strict`: the config it holds or names, and the exit that earns. */
+private class EmptyStrictRow(val label: String, val config: String?, val args: List<String>, val exitCode: Int)
 
 /** A hand-editable file in one of the ways it breaks. */
 private class BrokenFile(val label: String, val text: String)

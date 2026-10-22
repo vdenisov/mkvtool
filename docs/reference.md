@@ -39,7 +39,8 @@ run continues without it — inspection is the thing you reach for *because*
 something is wrong, so it does not refuse to describe your files over a config it
 was not required to have in the first place. Under `--strict` those same problems
 exit 2, since the report was then classified without the selections the config
-was supposed to supply.
+was supposed to supply. That holds in a directory with no media files too: the
+problem belongs to the config, not to the batch.
 
 ## Reading the consistency check report
 
