@@ -55,6 +55,13 @@ class FetchEpisodesTest : FunSpec({
             // The season goes into the request path as written, so padding is preserved rather than
             // normalized — v1 built the URL from the string and only the YAML from the number.
             Case("a padded season stays as written", "1920", "07", ShowRef.Resolved("1920", "07")),
+            Case("season 0, the specials, is a season", "1920", "0", ShowRef.Resolved("1920", "0")),
+            Case(
+                "a specials season URL supplies season 0",
+                "https://www.themoviedb.org/tv/1920-twin-peaks/season/0",
+                null,
+                ShowRef.Resolved("1920", "0"),
+            ),
         ) { (_, showId, season, expected) ->
             resolveShowRef(showId, season) shouldBe expected
         }
@@ -294,6 +301,45 @@ class FetchEpisodesTest : FunSpec({
 
             fetchEpisodes(dir, fetcher, "1", "1", null, SilentRenderer).episodes shouldBe
                 listOf(FetchedEpisode(11, "Eleven"), FetchedEpisode(13, "Thirteen"))
+        }
+
+        test("episode 0 is a real number, kept beside episode 1, and season 0 is written as such") {
+            val dir = tempdir()
+            val fetcher = fakeFetcher(
+                "/3/tv/1" to """{"name":"Stub"}""",
+                "/3/tv/1/season/0" to
+                    """{"episodes":[{"episode_number":0,"name":"Special"},{"episode_number":1,"name":"One"}]}""",
+            )
+
+            fetchEpisodes(dir, fetcher, "1", "0", null, SilentRenderer).episodes shouldBe
+                listOf(FetchedEpisode(0, "Special"), FetchedEpisode(1, "One"))
+
+            val yaml = Yaml().load<Map<String, Any>>(File(dir, "episodes.yaml").readText(Charsets.UTF_8))
+            yaml["season"] shouldBe 0
+            @Suppress("UNCHECKED_CAST")
+            (yaml["episodes"] as List<Map<String, Any>>).map { it["episode"] } shouldBe listOf(0, 1)
+        }
+
+        test("an untranslated episode 0 is filled with its own en-US name, not episode 1's") {
+            val dir = tempdir()
+            val fetcher = TmdbFetcher { path, locale ->
+                when {
+                    !path.contains("season") -> """{"name":"Stub"}"""
+                    locale == "ru-RU" -> """
+                        {"name":"Спецвыпуски","episodes":[
+                          {"episode_number":0,"name":""},{"episode_number":1,"name":"Первый"}
+                        ]}
+                    """.trimIndent()
+                    else -> """
+                        {"name":"Specials","episodes":[
+                          {"episode_number":0,"name":"Special"},{"episode_number":1,"name":"One"}
+                        ]}
+                    """.trimIndent()
+                }
+            }
+
+            fetchEpisodes(dir, fetcher, "1", "0", "ru-RU", SilentRenderer).episodes shouldBe
+                listOf(FetchedEpisode(0, "Special"), FetchedEpisode(1, "Первый"))
         }
 
         test("a season with no episodes is an error, not an empty pair of files") {

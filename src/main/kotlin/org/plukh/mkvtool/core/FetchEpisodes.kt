@@ -175,8 +175,9 @@ fun fetchEpisodes(
 
     val episodes = seasonData.episodes.mapIndexed { index, episode ->
         // A real response always numbers its episodes; falling back on the position keeps a truncated
-        // payload from writing an episodes.yaml with no usable numbers in it at all.
-        val number = episode.episodeNumber?.takeIf { it != 0 } ?: (index + 1)
+        // payload from writing an episodes.yaml with no usable numbers in it at all. Only an absent number
+        // qualifies: 0 is a real one, which specials carry.
+        val number = episode.episodeNumber ?: (index + 1)
         val fallbackName = fallbackSeason?.episodes?.firstOrNull { it.episodeNumber == number }?.name
         FetchedEpisode(number, episode.name.orEmpty().ifEmpty { fallbackName.orEmpty() })
     }

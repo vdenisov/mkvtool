@@ -206,6 +206,31 @@ class FetchEpisodesTest : FunSpec({
         names.filter { '?' in it || '�' in it } shouldBe emptyList()
     }
 
+    test("a specials season keeps episode 0 through fetch and rename") {
+        val workDir = tempdir()
+        stageInput(workDir, "S00E00.mkv")
+        stageInput(workDir, "S00E01.mkv")
+        val routes = tmdbRoutes(
+            2260, "Stub Show", "2006-07-07", 0, listOf("Unaired Pilot", "Behind the Scenes"), firstEpisode = 0,
+        )
+
+        val fetch = withStubServer(routes) { baseUrl ->
+            mkvtool("fetch-episodes", *stubArgs(baseUrl), "--show-id", "2260", "--season", "0", workDir = workDir)
+        }
+        withClue(fetch.output) { fetch.exitCode shouldBe 0 }
+
+        val yaml = loadEpisodesYaml(workDir)
+        yaml.season shouldBe "00"
+        yaml.byEpisode.keys.toList() shouldBe listOf("00", "01")
+
+        val rename = mkvtool("rename", "My Show", workDir = workDir)
+        withClue(rename.output) { rename.exitCode shouldBe 0 }
+
+        val names = workDir.list().orEmpty().toList()
+        names shouldContain "My Show - S00E00 - Unaired Pilot.mkv"
+        names shouldContain "My Show - S00E01 - Behind the Scenes.mkv"
+    }
+
     // Not "does our code work" but "has the API changed shape" - which no commit causes, so no ordinary run
     // selects it: the live-contract job does, on its schedule and on dispatch, and a developer can with
     // -Pe2eTags=Live. Assertions are loose on purpose: TheMovieDB may legitimately edit episode titles, and
@@ -253,6 +278,7 @@ private fun tmdbRoutes(
     season: Int,
     episodes: List<String>,
     seasonName: String? = null,
+    firstEpisode: Int = 1,
 ): Map<String, String> {
     val show = buildJsonObject {
         put("name", showName)
@@ -263,7 +289,7 @@ private fun tmdbRoutes(
         putJsonArray("episodes") {
             episodes.forEachIndexed { i, name ->
                 addJsonObject {
-                    put("episode_number", i + 1)
+                    put("episode_number", i + firstEpisode)
                     put("name", name)
                 }
             }
