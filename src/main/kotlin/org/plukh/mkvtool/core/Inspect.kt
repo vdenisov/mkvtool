@@ -343,9 +343,8 @@ fun externalRowsOf(ext: String, languageGuess: String?, probed: ProbeResult?): E
 
     val tracks = (probed as? ProbeResult.Probed)?.allTracks
     if (tracks == null) {
-        // mkvmerge numbers the single track of a raw .ass or .srt as 0, and that is the id an
-        // additionalSources entry has to name, so print it rather than dashing it out for not having
-        // been probed.
+        // mkvmerge numbers the single track of a raw .ass or .srt as 0, the track an additionalSources
+        // entry always refers to, so print it rather than dashing it out for not having been probed.
         return ExternalListing.Tracks(
             listOf(
                 ExternalTrack(

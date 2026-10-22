@@ -46,8 +46,7 @@ data class VideoTrackConfig(
 )
 
 /**
- * One configured track. [id] is the number it carries in its own file — for a track inside an additional
- * source that is always 0, since mkvmerge sees a single-track file there.
+ * One configured main-source track. [id] is the number it carries in the main file.
  *
  * [id] is nullable because a config can omit it: the model reports what the file says and leaves refusing
  * it to whoever is about to act on it.
@@ -68,10 +67,22 @@ data class MainSourceConfig(
     val additionalOptions: List<String> = emptyList(),
 )
 
+/**
+ * The track inside an additional source. It has no id: mkvmerge sees a single-track file there, always
+ * track 0. [idDeclared] records that the config wrote one anyway, for [additionalSourceIdProblems].
+ */
+data class SourceTrackConfig(
+    val language: String? = null,
+    val title: Template? = null,
+    val default: Boolean = false,
+    val charset: String? = null,
+    val idDeclared: Boolean = false,
+)
+
 /** An extra file muxed in alongside the main source. [file] is templated — `${'$'}{fileName}` and friends. */
 data class AdditionalSource(
     val file: String? = null,
-    val tracks: List<TrackConfig> = emptyList(),
+    val tracks: List<SourceTrackConfig> = emptyList(),
     val additionalOptions: List<String> = emptyList(),
 )
 
@@ -122,14 +133,30 @@ fun parseConfig(mapping: Map<*, *>): Config {
             .map { source ->
                 AdditionalSource(
                     file = source.stringAt("file"),
-                    // Always track 0: mkvmerge sees a companion as a single-track file.
-                    tracks = source.tracksAt("tracks").map { it.copy(id = it.id ?: 0) },
+                    tracks = source.sourceTracksAt("tracks"),
                     additionalOptions = source.stringsAt("additionalOptions"),
                 )
             },
         trackOrder = mapping.stringAt("trackOrder")?.takeIf { it.isNotEmpty() },
     )
 }
+
+/**
+ * One line per additional-source track that sets an `id`, naming it by config path. Any value is refused,
+ * `0` included: the key cannot change what mkvmerge addresses, so it only ever looks like a decision. Each
+ * caller applies its own config-problem policy.
+ */
+fun additionalSourceIdProblems(config: Config): List<String> =
+    config.additionalSources.flatMapIndexed { i, source ->
+        source.tracks.mapIndexedNotNull { j, track ->
+            if (track.idDeclared) {
+                "config.yaml sets an id on additionalSources[$i].tracks[$j], which should be removed: " +
+                    "an additional-source track is always track 0"
+            } else {
+                null
+            }
+        }
+    }
 
 /**
  * What the check needs to know about the config: which ids are selected, and what each is titled.
@@ -205,17 +232,32 @@ private fun Map<*, *>?.stringsAt(key: String): List<String> =
 private fun Map<*, *>?.templateAt(key: String): Template? =
     if (this != null && containsKey(key)) Template(this[key]?.toString()) else null
 
+private fun Map<*, *>?.trackMapsAt(key: String): List<Map<*, *>> =
+    (this?.get(key) as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
+
+/** Truthiness: absent, null and false all mean "not the default track". */
+private fun Map<*, *>.isDefaultTrack(): Boolean = this["default"] == true || stringAt("default") == "true"
+
 private fun Map<*, *>?.tracksAt(key: String): List<TrackConfig> =
-    (this?.get(key) as? List<*>).orEmpty()
-        .mapNotNull { it as? Map<*, *> }
-        .map { track ->
-            TrackConfig(
-                // A quoted id is still an id: v1 coerced with `as Integer`, which read "2" as 2.
-                id = (track["id"] as? Number)?.toInt() ?: track.stringAt("id")?.trim()?.toIntOrNull(),
-                language = track.stringAt("language"),
-                title = track.templateAt("title"),
-                // Truthiness: absent, null and false all mean "not the default track".
-                default = track["default"] == true || track.stringAt("default") == "true",
-                charset = track.stringAt("charset"),
-            )
-        }
+    trackMapsAt(key).map { track ->
+        TrackConfig(
+            // A quoted id is still an id: v1 coerced with `as Integer`, which read "2" as 2.
+            id = (track["id"] as? Number)?.toInt() ?: track.stringAt("id")?.trim()?.toIntOrNull(),
+            language = track.stringAt("language"),
+            title = track.templateAt("title"),
+            default = track.isDefaultTrack(),
+            charset = track.stringAt("charset"),
+        )
+    }
+
+private fun Map<*, *>?.sourceTracksAt(key: String): List<SourceTrackConfig> =
+    trackMapsAt(key).map { track ->
+        SourceTrackConfig(
+            language = track.stringAt("language"),
+            title = track.templateAt("title"),
+            default = track.isDefaultTrack(),
+            charset = track.stringAt("charset"),
+            // The key, not its value: an empty `id:` or a harmless `id: 0` is refused the same way.
+            idDeclared = track.containsKey("id"),
+        )
+    }

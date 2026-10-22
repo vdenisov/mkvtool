@@ -1,6 +1,7 @@
 package org.plukh.mkvtool.core
 
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.datatest.withData
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
@@ -140,13 +141,13 @@ class ConfigTest : FunSpec({
                 .mainSource.audioTracks.shouldBeEmpty()
         }
 
-        test("a track in an additional source is always track 0, whatever it says") {
+        test("an additional source carries its file, tracks and options, and a track has no id") {
             val source = parseConfig(
                 mapOf(
                     "additionalSources" to listOf(
                         mapOf(
                             "file" to "\${fileName}[Grp].mka",
-                            "tracks" to listOf(mapOf("language" to "ru")),
+                            "tracks" to listOf(mapOf("language" to "ru", "default" to true)),
                             "additionalOptions" to listOf("--compression", "0:none"),
                         ),
                     ),
@@ -154,8 +155,60 @@ class ConfigTest : FunSpec({
             ).additionalSources.single()
 
             source.file shouldBe "\${fileName}[Grp].mka"
-            source.tracks.single().id shouldBe 0
+            source.tracks.single() shouldBe SourceTrackConfig(language = "ru", default = true)
             source.additionalOptions shouldBe listOf("--compression", "0:none")
+        }
+
+        context("an id key on an additional-source track is recorded, whatever its value") {
+            data class IdCase(val label: String, val idLine: String?, val declared: Boolean)
+
+            withData(
+                nameFn = { it.label },
+                IdCase("no id key", null, false),
+                IdCase("a real-looking id", "id: 1", true),
+                IdCase("the harmless truth, 0", "id: 0", true),
+                IdCase("a quoted 0", "id: \"0\"", true),
+                IdCase("an empty id", "id:", true),
+            ) { (_, idLine, declared) ->
+                val file = write(
+                    buildString {
+                        append("additionalSources:\n  - file: a.mka\n    tracks:\n      - language: ru\n")
+                        idLine?.let { append("        $it\n") }
+                    },
+                )
+
+                val config = loadConfig(file).shouldBeInstanceOf<MappingLoad.Loaded<Config>>().value
+                val track = config.additionalSources.single().tracks.single()
+                track.idDeclared shouldBe declared
+                track.language shouldBe "ru"
+            }
+        }
+    }
+
+    context("additionalSourceIdProblems") {
+        test("names every track that sets an id, by config path, in order") {
+            val config = Config(
+                additionalSources = listOf(
+                    AdditionalSource(file = "a.mka", tracks = listOf(SourceTrackConfig(idDeclared = true))),
+                    AdditionalSource(
+                        file = "b.ass",
+                        tracks = listOf(SourceTrackConfig(), SourceTrackConfig(idDeclared = true)),
+                    ),
+                ),
+            )
+
+            additionalSourceIdProblems(config) shouldBe listOf(
+                "config.yaml sets an id on additionalSources[0].tracks[0], which should be removed: " +
+                    "an additional-source track is always track 0",
+                "config.yaml sets an id on additionalSources[1].tracks[1], which should be removed: " +
+                    "an additional-source track is always track 0",
+            )
+        }
+
+        test("a config with no ids on its additional sources has no problem") {
+            additionalSourceIdProblems(
+                Config(additionalSources = listOf(AdditionalSource(file = "a.mka", tracks = listOf(SourceTrackConfig())))),
+            ).shouldBeEmpty()
         }
     }
 

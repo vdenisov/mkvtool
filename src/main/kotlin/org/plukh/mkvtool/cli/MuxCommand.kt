@@ -105,8 +105,9 @@ class MuxCommand : Callable<Int> {
 
         val config = loadOrRefuse(dir, renderer) ?: return 2
 
-        // Fields the command line cannot be built without. Refused in the same sentence shape an
-        // unreadable config gets, because it is the same answer: this config cannot be muxed with.
+        // Fields the command line cannot be built without, or would have to ignore. Refused in the same
+        // sentence shape an unreadable config gets, because it is the same answer: this config cannot be
+        // muxed with.
         muxConfigProblem(config)?.let {
             renderer.render(Error("$it; there is nothing to mux with."))
             return 2

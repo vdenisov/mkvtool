@@ -131,7 +131,7 @@ class InspectRendererTest : FunSpec({
             out shouldContain "  + [A] [GroupA] (.mka, .ass)"
         }
 
-        test("an unprobed file shows track id 0 — the id an additionalSources entry must name") {
+        test("an unprobed file shows track id 0 — the track an additionalSources entry refers to") {
             val (out, _) = renderResult(
                 FileIdentificationRenderer,
                 identification(tracks = listOf(pt(0, "video")), externals = listOf(variantOf(unprobedAss()))),

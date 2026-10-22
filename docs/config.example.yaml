@@ -96,7 +96,8 @@ mainSource:
   #   - "0:none"
 
 # Extra files muxed in alongside the main source — an external dub, a subtitle file. Each one holds
-# exactly one track, which mkvmerge always calls track 0, so no id is given here.
+# exactly one track, which mkvmerge always calls track 0, so no id is given here — a config that
+# sets one is refused.
 #
 # `file` is a template resolved per episode. After `mkvtool rename` a companion's name is the main
 # file's name plus its own suffix, which is what makes `${fileName}` the usual pattern; a companion
