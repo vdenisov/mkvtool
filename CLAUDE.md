@@ -790,7 +790,7 @@ place; the command declares one catch-all parameter list and *no* options, not e
 
 ### `fetch-episodes`
 
-The API key resolves as `--api-key`, then `apikey.txt` in the current directory, then
+The API key resolves as `--api-key`, then `TMDB_API_KEY`, then `apikey.txt` in the current directory, then
 `~/.mkvtool/apikey.txt` (`%USERPROFILE%\.mkvtool` on Windows). TheMovieDB answers an untranslated field
 with an empty string rather than falling back on its own, so a partially translated season is topped up
 from `en-US` and the run says when it did that. Failures print TheMovieDB's own message. A hidden

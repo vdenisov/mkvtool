@@ -86,6 +86,42 @@ class FetchEpisodesTest : FunSpec({
         File(workDir, "episodes.yaml").exists() shouldBe false
     }
 
+    // MKVTOOL_HOME points at an empty directory in both, so the developer's own home key file cannot be what
+    // answers.
+    test("the key can come from TMDB_API_KEY alone") {
+        val workDir = tempdir()
+        val routes = tmdbRoutes(1920, "Twin Peaks", "1990-04-08", 1, listOf("Pilot"))
+        val env = mapOf("TMDB_API_KEY" to "stub", "MKVTOOL_HOME" to tempdir().absolutePath)
+
+        val run = withStubServer(routes) { baseUrl ->
+            mkvtool(
+                "fetch-episodes", "--base-url", baseUrl, "--show-id", "1920", "--season", "1",
+                workDir = workDir, env = env,
+            )
+        }
+
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+        }
+        File(workDir, "episodes.yaml").exists() shouldBe true
+        File(workDir, "episodes.txt").exists() shouldBe true
+    }
+
+    test("with no key anywhere, the error names every source") {
+        val workDir = tempdir()
+        // Set empty rather than left out, so a key the developer exported cannot leak in.
+        val env = mapOf("TMDB_API_KEY" to "", "MKVTOOL_HOME" to tempdir().absolutePath)
+
+        val run = mkvtool("fetch-episodes", "--show-id", "1920", "--season", "1", workDir = workDir, env = env)
+
+        withClue(run.output) {
+            run.exitCode shouldBe 2
+            run.output shouldContain "--api-key"
+            run.output shouldContain "TMDB_API_KEY"
+            run.output shouldContain "apikey.txt"
+        }
+    }
+
     context("--show-id accepts a TheMovieDB URL") {
         withData(
             "https://www.themoviedb.org/tv/1920-twin-peaks",

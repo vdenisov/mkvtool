@@ -31,18 +31,21 @@ sealed interface ApiKeyResolution {
 }
 
 /**
- * The API key: the flag, then `apikey.txt` in [dir], then in [home].
+ * The API key: the flag, then `TMDB_API_KEY` in [env], then `apikey.txt` in [dir], then in [home]. An empty
+ * flag or variable counts as unset.
  *
  * The current directory keeps its v1 precedence; what changed is the fallback behind it — v1 looked next
  * to the script, which a single binary on `PATH` has no equivalent of, so the key now lives in the tool's
  * home directory instead. It is a personal secret the user places, which is why nothing creates it.
  */
-fun resolveApiKey(explicit: String?, dir: File, home: File): ApiKeyResolution {
+fun resolveApiKey(explicit: String?, env: Map<String, String>, dir: File, home: File): ApiKeyResolution {
     if (!explicit.isNullOrEmpty()) return ApiKeyResolution.Found(explicit)
+    env["TMDB_API_KEY"]?.takeIf { it.isNotEmpty() }?.let { return ApiKeyResolution.Found(it) }
 
     val keyFile = listOf(File(dir, "apikey.txt"), File(home, "apikey.txt")).firstOrNull { it.exists() }
         ?: return ApiKeyResolution.Problem(
-            "No API key: pass --api-key, or create apikey.txt in the current directory or in ${home.path}"
+            "No API key: pass --api-key, set TMDB_API_KEY, or create apikey.txt in the current directory or " +
+                "in ${home.path}"
         )
 
     val key = readLinesDetected(keyFile).firstOrNull { it.isNotBlank() }?.trim()

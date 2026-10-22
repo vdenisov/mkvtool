@@ -99,13 +99,32 @@ class FetchEpisodesTest : FunSpec({
         test("the flag wins outright, without touching the filesystem") {
             val dir = tempdir()
             File(dir, "apikey.txt").writeText("from-file")
-            resolveApiKey("from-flag", dir, dir) shouldBe ApiKeyResolution.Found("from-flag")
+            resolveApiKey("from-flag", emptyMap(), dir, dir) shouldBe ApiKeyResolution.Found("from-flag")
         }
 
         test("an empty flag is no flag at all") {
             val dir = tempdir()
             File(dir, "apikey.txt").writeText("from-file\n")
-            resolveApiKey("", dir, tempdir()) shouldBe ApiKeyResolution.Found("from-file")
+            resolveApiKey("", emptyMap(), dir, tempdir()) shouldBe ApiKeyResolution.Found("from-file")
+        }
+
+        test("the flag beats TMDB_API_KEY") {
+            resolveApiKey("from-flag", mapOf("TMDB_API_KEY" to "from-env"), tempdir(), tempdir()) shouldBe
+                ApiKeyResolution.Found("from-flag")
+        }
+
+        test("TMDB_API_KEY beats a file in the current directory") {
+            val dir = tempdir()
+            File(dir, "apikey.txt").writeText("from-file\n")
+            resolveApiKey(null, mapOf("TMDB_API_KEY" to "from-env"), dir, tempdir()) shouldBe
+                ApiKeyResolution.Found("from-env")
+        }
+
+        test("an empty TMDB_API_KEY is no variable at all") {
+            val dir = tempdir()
+            File(dir, "apikey.txt").writeText("from-file\n")
+            resolveApiKey(null, mapOf("TMDB_API_KEY" to ""), dir, tempdir()) shouldBe
+                ApiKeyResolution.Found("from-file")
         }
 
         test("the current directory takes precedence over the home directory") {
@@ -113,25 +132,26 @@ class FetchEpisodesTest : FunSpec({
             val home = tempdir()
             File(dir, "apikey.txt").writeText("near\n")
             File(home, "apikey.txt").writeText("home\n")
-            resolveApiKey(null, dir, home) shouldBe ApiKeyResolution.Found("near")
+            resolveApiKey(null, emptyMap(), dir, home) shouldBe ApiKeyResolution.Found("near")
         }
 
         test("the home directory is the fallback the script directory used to be") {
             val home = tempdir()
             File(home, "apikey.txt").writeText("home-key\n")
-            resolveApiKey(null, tempdir(), home) shouldBe ApiKeyResolution.Found("home-key")
+            resolveApiKey(null, emptyMap(), tempdir(), home) shouldBe ApiKeyResolution.Found("home-key")
         }
 
         test("blank lines and surrounding space are skipped, not passed to the API") {
             val home = tempdir()
             File(home, "apikey.txt").writeText("\n   \n  the-key  \nsomething else\n")
-            resolveApiKey(null, tempdir(), home) shouldBe ApiKeyResolution.Found("the-key")
+            resolveApiKey(null, emptyMap(), tempdir(), home) shouldBe ApiKeyResolution.Found("the-key")
         }
 
         test("no file anywhere names both places it looked") {
             val home = File(tempdir(), ".mkvtool")
-            val problem = resolveApiKey(null, tempdir(), home).shouldBeInstanceOf<ApiKeyResolution.Problem>()
+            val problem = resolveApiKey(null, emptyMap(), tempdir(), home).shouldBeInstanceOf<ApiKeyResolution.Problem>()
             problem.message shouldContain "No API key"
+            problem.message shouldContain "TMDB_API_KEY"
             problem.message shouldContain "current directory"
             problem.message shouldContain home.path
         }
@@ -139,7 +159,7 @@ class FetchEpisodesTest : FunSpec({
         test("a file with nothing usable in it is reported as empty, by path") {
             val home = tempdir()
             val file = File(home, "apikey.txt").apply { writeText("\n  \n") }
-            val problem = resolveApiKey(null, tempdir(), home).shouldBeInstanceOf<ApiKeyResolution.Problem>()
+            val problem = resolveApiKey(null, emptyMap(), tempdir(), home).shouldBeInstanceOf<ApiKeyResolution.Problem>()
             problem.message shouldContain "API key file is empty"
             problem.message shouldContain file.absolutePath
         }

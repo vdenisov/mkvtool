@@ -130,9 +130,10 @@ pasted straight from a browser. A URL that names a season supplies `--season`
 too; passing a `--season` that disagrees with the URL is an error rather than a
 silent choice between the two. `--season 0` fetches the show's specials.
 
-If `--api-key` is not supplied, the key is read from `apikey.txt` — the current
-directory first, then `~/.mkvtool/apikey.txt` (`%USERPROFILE%\.mkvtool\apikey.txt`
-on Windows), so the key does not have to be copied into every media directory.
+If `--api-key` is not supplied, the key is read from the `TMDB_API_KEY`
+environment variable, and failing that from `apikey.txt` — the current directory
+first, then `~/.mkvtool/apikey.txt` (`%USERPROFILE%\.mkvtool\apikey.txt` on
+Windows), so the key does not have to be copied into every media directory.
 Endpoint examples live in [`docs/themoviedb.http`](docs/themoviedb.http).
 
 `--language` takes a TheMovieDB locale such as `ru-RU`, and the names are fetched

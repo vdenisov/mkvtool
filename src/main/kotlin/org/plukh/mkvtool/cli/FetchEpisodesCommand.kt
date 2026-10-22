@@ -35,7 +35,10 @@ class FetchEpisodesCommand : Callable<Int> {
 
     @Option(
         names = ["-a", "--api-key"],
-        description = ["TheMovieDB API key. If one is not supplied, will try to read it from an 'apikey.txt' file"],
+        description = [
+            "TheMovieDB API key. If one is not supplied, will try the TMDB_API_KEY environment variable, " +
+                "then an 'apikey.txt' file",
+        ],
     )
     var apiKey: String? = null
 
@@ -73,7 +76,7 @@ class FetchEpisodesCommand : Callable<Int> {
     override fun call(): Int {
         val renderer = output.renderer()
 
-        val key = when (val resolution = resolveApiKey(apiKey, File("."), mkvtoolHome())) {
+        val key = when (val resolution = resolveApiKey(apiKey, System.getenv(), File("."), mkvtoolHome())) {
             is ApiKeyResolution.Found -> resolution.key
             is ApiKeyResolution.Problem -> return fail(renderer, resolution.message)
         }
