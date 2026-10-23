@@ -229,7 +229,7 @@ hand-assembled `episodes.txt` — use `core/CharsetDetection.kt` rather than qui
 | `Probe.kt` | `mkvmerge -J`: `parseProbe`, `probeFile`, typed track records, signatures, slot grouping, `layoutKey`, `findDuplicates` |
 | `CheckReport.kt` | `buildCheckReport` — the consistency **model**, with no presentation in it |
 | `Substitution.kt` | the template engine: variables, scopes, `friendlyCodec`, language names, validation |
-| `Config.kt` | the typed config model, its lenient load with `sharedTracks` resolution, `groupProblems`, `partitionByGroup`, and the derived `TrackSelection` |
+| `Config.kt` | the typed config model, its lenient load with `sharedTracks` resolution, `groupProblems`, `bindingProblems`, `partitionByGroup`, and the derived `TrackSelection` |
 | `MediaFiles.kt` | file selection: `compileMasks`, the extension rule, the pre-mask/post-mask split |
 | `Inspect.kt`, `Mux.kt`, `Rename.kt` | the three big engines and their result models |
 | `Tmdb.kt`, `FetchEpisodes.kt` | the HTTP fetcher behind a seam, and what gets written to disk |
@@ -549,6 +549,26 @@ group it refuses a grouped config with exit 2, since muxing the empty top level 
 `inspect` says it does not report per group and carries on, uncounted, and `--identify` does not list
 the groups' sources. The new keys stay out of `docs/` until then, and `ConfigDocsParityTest` holds them in
 a pending set.
+
+**Matchers, the episode map and `outputName` are parsed and validated, and not run yet.** They say how
+each file gets its episode and what the output is called, which is what lets a config face raw release
+names instead of renamed ones. The main files' keys live in `general` (`matcher`, `episodeRegex`,
+`seasonRegex`, `episodeMap`), not in a group, because groups claim files *by* episode number, so a main
+file's number has to be known before its group is. An additional source binds the same way with the same
+keys, over the files its `files:` masks match; `file:` keeps naming one file per episode through the
+template engine, and a source may not set both. Without a pin the cascade runs (exact name, name plus
+suffix, the regex when given, `SxxEyy`), a main file's from the regex on, since it has nothing to be named
+after; `matcher:` pins one of `exact`, `suffix`, `regex`, `sxxeyy` or `sequence`, case-insensitively, and a
+main file takes no name pin for the same reason. `sequence` is pin-only,
+because positional matching is the one rule that can silently mis-pair: the files sort by name and the Nth
+is episode N, so a regex beside it is an error, while an `episodeMap` still applies after it. The map is
+range to range (`13-24: 1-12`), equal lengths, release side from 0 and real side from 1, absent meaning
+identity. `outputName` is a file-scope template, so stage one validates it like `general.title`; `.mkv` is
+appended. `bindingProblems` reports what the config alone can show: fatal in `mux`, counted in `inspect`.
+`bindingKeys` lists the binding keys set, `outputName` not among them. Until binding runs, `mux` refuses a
+config setting any of them or `outputName` with exit 2, since a v1 run would quietly ignore them, and
+`inspect` says it identifies files the v1 way and carries on, uncounted; it has nothing to say about
+`outputName`, naming no output. The keys join the docs parity test's pending set.
 
 ### File selection and masks
 

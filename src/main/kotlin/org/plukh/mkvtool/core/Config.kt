@@ -1,6 +1,9 @@
 package org.plukh.mkvtool.core
 
 import java.io.File
+import java.util.Locale
+import java.util.regex.Pattern
+import java.util.regex.PatternSyntaxException
 
 /**
  * `config.yaml`: the muxing decisions, typed. v1 spread the reading of it across three files, `mux`,
@@ -37,7 +40,36 @@ data class GeneralConfig(
     val mkvmergeExe: String? = null,
     /** The segment (container) title — a different field from the video track's name. */
     val title: Template? = null,
+    /** How the main files get their episode numbers. Here rather than per group: groups claim by number. */
+    val matching: MatcherConfig = MatcherConfig(),
+    /** The output's base name, templated; null keeps the main file's own. `.mkv` is appended. */
+    val outputName: Template? = null,
 )
+
+/**
+ * How a source's files bind to episodes, as written: [matcher] pins one rule and bypasses the automatic
+ * cascade, and nothing set is the cascade itself. Values stay raw so [bindingProblems] can quote them.
+ */
+data class MatcherConfig(
+    val matcher: String? = null,
+    val episodeRegex: String? = null,
+    val seasonRegex: String? = null,
+    /** Null when absent, which is the identity map. */
+    val episodeMap: EpisodeMap? = null,
+) {
+    /** [matcher] as the rule it names: pin names are trimmed and case-insensitive, so `SxxEyy` pins `sxxeyy`. */
+    val pin: String? get() = matcher?.trim()?.lowercase(Locale.ROOT)
+}
+
+/** An `episodeMap`, release numbers to real ones; [notAMapping] when the key holds something else. */
+data class EpisodeMap(val entries: List<EpisodeMapEntry> = emptyList(), val notAMapping: Boolean = false)
+
+/** One `from: to` line as written. A range is null when its side is not one. */
+data class EpisodeMapEntry(val from: String, val to: String) {
+    // A release may number from 0 (a `00` prologue); real episodes start at 1, as group ranges do.
+    val fromRange: IntRange? = episodeRangeOf(from, min = 0)
+    val toRange: IntRange? = episodeRangeOf(to)
+}
 
 /** The video track, which `mux` always copies and always addresses as track 0. */
 data class VideoTrackConfig(
@@ -86,11 +118,17 @@ data class SourceTrackConfig(
     val ref: String? = null,
 )
 
-/** An extra file muxed in alongside the main source. [file] is templated — `${'$'}{fileName}` and friends. */
+/**
+ * An extra file muxed in alongside the main source. [file] is templated — `${'$'}{fileName}` and friends —
+ * and names the file per episode; [files] is the other way, masks whose matches [matching] binds to
+ * episodes. [files] is null when absent and empty when every mask was blank.
+ */
 data class AdditionalSource(
     val file: String? = null,
     val tracks: List<SourceTrackConfig> = emptyList(),
     val additionalOptions: List<String> = emptyList(),
+    val files: List<String>? = null,
+    val matching: MatcherConfig = MatcherConfig(),
 )
 
 /**
@@ -166,6 +204,8 @@ fun parseConfig(mapping: Map<*, *>): Config {
             // Truthiness, as v1: a blank path is no path, and the caller auto-detects.
             mkvmergeExe = general.stringAt("mkvmergeExe")?.takeIf { it.isNotEmpty() },
             title = general.templateAt("title"),
+            matching = matcherConfigOf(general),
+            outputName = general.templateAt("outputName"),
         ),
         mainSource = mainSourceOf(mapping.mapAt("mainSource"), shared),
         additionalSources = additionalSourcesOf(mapping, shared),
@@ -280,15 +320,62 @@ fun groupProblems(config: Config, configName: String): List<String> {
                     merged
                 }
             if (overlaps.isNotEmpty()) {
-                val spelled = overlaps.joinToString(", ") {
-                    if (it.first == it.last) "${it.first}" else "${it.first}-${it.last}"
-                }
+                val spelled = overlaps.joinToString(", ") { it.spelled() }
                 problems += "$configName claims episodes $spelled in both ${labels[i]} and ${labels[j]}"
             }
         }
     }
 
     return problems
+}
+
+/**
+ * One line per problem with the matcher keys, the episode maps, a source's `files` or `general.outputName`
+ * that the config alone can show, each starting with [configName]. Each caller applies its own
+ * config-problem policy.
+ */
+fun bindingProblems(config: Config, configName: String): List<String> {
+    val problems = ArrayList<String>()
+    problems += matcherProblems(config.general.matching, "general", main = true, configName)
+    // A declared empty name would name every output `.mkv`, and so would a blank one once it is sanitized.
+    config.general.outputName?.let {
+        if (it.text.isNullOrBlank()) problems += "$configName has an empty general.outputName"
+    }
+
+    config.groups.forEachIndexed { g, group ->
+        group.additionalSources.forEachIndexed { i, source ->
+            val path = "${config.groupPrefix(g)}additionalSources[$i]"
+            val declared = source.matching.declaredKeys()
+            when {
+                !source.file.isNullOrEmpty() && source.files != null ->
+                    problems += "$configName sets both file and files on $path; file names one file per " +
+                        "episode, files binds what its masks match"
+                source.files?.isEmpty() == true -> problems += "$configName has no usable mask in $path.files"
+                source.files == null && declared.isNotEmpty() ->
+                    problems += "$configName sets ${declared.first()} on $path, " +
+                        "which has no files to bind"
+            }
+            problems += matcherProblems(source.matching, path, main = false, configName)
+        }
+    }
+    return problems
+}
+
+/**
+ * The config path of every key that binds files to episodes and is set, in config order: what a command that
+ * does not bind yet has to refuse or warn about. `general.outputName` is not one; it names the output.
+ */
+fun bindingKeys(config: Config): List<String> {
+    val keys = ArrayList<String>()
+    keys += config.general.matching.declaredKeys().map { "general.$it" }
+    config.groups.forEachIndexed { g, group ->
+        group.additionalSources.forEachIndexed { i, source ->
+            val path = "${config.groupPrefix(g)}additionalSources[$i]"
+            if (source.files != null) keys += "$path.files"
+            keys += source.matching.declaredKeys().map { "$path.$it" }
+        }
+    }
+    return keys
 }
 
 /** A file list split by group. Data only: what a double claim or an unclaimed file *means* is the caller's to
@@ -411,6 +498,100 @@ private fun GroupConfig.trackRefs(): List<Pair<String, String?>> =
 private fun overlap(a: IntRange, b: IntRange): IntRange? =
     (maxOf(a.first, b.first)..minOf(a.last, b.last)).takeUnless { it.isEmpty() }
 
+private fun IntRange.spelled(): String = if (first == last) "$first" else "$first-$last"
+
+/** The pins a source accepts, cascade order then `sequence`. A main file takes no name pin: it has no main
+ *  file of its own to be named after. */
+private val NAME_MATCHERS = setOf("exact", "suffix")
+private val MATCHERS = NAME_MATCHERS + setOf("regex", "sxxeyy", "sequence")
+
+private fun MatcherConfig.declaredKeys(): List<String> = listOfNotNull(
+    "matcher".takeIf { matcher != null },
+    "episodeRegex".takeIf { episodeRegex != null },
+    "seasonRegex".takeIf { seasonRegex != null },
+    "episodeMap".takeIf { episodeMap != null },
+)
+
+private fun matcherProblems(matching: MatcherConfig, path: String, main: Boolean, configName: String): List<String> {
+    val problems = ArrayList<String>()
+    val pin = matching.pin
+    // Quoted as written; the checks read the case-folded pin.
+    val written = matching.matcher
+    // A blank regex is reported as empty, and is no regex to every check after that.
+    val regexes = listOf("episodeRegex" to matching.episodeRegex, "seasonRegex" to matching.seasonRegex)
+        .mapNotNull { (key, regex) ->
+            if (regex?.isBlank() == true) problems += "$configName has an empty $path.$key"
+            regex?.takeUnless { it.isBlank() }?.let { key to it }
+        }
+    val keys = regexes.map { it.first }
+    // A regex beside a pin that reads none is reported as stray, so it is not compiled as well.
+    var regexRead = true
+    when {
+        pin == null -> if ("seasonRegex" in keys && "episodeRegex" !in keys) {
+            problems += "$configName sets $path.seasonRegex without an episodeRegex"
+        }
+        pin.isEmpty() -> problems += "$configName has an empty $path.matcher"
+        pin !in MATCHERS -> problems += "$configName has an unknown matcher '$written' at $path.matcher"
+        main && pin in NAME_MATCHERS -> problems += "$configName pins '$written' at $path.matcher, which only " +
+            "an additional source can use: a main file has nothing to be named after"
+        pin == "regex" && "episodeRegex" !in keys ->
+            problems += "$configName pins '$written' at $path.matcher with no episodeRegex"
+        pin != "regex" -> {
+            regexRead = false
+            keys.forEach { problems += "$configName sets $path.$it beside the '$written' pin, which reads no regex" }
+            // A file bound by name takes its main file's episode, which general.episodeMap has already mapped.
+            if (pin in NAME_MATCHERS && matching.episodeMap != null) {
+                problems += "$configName sets $path.episodeMap beside the '$written' pin, which binds by name " +
+                    "and reads no number"
+            }
+        }
+    }
+    for ((key, regex) in regexes.takeIf { regexRead }.orEmpty()) {
+        val groups = try {
+            Pattern.compile(regex).matcher("").groupCount()
+        } catch (e: PatternSyntaxException) {
+            problems += "$configName has a regex at $path.$key that does not compile: ${e.description}"
+            continue
+        }
+        if (groups < 1) {
+            problems += "$configName has a regex at $path.$key that captures no group; group 1 is the number"
+        }
+    }
+    matching.episodeMap?.let { problems += episodeMapProblems(it, "$path.episodeMap", configName) }
+    return problems
+}
+
+private fun episodeMapProblems(map: EpisodeMap, path: String, configName: String): List<String> {
+    if (map.notAMapping) return listOf("$configName sets $path to something that is not a mapping")
+    if (map.entries.isEmpty()) return listOf("$configName has an empty $path")
+    val problems = ArrayList<String>()
+    for (entry in map.entries) {
+        if (entry.fromRange == null) {
+            problems += "$configName has a release range at $path that is not one: '${entry.from}'"
+        }
+        if (entry.toRange == null) {
+            problems += "$configName has an episode range at $path that is not one: '${entry.to}'"
+        }
+        val from = entry.fromRange ?: continue
+        val to = entry.toRange ?: continue
+        if (from.last - from.first != to.last - to.first) {
+            problems += "$configName maps ${from.spelled()} to ${to.spelled()} at $path, which differ in length"
+        }
+    }
+    val valid = map.entries.mapNotNull { entry -> entry.fromRange?.let { from -> entry.toRange?.let { from to it } } }
+    for (i in valid.indices) {
+        for (j in i + 1 until valid.size) {
+            overlap(valid[i].first, valid[j].first)?.let {
+                problems += "$configName maps release episodes ${it.spelled()} twice at $path"
+            }
+            overlap(valid[i].second, valid[j].second)?.let {
+                problems += "$configName maps two release numbers onto episodes ${it.spelled()} at $path"
+            }
+        }
+    }
+    return problems
+}
+
 private fun Map<*, *>?.mapAt(key: String): Map<*, *>? = this?.get(key) as? Map<*, *>
 
 private fun Map<*, *>?.stringAt(key: String): String? = this?.get(key)?.toString()
@@ -442,38 +623,60 @@ private fun additionalSourcesOf(parent: Map<*, *>, shared: Map<String, Map<*, *>
             file = source.stringAt("file"),
             tracks = source.sourceTracksAt("tracks", shared),
             additionalOptions = source.stringsAt("additionalOptions"),
+            files = source.takeIf { it.containsKey("files") }?.masksAt("files"),
+            matching = matcherConfigOf(source),
         )
     }
 
+/** The four flat matcher keys, on `general` or on a source. A key with no value is declared, as empty. */
+private fun matcherConfigOf(map: Map<*, *>?) = MatcherConfig(
+    matcher = map?.declaredAt("matcher"),
+    episodeRegex = map?.declaredAt("episodeRegex"),
+    seasonRegex = map?.declaredAt("seasonRegex"),
+    episodeMap = map?.takeIf { it.containsKey("episodeMap") }?.let { episodeMapOf(it["episodeMap"]) },
+)
+
+private fun episodeMapOf(value: Any?): EpisodeMap = when (value) {
+    // Declared with no value: empty, which bindingProblems says, rather than something else.
+    null -> EpisodeMap()
+    is Map<*, *> ->
+        EpisodeMap(value.map { (from, to) -> EpisodeMapEntry(from.toString().trim(), to?.toString().orEmpty().trim()) })
+    else -> EpisodeMap(notAMapping = true)
+}
+
 /** Episode tokens come from a list or a comma-separated scalar, so `[1-10, 12]`, `"1-10, 12"` and `7` all
- *  read the same. A scalar `files` is one mask. */
+ *  read the same. */
 private fun membershipOf(group: Map<*, *>): Membership {
     val tokens = when (val episodes = group["episodes"]) {
         null -> emptyList()
         is List<*> -> episodes.map { it?.toString().orEmpty() }
         else -> episodes.toString().split(',')
     }.map { it.trim() }.filter { it.isNotEmpty() }
-    val files = group["files"]
 
     val ranges = tokens.map { it to episodeRangeOf(it) }
 
     return Membership(
         episodes = ranges.mapNotNull { it.second },
         malformedEpisodes = ranges.filter { it.second == null }.map { it.first },
-        // A blank mask matches nothing, so it is no mask, and a group of only those claims nothing.
-        files = (if (files is List<*>) files.mapNotNull { it?.toString() } else listOfNotNull(files?.toString()))
-            .filter { it.isNotBlank() },
+        files = group.masksAt("files"),
     )
+}
+
+/** Masks from a list or a scalar, which is one mask. A blank mask matches nothing, so it is no mask. */
+private fun Map<*, *>.masksAt(key: String): List<String> {
+    val masks = this[key]
+    return (if (masks is List<*>) masks.mapNotNull { it?.toString() } else listOfNotNull(masks?.toString()))
+        .filter { it.isNotBlank() }
 }
 
 private val EPISODE_RANGE = Regex("""(\d+)(?:\s*-\s*(\d+))?""")
 
-/** `N` or `N-M` with `1 <= N <= M`, or null. */
-private fun episodeRangeOf(token: String): IntRange? {
+/** `N` or `N-M` with `min <= N <= M`, or null. */
+private fun episodeRangeOf(token: String, min: Int = 1): IntRange? {
     val match = EPISODE_RANGE.matchEntire(token) ?: return null
     val first = match.groupValues[1].toIntOrNull() ?: return null
     val last = match.groupValues[2].ifEmpty { match.groupValues[1] }.toIntOrNull() ?: return null
-    return if (first in 1..last) first..last else null
+    return if (first in min..last) first..last else null
 }
 
 /** The track entries at [key], each laid over the definition it uses. */
@@ -497,7 +700,10 @@ private fun Map<*, *>.isDefaultTrack(): Boolean = this["default"] == true || str
 private fun Map<*, *>.nameAt(): String? = stringAt("name")?.takeIf { it.isNotEmpty() }
 
 /** The `use:` value, empty when the key is there with none, so validation can say so rather than drop it. */
-private fun Map<*, *>.useAt(): String? = if (containsKey("use")) stringAt("use").orEmpty() else null
+private fun Map<*, *>.useAt(): String? = declaredAt("use")
+
+/** [key]'s value, empty when the key is there with none, null when it is absent. */
+private fun Map<*, *>.declaredAt(key: String): String? = if (containsKey(key)) stringAt(key).orEmpty() else null
 
 private fun Map<*, *>?.tracksAt(key: String, shared: Map<String, Map<*, *>>): List<TrackConfig> =
     trackMapsAt(key, shared).map { track ->

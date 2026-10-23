@@ -461,6 +461,54 @@ class InspectTest : FunSpec({
         }
     }
 
+    // Binding is not wired in yet, which inspect says; a valid binding key is still no problem.
+    test("a valid binding key is a warning and no config problem").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "a.mkv")
+        File(workDir, "config.yaml").writeText(
+            "general:\n  matcher: \"sxxeyy\"\nadditionalSources:\n  - files: \"Rus sound/*.mka\"\n",
+            StandardCharsets.UTF_8,
+        )
+
+        val run = inspect(workDir, "--strict")
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldContain
+                "*** Warning: config.yaml sets general.matcher, which inspect does not use yet; " +
+                "files are identified the v1 way, and --identify does not list a source's files."
+            run.output shouldNotContain "config problem"
+        }
+    }
+
+    test("an outputName alone draws no warning: inspect names no output").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "a.mkv")
+        File(workDir, "config.yaml").writeText(
+            "general:\n  outputName: \"Show - \${episodeName}\"\n",
+            StandardCharsets.UTF_8,
+        )
+
+        val run = inspect(workDir, "--strict")
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldNotContain "does not use yet"
+            run.output shouldNotContain "config problem"
+        }
+    }
+
+    test("a binding problem is a counted config problem").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "a.mkv")
+        File(workDir, "config.yaml").writeText("general:\n  matcher: \"fuzzy\"\n", StandardCharsets.UTF_8)
+
+        val run = inspect(workDir, "--strict")
+        withClue(run.output) {
+            run.exitCode shouldBe 2
+            run.output shouldContain "*** Warning: config.yaml has an unknown matcher 'fuzzy' at general.matcher."
+            run.output shouldContain "config problem"
+        }
+    }
+
     // A split that only a loaded config can classify: a run that ignored --config would say "Add a config".
     test("--config reads a config outside the working directory").config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()

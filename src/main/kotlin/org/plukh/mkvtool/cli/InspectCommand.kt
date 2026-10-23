@@ -8,6 +8,8 @@ import org.plukh.mkvtool.core.MkvToolNotFoundException
 import org.plukh.mkvtool.core.StrictVerdict
 import org.plukh.mkvtool.core.SubstitutionEngine
 import org.plukh.mkvtool.core.additionalSourceIdProblems
+import org.plukh.mkvtool.core.bindingKeys
+import org.plukh.mkvtool.core.bindingProblems
 import org.plukh.mkvtool.core.collectTemplateFields
 import org.plukh.mkvtool.core.groupProblems
 import org.plukh.mkvtool.core.inspectDirectory
@@ -160,6 +162,24 @@ class InspectCommand : Callable<Int> {
                     "$configName declares groups, which inspect does not report per group yet; " +
                         "findings are not classified against the groups' selections, " +
                         "and --identify does not list the groups' sources.",
+                ),
+            )
+        }
+        config?.let { bindingProblems(it, configName) }?.forEach {
+            renderer.render(Warning("$it."))
+            configProblems++
+        }
+        // Not counted either, for the same reason as the groups warning above.
+        config?.let { bindingKeys(it).firstOrNull() }?.let { key ->
+            // A group's sources are already said to be unlisted, by the groups warning.
+            val unlisted = if (config.additionalSources.any { it.files != null }) {
+                ", and --identify does not list a source's files"
+            } else {
+                ""
+            }
+            renderer.render(
+                Warning(
+                    "$configName sets $key, which inspect does not use yet; files are identified the v1 way$unlisted.",
                 ),
             )
         }
