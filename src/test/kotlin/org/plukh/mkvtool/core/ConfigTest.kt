@@ -590,11 +590,6 @@ class ConfigTest : FunSpec({
                 listOf("config.yaml claims episodes 4-7 in both groups[0] (bd) and groups[1] (tv)"),
             ),
             ProblemCase(
-                "a file mask that is not a glob",
-                "groups:\n  - files: [\"*OVA*\", \"*[OVA*\"]\n",
-                listOf("config.yaml has a file mask in groups[0] that is not a valid pattern: '*[OVA*'"),
-            ),
-            ProblemCase(
                 "only blank file masks claim nothing",
                 "groups:\n  - name: bd\n    files: [\"\", \" \"]\n",
                 listOf("config.yaml has no episodes or files for groups[0] (bd)"),

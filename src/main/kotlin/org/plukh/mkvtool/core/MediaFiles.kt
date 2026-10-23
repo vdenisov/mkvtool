@@ -1,9 +1,6 @@
 package org.plukh.mkvtool.core
 
 import java.io.File
-import java.nio.file.FileSystems
-import java.nio.file.PathMatcher
-import java.nio.file.Paths
 
 /**
  * Which files a batch command works on: the extension rule, the file masks, and the two lists every
@@ -36,25 +33,57 @@ typealias FileMask = (File) -> Boolean
 /**
  * [patterns] as predicates, resolved against [dir].
  *
- * A pattern that names an **existing file** is matched by bare name equality instead of as a glob. That is
- * the only way to select a file whose own name holds glob metacharacters: as a glob, `Odd[1].mkv` also
- * matches `Odd1.mkv` and can never name itself.
+ * A pattern that names an **existing file in [dir]** is matched by name equality instead of as a glob, so
+ * a file whose own name holds a `*` or `?` (legal outside Windows) selects only itself. The name compared
+ * is the one on disk, so a pattern typed in another case still selects the file where the file system
+ * ignores case.
  *
- * Everything else becomes a JDK `glob:` matcher over the **bare file name** — backslashes folded to
- * forward slashes first, since a Windows caller types the separator that way. Matching the name alone is
- * what makes a pattern holding a `/` match nothing at all, v1's behaviour and harmless: these commands
- * only ever list one directory.
+ * Everything else goes through [maskRegex] over the **bare file name**, so a pattern naming a directory
+ * matches nothing, v1's behaviour and harmless: these commands only ever list one directory. The one
+ * exception is a leading `**` and slash, which also matches no directory at all.
  */
 fun compileMasks(patterns: List<String>, dir: File): List<FileMask> =
     patterns.map { pattern ->
         val named = File(pattern).let { if (it.isAbsolute) it else File(dir, pattern) }
-        if (named.isFile) {
-            val literal = named.name
+        // A same-named file elsewhere must not stand in for the one in dir: `extras/E01.mkv` is not `E01.mkv`.
+        if (named.isFile && named.canonicalFile.parentFile == dir.canonicalFile) {
+            val literal = named.canonicalFile.name
             return@map { candidate: File -> candidate.name == literal }
         }
-        val matcher = globMatcher(pattern)
-        return@map { candidate: File -> matcher.matches(Paths.get(candidate.name)) }
+        val regex = maskRegex(pattern)
+        return@map { candidate: File -> regex.matches(candidate.name) }
     }
+
+/**
+ * [pattern] as the tool's one glob: `*` is any run within a path segment, `**` any run across segments
+ * (at the start of a segment and before a slash, also no directory at all), `?` one character, and
+ * everything else literal. Brackets and braces are literal because release names are full of them
+ * (`[MC-Ent]`), where a JDK glob would read a character class; it also means no pattern can be invalid.
+ * Backslashes fold to forward slashes, since a Windows caller types the separator that way. Case is
+ * ignored on Windows and significant elsewhere.
+ */
+fun maskRegex(pattern: String): Regex {
+    val glob = pattern.replace('\\', '/')
+    val regex = StringBuilder()
+    var i = 0
+    while (i < glob.length) {
+        val segmentStart = i == 0 || glob[i - 1] == '/'
+        val token = when {
+            segmentStart && glob.startsWith("**/", i) -> "(?:.*/)?" to 3
+            glob.startsWith("**", i) -> ".*" to 2
+            glob[i] == '*' -> "[^/]*" to 1
+            glob[i] == '?' -> "[^/]" to 1
+            glob[i] in REGEX_SPECIALS -> "\\${glob[i]}" to 1
+            else -> glob[i].toString() to 1
+        }
+        regex.append(token.first)
+        i += token.second
+    }
+    // Windows file names ignore case, so a mask there must too.
+    val caseRule = if (File.separatorChar == '\\') setOf(RegexOption.IGNORE_CASE) else emptySet()
+    // `.*` must cross a line terminator like `[^/]*` does, or `**` would match less than `*`.
+    return Regex(regex.toString(), caseRule + RegexOption.DOT_MATCHES_ALL)
+}
 
 /**
  * The files of one directory, before and after the masks.
@@ -138,10 +167,6 @@ fun maskDescription(fileMasks: List<String>, excludeMasks: List<String>): String
 internal fun resolveAgainst(dir: File, path: String): File =
     File(path).let { if (it.isAbsolute) it else File(dir, path) }
 
-/** [pattern] as a JDK `glob:` matcher, backslashes folded to forward slashes; throws when it is not a glob. */
-internal fun globMatcher(pattern: String): PathMatcher =
-    FileSystems.getDefault().getPathMatcher("glob:" + pattern.replace('\\', '/'))
-
 /**
  * [name]'s extension, lower-cased, without the dot; empty when it has none.
  *
@@ -150,3 +175,6 @@ internal fun globMatcher(pattern: String): PathMatcher =
  * `lowercase` is locale-independent, which is the [Locale.ROOT] the discovery engine also folds in.
  */
 fun extensionOf(name: String): String = name.substringAfterLast('.', "").lowercase()
+
+// What a regex reads as syntax outside a character class; every other character stands for itself.
+private const val REGEX_SPECIALS = """\.^$|?*+()[]{}"""

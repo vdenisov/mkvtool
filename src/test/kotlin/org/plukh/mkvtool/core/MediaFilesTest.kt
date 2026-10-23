@@ -42,24 +42,55 @@ class MediaFilesTest : FunSpec({
             selection.selected.map { it.name } shouldContainExactly listOf("a.mkv", "b.mkv")
         }
 
-        test("a pattern naming an existing file is matched literally, not as a glob") {
+        test("brackets are literal, so a bracketed name selects only itself") {
             val dir = tempdir()
-            // As a glob, `Odd[1].mkv` is a character class and also matches `Odd1.mkv` — so a file whose
-            // own name holds metacharacters could never be selected without this rule.
             listOf("Odd[1].mkv", "Odd1.mkv").forEach { File(dir, it).writeText("x") }
 
-            val selection = selectMedia(dir, DEFAULT_ALLOWED_EXTENSIONS, fileMasks = listOf("Odd[1].mkv"))
+            val selection = selectMedia(dir, DEFAULT_ALLOWED_EXTENSIONS, fileMasks = listOf("*[1].mkv"))
 
             selection.selected.map { it.name } shouldContainExactly listOf("Odd[1].mkv")
         }
 
-        test("the same pattern is a glob again once no such file exists") {
+        test("a pattern naming no file is still no character class") {
+            // A JDK glob would read [1] as a character class and select Odd1.mkv here.
             val dir = tempdir()
             File(dir, "Odd1.mkv").writeText("x")
 
             val selection = selectMedia(dir, DEFAULT_ALLOWED_EXTENSIONS, fileMasks = listOf("Odd[1].mkv"))
 
-            selection.selected.map { it.name } shouldContainExactly listOf("Odd1.mkv")
+            selection.selected.shouldBeEmpty()
+        }
+
+        // Windows forbids * and ? in a file name, so there the rule cannot be reached.
+        test("a pattern naming an existing file with a wildcard in its name selects only that file")
+            .config(enabledIf = { File.separatorChar == '/' }) {
+                val dir = tempdir()
+                listOf("E0?.mkv", "E01.mkv").forEach { File(dir, it).writeText("x") }
+
+                val selection = selectMedia(dir, DEFAULT_ALLOWED_EXTENSIONS, fileMasks = listOf("E0?.mkv"))
+
+                selection.selected.map { it.name } shouldContainExactly listOf("E0?.mkv")
+            }
+
+        test("an exact name in another case still selects the file where names ignore case")
+            .config(enabledIf = { File.separatorChar == '\\' }) {
+                val dir = tempdir()
+                File(dir, "Show.S01E02.mkv").writeText("x")
+
+                val selection = selectMedia(dir, DEFAULT_ALLOWED_EXTENSIONS, fileMasks = listOf("show.s01e02.mkv"))
+
+                selection.selected.map { it.name } shouldContainExactly listOf("Show.S01E02.mkv")
+            }
+
+        test("a file in a subdirectory does not stand in for the same name at the top level") {
+            val dir = tempdir()
+            File(dir, "E01.mkv").writeText("x")
+            File(dir, "extras").mkdir()
+            File(dir, "extras/E01.mkv").writeText("x")
+
+            val selection = selectMedia(dir, DEFAULT_ALLOWED_EXTENSIONS, fileMasks = listOf("extras/E01.mkv"))
+
+            selection.selected.shouldBeEmpty()
         }
 
         test("several masks union") {
@@ -100,6 +131,38 @@ class MediaFilesTest : FunSpec({
             File(dir, "a.mkv").writeText("x")
 
             selectMedia(dir, DEFAULT_ALLOWED_EXTENSIONS, fileMasks = listOf("*.mp4")).selected.shouldBeEmpty()
+        }
+    }
+
+    context("maskRegex: *, ** and ? are the only wildcards") {
+        data class Case(val pattern: String, val path: String, val matches: Boolean)
+
+        withData(
+            nameFn = { "${it.pattern} ${if (it.matches) "matches" else "does not match"} ${it.path}" },
+            Case("*.mkv", "a.mkv", true),
+            Case("*.mkv", "dir/a.mkv", false),
+            Case("**.mkv", "dir/sub/a.mkv", true),
+            Case("**/*.mka", "a.mka", true),
+            Case("x**/b", "xb", false),
+            Case("**.mkv", "a\nb.mkv", true),
+            // Once invalid JDK globs that crashed the run; now plain literals.
+            Case("*[OVA*", "S01E01[OVA x", true),
+            Case("{{a", "{{a", true),
+            Case("**/*.mka", "Rus sound/[MC-Ent]/a.mka", true),
+            Case("Rus sound/*/*.mka", "Rus sound/[MC-Ent]/a.mka", true),
+            Case("E0?.mkv", "E01.mkv", true),
+            Case("E0?.mkv", "E0/.mkv", false),
+            Case("*[MC-Ent].mka", "S01E01[MC-Ent].mka", true),
+            Case("*[MC-Ent].mka", "S01E01M.mka", false),
+            Case("{a,b}.mkv", "{a,b}.mkv", true),
+            Case("{a,b}.mkv", "a.mkv", false),
+            Case("a.b(1)+.mkv", "a.b(1)+.mkv", true),
+            Case("a.mkv", "aXmkv", false),
+            Case("Rus sound\\*.mka", "Rus sound/a.mka", true),
+        ) { maskRegex(it.pattern).matches(it.path) shouldBe it.matches }
+
+        test("case follows the platform's file names") {
+            maskRegex("*.MKV").matches("a.mkv") shouldBe (File.separatorChar == '\\')
         }
     }
 
