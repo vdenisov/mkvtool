@@ -221,7 +221,7 @@ hand-assembled `episodes.txt` — use `core/CharsetDetection.kt` rather than qui
 | `Tools.kt` | `findMkvTool`: PATH resolution with the Windows default-location fallback; `resolveMkvmerge`: a configured `mkvmergeExe`, probed and never replaced by auto-detection |
 | `Propedit.kt` | the mkvpropedit loop and `buildPropeditCommand` |
 | `FindUnusedFonts.kt` | the `.ass`-versus-`fonts/` matcher |
-| `YamlMapping.kt` | `loadMapping`: "read this file, get a mapping or a named reason why not" |
+| `YamlMapping.kt` | `loadMapping`: "read this file, get a mapping or a named reason why not", with the numbers YAML 1.1 would misread kept as text |
 | `CharsetDetection.kt` | Groovy's auto-detection semantics, transcribed, for the files that need them |
 | `Episodes.kt` | the episode-metadata *shape*: `parseSeasonEpisode`, `parseCanonicalName`, `sanitizeForFilename`, `indexFromLines`, `normalizeYaml`, plus the display-only `formatRanges`/`batchLabels` |
 | `Discovery.kt` | external-file discovery: `walkTree`, `discoverCompanions`, the extension tables, `trimForDisplay` |
@@ -229,7 +229,7 @@ hand-assembled `episodes.txt` — use `core/CharsetDetection.kt` rather than qui
 | `Probe.kt` | `mkvmerge -J`: `parseProbe`, `probeFile`, typed track records, signatures, slot grouping, `layoutKey`, `findDuplicates` |
 | `CheckReport.kt` | `buildCheckReport` — the consistency **model**, with no presentation in it |
 | `Substitution.kt` | the template engine: variables, scopes, `friendlyCodec`, language names, validation |
-| `Config.kt` | the typed config model, its lenient load, and the derived `TrackSelection` |
+| `Config.kt` | the typed config model, its lenient load with `sharedTracks` resolution, `groupProblems`, `partitionByGroup`, and the derived `TrackSelection` |
 | `MediaFiles.kt` | file selection: `compileMasks`, the extension rule, the pre-mask/post-mask split |
 | `Inspect.kt`, `Mux.kt`, `Rename.kt` | the three big engines and their result models |
 | `Tmdb.kt`, `FetchEpisodes.kt` | the HTTP fetcher behind a seam, and what gets written to disk |
@@ -491,6 +491,12 @@ and episode metadata produces no findings; it only decorates the source paths `-
 `normalizeYaml` runs *inside* the guard, as `loadMapping`'s transform, because `episode: "one"` throws
 there rather than at parse time.
 
+`loadMapping` keeps a **number YAML 1.1 would misread as the text it was written as**, in `config.yaml`
+and `episodes.yaml` alike: an unquoted `010` would be octal 8 and `1:30` base-60 90, and zero-padded
+episode and season numbers (`010`) are second nature to collectors. A text field keeps its padding, and a
+numeric one converts the text as it converts a quoted number. The override sits in the resolver, not in
+each reader, because by the time a reader sees `8` the text is gone.
+
 Charset contract: the yaml is read and written with an **explicit UTF-8** both ways — it is
 machine-written, so it is a fixed contract — and dumped with `allowUnicode`, without which snakeyaml
 escapes every Cyrillic character and produces valid YAML that is unreadable for exactly the titles the
@@ -504,10 +510,12 @@ hand-editable file next to the media, so you can diff it, keep it beside the sea
 the mux in five years.
 
 Reading it is **lenient**: a field of the wrong shape comes back absent rather than throwing, because a
-config is optional throughout `inspect`. Ids are coerced, so a quoted `id: "2"` still selects track 2. One
-distinction is not lenient and must not be flattened: **a declared template is not an absent one.** A
-missing key leaves the field's default (the file name); a key written with no value is a *declared* empty
-template and overrides that default. It is load-bearing in both the validation and the command line.
+config is optional throughout `inspect`. Ids are coerced, so a quoted `id: "2"` still selects track 2,
+and an unquoted `id: 010` reaches the reader as text and selects track 10 (see the zero-padding paragraph
+under episode metadata). One distinction is not lenient and must not be flattened: **a declared template
+is not an absent one.** A missing key leaves the field's default (the file name); a key written with no
+value is a *declared* empty template and overrides that default. It is load-bearing in both the
+validation and the command line.
 
 `trackOrder` is derived from the configured tracks when omitted (video, audio in listed order, subtitles,
 then one entry per additional source). When set explicitly it is validated and mismatches are **warned
@@ -526,6 +534,21 @@ Omitting `audioTracks` or `subtitleTracks` (or setting them to `[]`) copies no t
 | `mainSource.audioTracks[]`, `mainSource.subtitleTracks[]` | Track ids with language/title/default; `charset` is optional on subtitles |
 | `additionalSources[]` | Extra files to mux in; the track id is always 0, and a config setting one is refused |
 | `trackOrder` | Optional `"sourceIndex:trackId"` CSV; see above |
+
+**Groups and shared tracks are parsed and validated, and not run yet.** `groups` is a list of muxing
+passes, each with a `name`, a membership (`episodes` ranges, `files` masks, or both) and its own
+`mainSource`, `additionalSources` and `trackOrder`; `general` stays top-level. A config without `groups`
+is one implicit group made of its top level, which is what `Config.groups` returns, so a v1 config needs
+nothing new. `sharedTracks` is a list of named track entries; a track entry with `use: <name>` is that
+definition with the entry's own keys laid over it, on the raw mapping at parse time, so an override keeps
+the absent-versus-declared distinction (`default: false` beats `true`, an empty `title:` clears one). A
+file claimed by two groups is an error, one claimed by none a skip; `partitionByGroup` answers that over a
+file list with the episode lookup injected. `auto: <hash>` is reserved for a future config generator to
+mark the entries it wrote; every reader ignores it like any unknown key. Until `mux` runs one pass per
+group it refuses a grouped config with exit 2, since muxing the empty top level would copy video alone;
+`inspect` says it does not report per group and carries on, uncounted, and `--identify` does not list
+the groups' sources. The new keys stay out of `docs/` until then, and `ConfigDocsParityTest` holds them in
+a pending set.
 
 ### File selection and masks
 

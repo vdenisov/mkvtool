@@ -43,6 +43,8 @@ data class GeneralConfig(
 data class VideoTrackConfig(
     val language: String? = null,
     val title: Template? = null,
+    /** As [TrackConfig.ref]. */
+    val ref: String? = null,
 )
 
 /**
@@ -57,6 +59,9 @@ data class TrackConfig(
     val title: Template? = null,
     val default: Boolean = false,
     val charset: String? = null,
+    /** The `sharedTracks` entry this one is built on, or null; set even when no definition has the name, and
+     *  empty for a `use:` with no value. */
+    val ref: String? = null,
 )
 
 /** The main file's tracks. An absent list and an empty one mean the same thing — copy none of that type. */
@@ -77,6 +82,8 @@ data class SourceTrackConfig(
     val default: Boolean = false,
     val charset: String? = null,
     val idDeclared: Boolean = false,
+    /** As [TrackConfig.ref]. */
+    val ref: String? = null,
 )
 
 /** An extra file muxed in alongside the main source. [file] is templated — `${'$'}{fileName}` and friends. */
@@ -87,18 +94,54 @@ data class AdditionalSource(
 )
 
 /**
+ * A `sharedTracks` entry as far as validation needs it. The definition itself is laid under every track
+ * entry that names it at parse time, so nothing downstream ever resolves a reference.
+ */
+data class SharedTrack(val name: String?, val usesAnother: Boolean = false)
+
+/**
+ * Which files a group claims: a file whose episode falls in [episodes], or whose name matches a mask in
+ * [files]. [malformedEpisodes] keeps the tokens that are not `N` or `N-M`, as written, for validation.
+ */
+data class Membership(
+    val episodes: List<IntRange> = emptyList(),
+    val malformedEpisodes: List<String> = emptyList(),
+    val files: List<String> = emptyList(),
+)
+
+/**
+ * One muxing pass: the files it claims and the full selection applied to them. A null [membership] is the
+ * implicit group of a config without `groups`, which claims every file.
+ */
+data class GroupConfig(
+    val name: String? = null,
+    val membership: Membership? = null,
+    val mainSource: MainSourceConfig = MainSourceConfig(),
+    val additionalSources: List<AdditionalSource> = emptyList(),
+    val trackOrder: String? = null,
+)
+
+/**
  * The whole config.
  *
  * [trackOrder] is left as the raw `sourceIndex:trackId` CSV: it is validated against the configured
  * tracks and warned about rather than parsed into a structure, and mkvmerge itself silently ignores ids
  * that are not there.
+ *
+ * [declaredGroups] is null when the config has no `groups` key. [groups] is what a group-aware reader
+ * iterates: the declared groups, or one implicit group made of the top-level fields.
  */
 data class Config(
     val general: GeneralConfig = GeneralConfig(),
     val mainSource: MainSourceConfig = MainSourceConfig(),
     val additionalSources: List<AdditionalSource> = emptyList(),
     val trackOrder: String? = null,
-)
+    val sharedTracks: List<SharedTrack> = emptyList(),
+    val declaredGroups: List<GroupConfig>? = null,
+) {
+    val groups: List<GroupConfig> =
+        declaredGroups ?: listOf(GroupConfig(null, null, mainSource, additionalSources, trackOrder))
+}
 
 /** Load [file] as a config, or classify why it cannot be one. Auto-detected charset: `config.yaml` is
  *  hand-written, which is the contract [loadMapping] keeps for it. */
@@ -107,7 +150,11 @@ fun loadConfig(file: File): MappingLoad<Config> = loadMapping(file, transform = 
 /** Turn an already-parsed mapping into the model. Never throws: anything unreadable is simply absent. */
 fun parseConfig(mapping: Map<*, *>): Config {
     val general = mapping.mapAt("general")
-    val mainSource = mapping.mapAt("mainSource")
+    val sharedEntries = mapping.mapsAt("sharedTracks")
+    // A duplicated name is a validation problem; the first wins, as a reader meets it.
+    val shared = sharedEntries.mapNotNull { entry -> entry.nameAt()?.let { it to entry } }
+        .distinctBy { it.first }
+        .toMap()
 
     return Config(
         general = GeneralConfig(
@@ -120,24 +167,24 @@ fun parseConfig(mapping: Map<*, *>): Config {
             mkvmergeExe = general.stringAt("mkvmergeExe")?.takeIf { it.isNotEmpty() },
             title = general.templateAt("title"),
         ),
-        mainSource = MainSourceConfig(
-            videoTrack = mainSource.mapAt("videoTrack")?.let {
-                VideoTrackConfig(language = it.stringAt("language"), title = it.templateAt("title"))
-            },
-            audioTracks = mainSource.tracksAt("audioTracks"),
-            subtitleTracks = mainSource.tracksAt("subtitleTracks"),
-            additionalOptions = mainSource.stringsAt("additionalOptions"),
-        ),
-        additionalSources = (mapping["additionalSources"] as? List<*>).orEmpty()
-            .mapNotNull { it as? Map<*, *> }
-            .map { source ->
-                AdditionalSource(
-                    file = source.stringAt("file"),
-                    tracks = source.sourceTracksAt("tracks"),
-                    additionalOptions = source.stringsAt("additionalOptions"),
+        mainSource = mainSourceOf(mapping.mapAt("mainSource"), shared),
+        additionalSources = additionalSourcesOf(mapping, shared),
+        trackOrder = mapping.trackOrderAt(),
+        sharedTracks = sharedEntries.map { SharedTrack(it.nameAt(), usesAnother = it.containsKey("use")) },
+        // A `groups:` key holding nothing usable is an empty list, not an absent one: it still declares groups.
+        declaredGroups = if (mapping.containsKey("groups")) {
+            mapping.mapsAt("groups").map { group ->
+                GroupConfig(
+                    name = group.nameAt(),
+                    membership = membershipOf(group),
+                    mainSource = mainSourceOf(group.mapAt("mainSource"), shared),
+                    additionalSources = additionalSourcesOf(group, shared),
+                    trackOrder = group.trackOrderAt(),
                 )
-            },
-        trackOrder = mapping.stringAt("trackOrder")?.takeIf { it.isNotEmpty() },
+            }
+        } else {
+            null
+        },
     )
 }
 
@@ -148,16 +195,149 @@ fun parseConfig(mapping: Map<*, *>): Config {
  * config-problem policy.
  */
 fun additionalSourceIdProblems(config: Config, configName: String): List<String> =
-    config.additionalSources.flatMapIndexed { i, source ->
-        source.tracks.mapIndexedNotNull { j, track ->
-            if (track.idDeclared) {
-                "$configName sets an id on additionalSources[$i].tracks[$j], which should be removed: " +
-                    "an additional-source track is always track 0"
-            } else {
-                null
+    config.groups.flatMapIndexed { g, group ->
+        group.additionalSources.flatMapIndexed { i, source ->
+            source.tracks.mapIndexedNotNull { j, track ->
+                if (track.idDeclared) {
+                    val path = withRef("${config.groupPrefix(g)}additionalSources[$i].tracks[$j]", track.ref)
+                    "$configName sets an id on $path, which should be removed: " +
+                        "an additional-source track is always track 0"
+                } else {
+                    null
+                }
             }
         }
     }
+
+/**
+ * One line per problem with `groups` or `sharedTracks` that the config alone can show, each starting with
+ * [configName]. Each caller applies its own config-problem policy. A file claimed by two groups through
+ * masks needs the file list, so that one is [partitionByGroup]'s to find.
+ */
+fun groupProblems(config: Config, configName: String): List<String> {
+    val problems = ArrayList<String>()
+    val sharedNames = config.sharedTracks.map { it.name }
+
+    config.sharedTracks.forEachIndexed { i, shared ->
+        when {
+            shared.name == null -> problems += "$configName has no name for sharedTracks[$i]"
+            sharedNames.indexOf(shared.name) < i ->
+                problems += "$configName has two sharedTracks named '${shared.name}'"
+        }
+        // Silently ignoring the key would read as a decision that is not one.
+        if (shared.usesAnother) {
+            problems += "$configName has a use on sharedTracks[$i], but a shared track cannot build on another"
+        }
+    }
+
+    config.groups.forEachIndexed { g, group ->
+        for ((path, ref) in group.trackRefs()) {
+            when {
+                ref == "" -> problems += "$configName has an empty use at ${config.groupPrefix(g)}$path"
+                ref != null && ref !in sharedNames ->
+                    problems += "$configName uses an unknown shared track '$ref' at ${config.groupPrefix(g)}$path"
+            }
+        }
+    }
+
+    val groups = config.declaredGroups ?: return problems
+    if (groups.isEmpty()) problems += "$configName declares groups but lists none"
+    val topLevel = listOfNotNull(
+        "mainSource".takeIf { config.mainSource != MainSourceConfig() },
+        "additionalSources".takeIf { config.additionalSources.isNotEmpty() },
+        "trackOrder".takeIf { config.trackOrder != null },
+    )
+    if (topLevel.isNotEmpty()) {
+        problems += "$configName sets ${topLevel.joinToString(", ")} at the top level beside groups, " +
+            "where nothing reads it; each group carries its own"
+    }
+
+    val labels = groups.mapIndexed { i, group -> "groups[$i]" + group.name?.let { " ($it)" }.orEmpty() }
+    groups.forEachIndexed { i, group ->
+        val membership = group.membership ?: Membership()
+        membership.malformedEpisodes.forEach {
+            problems += "$configName has an episode range in ${labels[i]} that is not one: '$it'"
+        }
+        membership.files.filter { runCatching { globMatcher(it) }.isFailure }.forEach {
+            problems += "$configName has a file mask in ${labels[i]} that is not a valid pattern: '$it'"
+        }
+        if (membership == Membership()) problems += "$configName has no episodes or files for ${labels[i]}"
+        if (group.name != null && groups.indexOfFirst { it.name == group.name } < i) {
+            problems += "$configName has two groups named '${group.name}'"
+        }
+    }
+
+    for (i in groups.indices) {
+        for (j in i + 1 until groups.size) {
+            val overlaps = groups[i].membership?.episodes.orEmpty()
+                .flatMap { a -> groups[j].membership?.episodes.orEmpty().mapNotNull { b -> overlap(a, b) } }
+                .sortedBy { it.first }
+                // One group's own ranges may overlap each other, so two intersections can nest.
+                .fold(ArrayList<IntRange>()) { merged, range ->
+                    val last = merged.lastOrNull()
+                    if (last != null && range.first - 1 <= last.last) {
+                        merged[merged.lastIndex] = last.first..maxOf(last.last, range.last)
+                    } else {
+                        merged += range
+                    }
+                    merged
+                }
+            if (overlaps.isNotEmpty()) {
+                val spelled = overlaps.joinToString(", ") {
+                    if (it.first == it.last) "${it.first}" else "${it.first}-${it.last}"
+                }
+                problems += "$configName claims episodes $spelled in both ${labels[i]} and ${labels[j]}"
+            }
+        }
+    }
+
+    return problems
+}
+
+/** A file list split by group. Data only: what a double claim or an unclaimed file *means* is the caller's to
+ *  say. Every file is in exactly one of the three. */
+data class GroupPartition(
+    /** Per group, in group order, the files it alone claims. */
+    val members: List<List<File>>,
+    /** Each file claimed by more than one group, with the indices of every group claiming it. */
+    val doubleClaimed: Map<File, List<Int>>,
+    /** The files no group claims. */
+    val unclaimed: List<File>,
+)
+
+/**
+ * Split [files] by the group that claims each. A file is claimed when its episode, as [episodeOf] reports
+ * it, falls in one of a group's ranges, or when its name matches one of the group's masks, which resolve
+ * against [dir] as every file mask does; a null from [episodeOf] leaves only the masks. The implicit group
+ * claims everything. Throws on a mask that is not a valid pattern, which [groupProblems] reports first.
+ */
+fun partitionByGroup(
+    groups: List<GroupConfig>,
+    files: List<File>,
+    dir: File,
+    episodeOf: (File) -> Int?,
+): GroupPartition {
+    val masks = groups.map { compileMasks(it.membership?.files.orEmpty(), dir) }
+    val claims = files.associateWith { file ->
+        val episode = episodeOf(file)
+        groups.indices.filter { i ->
+            val membership = groups[i].membership ?: return@filter true
+            (episode != null && membership.episodes.any { episode in it }) || masks[i].any { it(file) }
+        }
+    }
+
+    return GroupPartition(
+        members = groups.indices.map { i -> files.filter { claims.getValue(it) == listOf(i) } },
+        doubleClaimed = claims.filterValues { it.size > 1 },
+        unclaimed = files.filter { claims.getValue(it).isEmpty() },
+    )
+}
+
+/** The config path group [index]'s entries start with: none for the implicit group, which is the top level. */
+internal fun Config.groupPrefix(index: Int): String = if (declaredGroups == null) "" else "groups[$index]."
+
+/** [path], naming the shared track its entry is built on when there is one. */
+internal fun withRef(path: String, ref: String?): String = if (ref.isNullOrEmpty()) path else "$path (use: $ref)"
 
 /**
  * What the check needs to know about the config: which ids are selected, and what each is titled.
@@ -222,6 +402,18 @@ fun trackSelectionOf(config: Config?): TrackSelection {
     )
 }
 
+/** Every track entry of the group with the shared track it names, by config path within the group. */
+private fun GroupConfig.trackRefs(): List<Pair<String, String?>> =
+    listOf("mainSource.videoTrack" to mainSource.videoTrack?.ref) +
+        mainSource.audioTracks.mapIndexed { i, track -> "mainSource.audioTracks[$i]" to track.ref } +
+        mainSource.subtitleTracks.mapIndexed { i, track -> "mainSource.subtitleTracks[$i]" to track.ref } +
+        additionalSources.flatMapIndexed { i, source ->
+            source.tracks.mapIndexed { j, track -> "additionalSources[$i].tracks[$j]" to track.ref }
+        }
+
+private fun overlap(a: IntRange, b: IntRange): IntRange? =
+    (maxOf(a.first, b.first)..minOf(a.last, b.last)).takeUnless { it.isEmpty() }
+
 private fun Map<*, *>?.mapAt(key: String): Map<*, *>? = this?.get(key) as? Map<*, *>
 
 private fun Map<*, *>?.stringAt(key: String): String? = this?.get(key)?.toString()
@@ -233,14 +425,85 @@ private fun Map<*, *>?.stringsAt(key: String): List<String> =
 private fun Map<*, *>?.templateAt(key: String): Template? =
     if (this != null && containsKey(key)) Template(this[key]?.toString()) else null
 
-private fun Map<*, *>?.trackMapsAt(key: String): List<Map<*, *>> =
+private fun Map<*, *>?.mapsAt(key: String): List<Map<*, *>> =
     (this?.get(key) as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
+
+private fun Map<*, *>.trackOrderAt(): String? = stringAt("trackOrder")?.takeIf { it.isNotEmpty() }
+
+private fun mainSourceOf(mainSource: Map<*, *>?, shared: Map<String, Map<*, *>>) = MainSourceConfig(
+    videoTrack = mainSource.mapAt("videoTrack")?.overDefinition(shared)?.let {
+        VideoTrackConfig(language = it.stringAt("language"), title = it.templateAt("title"), ref = it.useAt())
+    },
+    audioTracks = mainSource.tracksAt("audioTracks", shared),
+    subtitleTracks = mainSource.tracksAt("subtitleTracks", shared),
+    additionalOptions = mainSource.stringsAt("additionalOptions"),
+)
+
+private fun additionalSourcesOf(parent: Map<*, *>, shared: Map<String, Map<*, *>>) =
+    parent.mapsAt("additionalSources").map { source ->
+        AdditionalSource(
+            file = source.stringAt("file"),
+            tracks = source.sourceTracksAt("tracks", shared),
+            additionalOptions = source.stringsAt("additionalOptions"),
+        )
+    }
+
+/** Episode tokens come from a list or a comma-separated scalar, so `[1-10, 12]`, `"1-10, 12"` and `7` all
+ *  read the same. A scalar `files` is one mask. */
+private fun membershipOf(group: Map<*, *>): Membership {
+    val tokens = when (val episodes = group["episodes"]) {
+        null -> emptyList()
+        is List<*> -> episodes.map { it?.toString().orEmpty() }
+        else -> episodes.toString().split(',')
+    }.map { it.trim() }.filter { it.isNotEmpty() }
+    val files = group["files"]
+
+    val ranges = tokens.map { it to episodeRangeOf(it) }
+
+    return Membership(
+        episodes = ranges.mapNotNull { it.second },
+        malformedEpisodes = ranges.filter { it.second == null }.map { it.first },
+        // A blank mask matches nothing, so it is no mask, and a group of only those claims nothing.
+        files = (if (files is List<*>) files.mapNotNull { it?.toString() } else listOfNotNull(files?.toString()))
+            .filter { it.isNotBlank() },
+    )
+}
+
+private val EPISODE_RANGE = Regex("""(\d+)(?:\s*-\s*(\d+))?""")
+
+/** `N` or `N-M` with `1 <= N <= M`, or null. */
+private fun episodeRangeOf(token: String): IntRange? {
+    val match = EPISODE_RANGE.matchEntire(token) ?: return null
+    val first = match.groupValues[1].toIntOrNull() ?: return null
+    val last = match.groupValues[2].ifEmpty { match.groupValues[1] }.toIntOrNull() ?: return null
+    return if (first in 1..last) first..last else null
+}
+
+/** The track entries at [key], each laid over the definition it uses. */
+private fun Map<*, *>?.trackMapsAt(key: String, shared: Map<String, Map<*, *>>): List<Map<*, *>> =
+    mapsAt(key).map { it.overDefinition(shared) }
+
+/**
+ * This track entry laid over the definition its `use:` names, or itself when it names none. The entry's
+ * own keys win, which keeps the absent-versus-declared distinction an override relies on: `default: false`
+ * beats a definition's `true`, and an empty `title:` clears a definition's title.
+ */
+private fun Map<*, *>.overDefinition(shared: Map<String, Map<*, *>>): Map<*, *> {
+    val definition = stringAt("use")?.let(shared::get) ?: return this
+    return LinkedHashMap<Any?, Any?>(definition).apply { putAll(this@overDefinition) }
+}
 
 /** Truthiness: absent, null and false all mean "not the default track". */
 private fun Map<*, *>.isDefaultTrack(): Boolean = this["default"] == true || stringAt("default") == "true"
 
-private fun Map<*, *>?.tracksAt(key: String): List<TrackConfig> =
-    trackMapsAt(key).map { track ->
+/** A `name:`, null when absent or empty: an empty name names nothing. */
+private fun Map<*, *>.nameAt(): String? = stringAt("name")?.takeIf { it.isNotEmpty() }
+
+/** The `use:` value, empty when the key is there with none, so validation can say so rather than drop it. */
+private fun Map<*, *>.useAt(): String? = if (containsKey("use")) stringAt("use").orEmpty() else null
+
+private fun Map<*, *>?.tracksAt(key: String, shared: Map<String, Map<*, *>>): List<TrackConfig> =
+    trackMapsAt(key, shared).map { track ->
         TrackConfig(
             // A quoted id is still an id: v1 coerced with `as Integer`, which read "2" as 2.
             id = (track["id"] as? Number)?.toInt() ?: track.stringAt("id")?.trim()?.toIntOrNull(),
@@ -248,11 +511,12 @@ private fun Map<*, *>?.tracksAt(key: String): List<TrackConfig> =
             title = track.templateAt("title"),
             default = track.isDefaultTrack(),
             charset = track.stringAt("charset"),
+            ref = track.useAt(),
         )
     }
 
-private fun Map<*, *>?.sourceTracksAt(key: String): List<SourceTrackConfig> =
-    trackMapsAt(key).map { track ->
+private fun Map<*, *>?.sourceTracksAt(key: String, shared: Map<String, Map<*, *>>): List<SourceTrackConfig> =
+    trackMapsAt(key, shared).map { track ->
         SourceTrackConfig(
             language = track.stringAt("language"),
             title = track.templateAt("title"),
@@ -260,5 +524,6 @@ private fun Map<*, *>?.sourceTracksAt(key: String): List<SourceTrackConfig> =
             charset = track.stringAt("charset"),
             // The key, not its value: an empty `id:` or a harmless `id: 0` is refused the same way.
             idDeclared = track.containsKey("id"),
+            ref = track.useAt(),
         )
     }

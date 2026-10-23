@@ -1,10 +1,15 @@
 package org.plukh.mkvtool.core
 
+import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.LoaderOptions
 import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.constructor.SafeConstructor
+import org.yaml.snakeyaml.nodes.Tag
+import org.yaml.snakeyaml.representer.Representer
+import org.yaml.snakeyaml.resolver.Resolver
 import java.io.File
 import java.nio.charset.Charset
+import java.util.regex.Pattern
 
 /**
  * "Read this file, get a mapping or a named reason why not" — the loader behind `config.yaml` and
@@ -41,12 +46,13 @@ fun loadMapping(file: File, charset: Charset? = null): MappingLoad<Map<*, *>> =
  * Four outcomes, three of them problems: unreadable or unparseable, empty, parsed-but-not-a-mapping, and
  * the mapping itself. Parsing is a safe load, so a document naming a Java type (`!!java.lang.Object`)
  * becomes a parse problem instead of instantiating anything; v1's snakeyaml 1.30 default would have
- * constructed it.
+ * constructed it. A zero-padded number (`010`) or one with colons (`1:30`) stays the text it was written as,
+ * not YAML 1.1's octal or base 60; a reader wanting a number converts the text.
  */
 fun <T> loadMapping(file: File, charset: Charset? = null, transform: (Map<*, *>) -> T): MappingLoad<T> =
     try {
         val text = if (charset != null) file.readText(charset) else readTextDetected(file)
-        val loaded: Any? = Yaml(SafeConstructor(LoaderOptions())).load(text)
+        val loaded: Any? = textPreservingYaml().load(text)
         when {
             loaded == null -> MappingLoad.Problem("${file.name} is empty")
             loaded !is Map<*, *> ->
@@ -61,3 +67,28 @@ fun <T> loadMapping(file: File, charset: Charset? = null, transform: (Map<*, *>)
  *  because snakeyaml appends a multi-line context dump that turns one warning into a screenful. */
 private fun firstLine(e: Exception): String =
     e.message?.lineSequence()?.firstOrNull { it.isNotEmpty() } ?: e.toString()
+
+/** A safe-load [Yaml] whose resolver keeps the numbers YAML 1.1 would misread as text. */
+private fun textPreservingYaml(): Yaml {
+    val loaderOptions = LoaderOptions()
+    val dumperOptions = DumperOptions()
+    return Yaml(
+        SafeConstructor(loaderOptions),
+        Representer(dumperOptions),
+        dumperOptions,
+        loaderOptions,
+        TextPreservingResolver(),
+    )
+}
+
+// YAML 1.1 reads `010` as octal 8 and `1:30` as 90 (base 60); readers coerce text, so text loses nothing.
+private val MISREAD_NUMBER: Pattern =
+    Pattern.compile("""^[-+]?(?:0[0-9_]+|[0-9][0-9_]*(?::[0-5]?[0-9])+(?:\.[0-9_]*)?)$""")
+
+private class TextPreservingResolver : Resolver() {
+    override fun addImplicitResolvers() {
+        // First registered wins, so this has to precede the stock INT and FLOAT resolvers.
+        addImplicitResolver(Tag.STR, MISREAD_NUMBER, "-+0123456789")
+        super.addImplicitResolvers()
+    }
+}

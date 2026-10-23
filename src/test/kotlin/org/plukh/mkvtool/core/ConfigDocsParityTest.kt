@@ -39,7 +39,15 @@ class ConfigDocsParityTest : FunSpec({
         "id", "language", "default", "charset",
         "additionalSources", "file", "tracks",
         "additionalOptions", "trackOrder",
+        "sharedTracks", "name", "use", "groups", "episodes", "files",
     )
+
+    /**
+     * Keys the loader reads that are not documented yet, because no command acts on them yet: groups are
+     * parsed and validated, and mux refuses them until it runs one pass per group. The set empties when
+     * that lands, and the test below keeps a documented key from lingering in it.
+     */
+    val pendingKeys = setOf("sharedTracks", "name", "use", "groups", "episodes", "files")
 
     /**
      * A key line is `name:` followed by end of line or by something that looks like a YAML value — a
@@ -76,11 +84,16 @@ class ConfigDocsParityTest : FunSpec({
     val exampleKeys = keysIn(repoFile(EXAMPLE_CONFIG_PATH).readLines(Charsets.UTF_8))
 
     test("the reference documents every config key") {
-        configKeys - referenceKeys shouldBe emptySet()
+        configKeys - pendingKeys - referenceKeys shouldBe emptySet()
     }
 
     test("the example config uses every config key") {
-        configKeys - exampleKeys shouldBe emptySet()
+        configKeys - pendingKeys - exampleKeys shouldBe emptySet()
+    }
+
+    test("a pending key is documented nowhere, or it would not be pending") {
+        pendingKeys intersect (referenceKeys + exampleKeys) shouldBe emptySet()
+        configKeys.containsAll(pendingKeys) shouldBe true
     }
 
     test("the reference names no key the loader does not read") {
@@ -96,7 +109,7 @@ class ConfigDocsParityTest : FunSpec({
         // above by describing nothing.
         referenceKeys.shouldNotBeEmpty()
         exampleKeys.shouldNotBeEmpty()
-        (configKeys - referenceKeys - exampleKeys).shouldBeEmpty()
+        (configKeys - pendingKeys - referenceKeys - exampleKeys).shouldBeEmpty()
     }
 
     /**

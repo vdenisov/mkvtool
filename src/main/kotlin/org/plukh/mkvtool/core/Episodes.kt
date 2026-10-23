@@ -310,6 +310,5 @@ private fun pad(number: Int): String = String.format(Locale.ROOT, "%02d", number
  *  `"one"` included — throws for [normalizeYaml]'s caller to classify. */
 private fun asInt(value: Any, what: String): Int = when (value) {
     is Number -> value.toInt()
-    is String -> value.toInt()
-    else -> throw IllegalArgumentException("$what is not a number: $value")
+    else -> (value as? String)?.toIntOrNull() ?: throw IllegalArgumentException("$what is not a number: $value")
 }

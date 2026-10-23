@@ -48,6 +48,34 @@ class YamlMappingTest : FunSpec({
         load.value shouldBe mapOf("a" to 1, "b" to "two")
     }
 
+    context("a number YAML 1.1 would misread keeps its text") {
+        // YAML 1.1 reads 010 as octal 8 and 1:30 as 90 (base 60); a collector writing 010 means ten.
+        withData(
+            nameFn = { "${it.first} is ${it.second::class.simpleName} ${it.second}" },
+            "010" to "010",
+            "007" to "007",
+            "-007" to "-007",
+            "0_10" to "0_10",
+            "08" to "08",
+            "1:0" to "1:0",
+            "1:30.5" to "1:30.5",
+            "0" to 0,
+            "12" to 12,
+            "0x1F" to 31,
+            "1.5" to 1.5,
+        ) { (text, expected) ->
+            val load = loadMapping(write(tempdir(), "n.yaml", "n: $text\n"))
+            load.shouldBeInstanceOf<MappingLoad.Loaded<Map<*, *>>>()
+            load.value["n"] shouldBe expected
+        }
+
+        test("inside a flow list too") {
+            val load = loadMapping(write(tempdir(), "n.yaml", "episodes: [008, 009, 010]\n"))
+            load.shouldBeInstanceOf<MappingLoad.Loaded<Map<*, *>>>()
+            load.value["episodes"] shouldBe listOf("008", "009", "010")
+        }
+    }
+
     test("the problem names the file and stays a lowercase fragment") {
         val load = loadMapping(write(tempdir(), "config.yaml", ""))
         load.shouldBeInstanceOf<MappingLoad.Problem>()

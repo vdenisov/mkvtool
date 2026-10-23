@@ -259,6 +259,29 @@ class SubstitutionTest : FunSpec({
             collectTemplateFields(null).shouldBeEmpty()
             fieldsOf(emptyMap<String, Any>()).shouldBeEmpty()
         }
+
+        test("a grouped config's fields are named under their group, and a shared track is named too") {
+            val config = mapOf(
+                "general" to mapOf("title" to "\${showName}"),
+                "sharedTracks" to listOf(mapOf("name" to "jpn", "id" to 1, "title" to "\${languageName}")),
+                "groups" to listOf(
+                    mapOf("episodes" to "1-6", "mainSource" to mapOf("audioTracks" to listOf(mapOf("use" to "jpn")))),
+                    mapOf(
+                        "episodes" to "7-12",
+                        "additionalSources" to listOf(
+                            mapOf("file" to "\${fileName}.mka", "tracks" to listOf(mapOf("title" to "Dub"))),
+                        ),
+                    ),
+                ),
+            )
+
+            fieldsOf(config).map { it.path } shouldContainExactly listOf(
+                "general.title",
+                "groups[0].mainSource.audioTracks[0].title (use: jpn)",
+                "groups[1].additionalSources[0].file",
+                "groups[1].additionalSources[0].tracks[0].title",
+            )
+        }
     }
 
     context("validateTemplates") {

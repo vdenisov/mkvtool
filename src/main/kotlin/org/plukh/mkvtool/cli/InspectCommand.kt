@@ -9,6 +9,7 @@ import org.plukh.mkvtool.core.StrictVerdict
 import org.plukh.mkvtool.core.SubstitutionEngine
 import org.plukh.mkvtool.core.additionalSourceIdProblems
 import org.plukh.mkvtool.core.collectTemplateFields
+import org.plukh.mkvtool.core.groupProblems
 import org.plukh.mkvtool.core.inspectDirectory
 import org.plukh.mkvtool.core.loadConfig
 import org.plukh.mkvtool.core.loadEpisodeMetadata
@@ -143,6 +144,21 @@ class InspectCommand : Callable<Int> {
         config?.let { additionalSourceIdProblems(it, configName) }?.forEach {
             renderer.render(Warning("$it; ignoring the id."))
             configProblems++
+        }
+        config?.let { groupProblems(it, configName) }?.forEach {
+            renderer.render(Warning("$it."))
+            configProblems++
+        }
+        // Not counted: a valid grouped config is not a problem, and --strict must not fail it.
+        // An empty groups: is already reported above; there are no groups to say anything about.
+        if (!config?.declaredGroups.isNullOrEmpty()) {
+            renderer.render(
+                Warning(
+                    "$configName declares groups, which inspect does not report per group yet; " +
+                        "findings are not classified against the groups' selections, " +
+                        "and --identify does not list the groups' sources.",
+                ),
+            )
         }
 
         // Episode metadata only decorates the source paths --identify resolves; it produces no findings,
