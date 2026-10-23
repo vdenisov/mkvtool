@@ -11,7 +11,10 @@ import io.kotest.matchers.string.shouldStartWith
 import org.plukh.mkvtool.core.AdditionalSource
 import org.plukh.mkvtool.core.Config
 import org.plukh.mkvtool.core.GeneralConfig
+import org.plukh.mkvtool.core.GroupConfig
 import org.plukh.mkvtool.core.MainSourceConfig
+import org.plukh.mkvtool.core.Membership
+import org.plukh.mkvtool.core.SharedTrack
 import org.plukh.mkvtool.core.SourceTrackConfig
 import org.plukh.mkvtool.core.Template
 import org.plukh.mkvtool.core.TrackConfig
@@ -141,6 +144,29 @@ class MuxCommandTest : FunSpec({
             // inventing a value — which is why these are not in the refusal list.
             muxConfigProblem(config(audio = listOf(TrackConfig(id = 1))), "config.yaml") shouldBe null
             muxConfigProblem(config(videoTrack = null), "config.yaml") shouldBe null
+        }
+
+        test("a missing id on an entry built on a shared track names the shared track too") {
+            muxConfigProblem(
+                config(audio = listOf(TrackConfig(language = "ja", ref = "jpn"))).copy(
+                    sharedTracks = listOf(SharedTrack("jpn")),
+                ),
+                "config.yaml",
+            ) shouldBe "config.yaml has no id for mainSource.audioTracks[0] (use: jpn)"
+        }
+
+        test("a group or shared-track problem is refused, before the per-track checks") {
+            muxConfigProblem(config(audio = listOf(TrackConfig(ref = "jpn"))), "config.yaml") shouldBe
+                "config.yaml uses an unknown shared track 'jpn' at mainSource.audioTracks[0]"
+        }
+
+        test("a grouped config is refused until mux runs one pass per group") {
+            val grouped = Config(
+                general = GeneralConfig(destinationDir = "mkv"),
+                declaredGroups = listOf(GroupConfig(name = "bd", membership = Membership(episodes = listOf(1..6)))),
+            )
+
+            muxConfigProblem(grouped, "config.yaml") shouldBe "config.yaml declares groups, which mux does not run yet"
         }
     }
 })

@@ -281,14 +281,22 @@ class EpisodesTest : FunSpec({
 
         // Throwing is the contract: callers run this as loadMapping's transform, inside the guard.
         context("rejects what it cannot read") {
-            test("an episode number that is not a number") {
-                shouldThrow<NumberFormatException> {
+            test("an episode number that is not a number, named as one") {
+                shouldThrow<IllegalArgumentException> {
                     normalizeYaml(mapOf("episodes" to listOf(mapOf("episode" to "one", "name" to "Pilot"))))
-                }
+                }.message shouldBe "episode number is not a number: one"
             }
 
             test("a season that is not a number") {
-                shouldThrow<NumberFormatException> { normalizeYaml(mapOf("season" to "one")) }
+                shouldThrow<IllegalArgumentException> { normalizeYaml(mapOf("season" to "one")) }
+                    .message shouldBe "season number is not a number: one"
+            }
+
+            test("a base-60 number the loader kept as text is not one either") {
+                // YAML 1.1 would have read 1:30 as 90; the loader keeps the text, and it is no episode number.
+                shouldThrow<IllegalArgumentException> {
+                    normalizeYaml(mapOf("episodes" to listOf(mapOf("episode" to "1:30"))))
+                }.message shouldBe "episode number is not a number: 1:30"
             }
 
             test("an episode number that is neither a number nor a string") {
@@ -335,6 +343,16 @@ class EpisodesTest : FunSpec({
                     season = "01",
                     byEpisode = mapOf("01" to "Пилот"),
                 )
+            }
+
+            test("a zero-padded number is the decimal it looks like, not YAML 1.1's octal") {
+                val file = File(tempdir(), "episodes.yaml").apply {
+                    writeText("season: 010\nepisodes:\n  - episode: 010\n    name: Ten\n", StandardCharsets.UTF_8)
+                }
+                val load = loadMapping(file, StandardCharsets.UTF_8) { normalizeYaml(it) }
+                load.shouldBeInstanceOf<MappingLoad.Loaded<EpisodeData>>()
+                load.value.season shouldBe "10"
+                load.value.byEpisode shouldBe mapOf("10" to "Ten")
             }
         }
     }

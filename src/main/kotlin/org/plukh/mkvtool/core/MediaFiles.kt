@@ -2,6 +2,7 @@ package org.plukh.mkvtool.core
 
 import java.io.File
 import java.nio.file.FileSystems
+import java.nio.file.PathMatcher
 import java.nio.file.Paths
 
 /**
@@ -51,7 +52,7 @@ fun compileMasks(patterns: List<String>, dir: File): List<FileMask> =
             val literal = named.name
             return@map { candidate: File -> candidate.name == literal }
         }
-        val matcher = FileSystems.getDefault().getPathMatcher("glob:" + pattern.replace('\\', '/'))
+        val matcher = globMatcher(pattern)
         return@map { candidate: File -> matcher.matches(Paths.get(candidate.name)) }
     }
 
@@ -136,6 +137,10 @@ fun maskDescription(fileMasks: List<String>, excludeMasks: List<String>): String
  */
 internal fun resolveAgainst(dir: File, path: String): File =
     File(path).let { if (it.isAbsolute) it else File(dir, path) }
+
+/** [pattern] as a JDK `glob:` matcher, backslashes folded to forward slashes; throws when it is not a glob. */
+internal fun globMatcher(pattern: String): PathMatcher =
+    FileSystems.getDefault().getPathMatcher("glob:" + pattern.replace('\\', '/'))
 
 /**
  * [name]'s extension, lower-cased, without the dot; empty when it has none.

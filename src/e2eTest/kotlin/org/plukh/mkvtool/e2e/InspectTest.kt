@@ -369,6 +369,10 @@ class InspectTest : FunSpec({
                 "an id on an additional-source track",
                 "additionalSources:\n  - file: \"a.mka\"\n    tracks:\n      - id: 1\n        language: \"ru\"\n",
             ),
+            BrokenFile(
+                "a use naming no shared track",
+                "mainSource:\n  audioTracks:\n    - use: \"jpn\"\n",
+            ),
         ) { row ->
             val workDir = tempdir()
             stageInput(workDir, "a.mkv")
@@ -421,6 +425,39 @@ class InspectTest : FunSpec({
                 strict.exitCode shouldBe 0
                 strict.output shouldNotContain "config problem"
             }
+        }
+    }
+
+    // Groups are not reported per group yet, which inspect says; a valid grouped config is still no problem.
+    test("a valid grouped config is a warning and no config problem").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "a.mkv")
+        File(workDir, "config.yaml").writeText(
+            "groups:\n  - name: \"bd\"\n    episodes: [1-6]\n  - name: \"tv\"\n    episodes: [7-12]\n",
+            StandardCharsets.UTF_8,
+        )
+
+        val run = inspect(workDir, "--strict")
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldContain
+                "*** Warning: config.yaml declares groups, which inspect does not report per group yet"
+            run.output shouldNotContain "config problem"
+        }
+    }
+
+    test("an empty groups list is one problem, with no per-group warning about it").config(
+        enabledOrReasonIf = needsMkvmerge,
+    ) {
+        val workDir = tempdir()
+        stageInput(workDir, "a.mkv")
+        File(workDir, "config.yaml").writeText("groups: []\n", StandardCharsets.UTF_8)
+
+        val run = inspect(workDir, "--strict")
+        withClue(run.output) {
+            run.exitCode shouldBe 2
+            run.output shouldContain "*** Warning: config.yaml declares groups but lists none."
+            run.output shouldNotContain "does not report per group"
         }
     }
 

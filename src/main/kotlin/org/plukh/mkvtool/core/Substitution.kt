@@ -232,30 +232,36 @@ fun collectTemplateFields(config: Config?): List<TemplateField> {
     // keeps the field list honest; an absent key is no field at all.
     config.general.title?.let { fields += TemplateField("general.title", it.text, FILE_VARS) }
 
-    config.mainSource.videoTrack?.let { video ->
-        video.title?.let {
-            fields += TemplateField("mainSource.videoTrack.title", it.text, all, video.language)
-        }
-    }
-    for ((key, tracks) in listOf(
-        "audioTracks" to config.mainSource.audioTracks,
-        "subtitleTracks" to config.mainSource.subtitleTracks,
-    )) {
-        tracks.forEachIndexed { i, track ->
-            track.title?.let {
-                fields += TemplateField("mainSource.$key[$i].title", it.text, all, track.language)
+    config.groups.forEachIndexed { g, group ->
+        val prefix = config.groupPrefix(g)
+        group.mainSource.videoTrack?.let { video ->
+            video.title?.let {
+                val path = withRef("${prefix}mainSource.videoTrack.title", video.ref)
+                fields += TemplateField(path, it.text, all, video.language)
             }
         }
-    }
-
-    config.additionalSources.forEachIndexed { i, source ->
-        // Truthiness here, unlike the titles above: a source with no file is nothing to resolve.
-        if (!source.file.isNullOrEmpty()) {
-            fields += TemplateField("additionalSources[$i].file", source.file, FILE_VARS)
+        for ((key, tracks) in listOf(
+            "audioTracks" to group.mainSource.audioTracks,
+            "subtitleTracks" to group.mainSource.subtitleTracks,
+        )) {
+            tracks.forEachIndexed { i, track ->
+                track.title?.let {
+                    val path = withRef("${prefix}mainSource.$key[$i].title", track.ref)
+                    fields += TemplateField(path, it.text, all, track.language)
+                }
+            }
         }
-        source.tracks.forEachIndexed { j, track ->
-            track.title?.let {
-                fields += TemplateField("additionalSources[$i].tracks[$j].title", it.text, all, track.language)
+
+        group.additionalSources.forEachIndexed { i, source ->
+            // Truthiness here, unlike the titles above: a source with no file is nothing to resolve.
+            if (!source.file.isNullOrEmpty()) {
+                fields += TemplateField("${prefix}additionalSources[$i].file", source.file, FILE_VARS)
+            }
+            source.tracks.forEachIndexed { j, track ->
+                track.title?.let {
+                    val path = withRef("${prefix}additionalSources[$i].tracks[$j].title", track.ref)
+                    fields += TemplateField(path, it.text, all, track.language)
+                }
             }
         }
     }

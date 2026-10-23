@@ -221,6 +221,7 @@ fun resolveUiLanguage(mkvmergeExe: String): String? =
  */
 fun muxConfigProblem(config: Config, configName: String): String? {
     if (config.general.destinationDir.isNullOrEmpty()) return "$configName has no general.destinationDir"
+    groupProblems(config, configName).firstOrNull()?.let { return it }
 
     for ((key, tracks) in listOf(
         "audioTracks" to config.mainSource.audioTracks,
@@ -229,7 +230,7 @@ fun muxConfigProblem(config: Config, configName: String): String? {
         tracks.forEachIndexed { i, track ->
             // Without an id there is no track to select, name or order: every option mkvmerge would be
             // handed for it addresses a number that is not there.
-            if (track.id == null) return "$configName has no id for mainSource.$key[$i]"
+            if (track.id == null) return "$configName has no id for ${withRef("mainSource.$key[$i]", track.ref)}"
         }
     }
 
@@ -239,7 +240,11 @@ fun muxConfigProblem(config: Config, configName: String): String? {
         if (source.file.isNullOrEmpty()) return "$configName has no file for additionalSources[$i]"
     }
 
-    return additionalSourceIdProblems(config, configName).firstOrNull()
+    additionalSourceIdProblems(config, configName).firstOrNull()?.let { return it }
+
+    // Until mux runs one pass per group, muxing the empty top level instead would copy video alone.
+    if (config.declaredGroups != null) return "$configName declares groups, which mux does not run yet"
+    return null
 }
 
 /**
