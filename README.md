@@ -259,9 +259,10 @@ mkvtool mux "Show.S01E*.mkv" --exclude "*.sample.mkv"
 ```
 
 Quote your patterns so the behavior is identical across shells (globs are
-expanded internally). A pattern that exactly names an existing file is taken
-literally, so a file called `Odd[1].mkv` selects only itself rather than being
-read as a character class. A pattern that matches nothing is reported, so a typo
+expanded internally). The only wildcards are `*` (any run of characters) and `?`
+(one character); everything else is literal, brackets and braces included, so
+`"*[MC-Ent].mkv"` means exactly what it says. Case is ignored on Windows and
+significant elsewhere. A pattern that matches nothing is reported, so a typo
 does not look like a successful run with no work to do.
 
 #### External file pre-flight

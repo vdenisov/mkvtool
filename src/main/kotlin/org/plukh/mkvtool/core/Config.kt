@@ -258,9 +258,6 @@ fun groupProblems(config: Config, configName: String): List<String> {
         membership.malformedEpisodes.forEach {
             problems += "$configName has an episode range in ${labels[i]} that is not one: '$it'"
         }
-        membership.files.filter { runCatching { globMatcher(it) }.isFailure }.forEach {
-            problems += "$configName has a file mask in ${labels[i]} that is not a valid pattern: '$it'"
-        }
         if (membership == Membership()) problems += "$configName has no episodes or files for ${labels[i]}"
         if (group.name != null && groups.indexOfFirst { it.name == group.name } < i) {
             problems += "$configName has two groups named '${group.name}'"
@@ -309,7 +306,7 @@ data class GroupPartition(
  * Split [files] by the group that claims each. A file is claimed when its episode, as [episodeOf] reports
  * it, falls in one of a group's ranges, or when its name matches one of the group's masks, which resolve
  * against [dir] as every file mask does; a null from [episodeOf] leaves only the masks. The implicit group
- * claims everything. Throws on a mask that is not a valid pattern, which [groupProblems] reports first.
+ * claims everything.
  */
 fun partitionByGroup(
     groups: List<GroupConfig>,

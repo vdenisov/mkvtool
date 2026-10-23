@@ -554,10 +554,18 @@ a pending set.
 
 Positional `FILE` arguments and `--exclude` patterns filter the file list in every mode, in both `mux` and
 `inspect`. Unix shells expand `*.mkv` before the tool sees it, but `cmd.exe` passes the literal through,
-so **globs are expanded internally** against the bare file name. A pattern that names an existing file is
-matched **literally** instead — otherwise a file called `Odd[1].mkv` could not be selected at all, since
-as a glob it also matches `Odd1.mkv`. Getting this wrong passes a Linux-only CI and fails on Windows. The
-file list is sorted by name, so batches process predictably.
+so **globs are expanded internally** against the bare file name. Getting this wrong passes a Linux-only CI
+and fails on Windows. The file list is sorted by name, so batches process predictably.
+
+**Every file pattern in the tool is one glob of its own**, `maskRegex`: `*` within a path segment, `**`
+across segments, `?` one character, and everything else literal. That covers these arguments and the
+config's `files:` masks alike. It is not the JDK glob because release names are full of brackets
+(`[MC-Ent]`), which a JDK glob reads as a character class, so a mask over them silently matches the wrong
+files; with brackets and braces literal, no pattern can be invalid either. Case is ignored on Windows and
+significant elsewhere. A pattern that names an existing file **in the media directory** is still matched
+**literally**, by its on-disk name, so a file whose own name holds a `*` or `?` (legal outside Windows)
+selects only itself, a differently cased exact name still selects it on Windows, and `extras/E01.mkv`
+never stands in for a top-level `E01.mkv`.
 
 `mux` walks the mask result *before* the extension rule, because it reports what it passes over
 (`*** Skipping notes.txt`) and needs to distinguish "nothing matched at all" from "nothing matched is

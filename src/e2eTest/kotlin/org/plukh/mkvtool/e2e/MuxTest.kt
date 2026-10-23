@@ -580,8 +580,8 @@ class MuxTest : FunSpec({
             MaskRow("an exact file name", listOf("Show.S01E02.mkv"), listOf("Show.S01E02.mkv")),
             MaskRow(
                 "an unexpanded glob, which misses the sample",
-                listOf("Show.S01E0[12].mkv"),
-                listOf("Show.S01E01.mkv", "Show.S01E02.mkv"),
+                listOf("Show.S01E0?.mkv"),
+                listOf("Show.S01E01.mkv", "Show.S01E02.mkv", "Show.S01E03.mkv"),
             ),
             MaskRow(
                 "several masks, unioned",
@@ -618,7 +618,7 @@ class MuxTest : FunSpec({
         File(workDir, "mkv").exists() shouldBe false
     }
 
-    // Read as a glob, Odd[1].mkv also matches Odd1.mkv, so without the literal rule it could not be selected.
+    // A JDK glob would read [1] as a character class and select Odd1.mkv too; brackets are literal here.
     test("a mask naming an existing file is matched literally, not as a glob")
         .config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()
@@ -633,6 +633,24 @@ class MuxTest : FunSpec({
 
         withClue(run.output) { run.exitCode shouldBe 0 }
         outputNames(workDir) shouldBe listOf("Odd[1].mkv")
+    }
+
+    // Release names are full of brackets, so a mask must not read them as a class: Odd[1].mkv is not Odd1.mkv.
+    test("brackets in a mask are literal, never a character class").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "Odd1.mkv")
+        writeConfig(
+            workDir,
+            cfg(audioTracks = listOf(TrackSpec(id = 1, language = "ja", title = "Japanese", default = true))),
+        )
+
+        val run = mux(workDir, "Odd[1].mkv")
+
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldContain "No files match"
+        }
+        File(workDir, "mkv").exists() shouldBe false
     }
 })
 

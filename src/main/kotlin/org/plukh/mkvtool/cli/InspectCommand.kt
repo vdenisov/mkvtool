@@ -93,7 +93,9 @@ class InspectCommand : Callable<Int> {
     @Option(
         names = ["-x", "--exclude"],
         paramLabel = "PATTERN",
-        description = ["File name or glob pattern to skip; may be given more than once"],
+        description = [
+            "File name or pattern to skip (* and ? are the only wildcards); may be given more than once",
+        ],
     )
     var excludeMasks: MutableList<String> = mutableListOf()
 
@@ -102,7 +104,8 @@ class InspectCommand : Callable<Int> {
         arity = "0..*",
         paramLabel = "FILE",
         description = [
-            "File names or glob patterns to inspect; may be given more than once " +
+            "File names or patterns to inspect (* and ? are the only wildcards); " +
+                "may be given more than once " +
                 "(default: every media file in the current directory)",
         ],
     )
