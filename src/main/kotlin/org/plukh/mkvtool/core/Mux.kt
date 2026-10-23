@@ -222,6 +222,7 @@ fun resolveUiLanguage(mkvmergeExe: String): String? =
 fun muxConfigProblem(config: Config, configName: String): String? {
     if (config.general.destinationDir.isNullOrEmpty()) return "$configName has no general.destinationDir"
     groupProblems(config, configName).firstOrNull()?.let { return it }
+    bindingProblems(config, configName).firstOrNull()?.let { return it }
 
     for ((key, tracks) in listOf(
         "audioTracks" to config.mainSource.audioTracks,
@@ -237,13 +238,20 @@ fun muxConfigProblem(config: Config, configName: String): String? {
     config.additionalSources.forEachIndexed { i, source ->
         // A source with no file is nothing to mux: v1 threw on it, and passing mkvmerge an empty argument
         // between its parentheses would be a worse answer than saying so.
-        if (source.file.isNullOrEmpty()) return "$configName has no file for additionalSources[$i]"
+        // A source with files: names none on purpose; the binding refusal below speaks for it.
+        if (source.file.isNullOrEmpty() && source.files == null) {
+            return "$configName has no file for additionalSources[$i]"
+        }
     }
 
     additionalSourceIdProblems(config, configName).firstOrNull()?.let { return it }
 
     // Until mux runs one pass per group, muxing the empty top level instead would copy video alone.
     if (config.declaredGroups != null) return "$configName declares groups, which mux does not run yet"
+    // Until mux binds, a v1 run would ignore them: wrong names and companions, quietly.
+    bindingKeys(config).firstOrNull()?.let { return "$configName sets $it, which mux does not run yet" }
+    // Until mux names outputs by it, a v1 run would keep the main file's name.
+    if (config.general.outputName != null) return "$configName sets general.outputName, which mux does not run yet"
     return null
 }
 

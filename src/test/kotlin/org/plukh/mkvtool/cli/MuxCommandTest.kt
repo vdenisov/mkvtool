@@ -13,6 +13,7 @@ import org.plukh.mkvtool.core.Config
 import org.plukh.mkvtool.core.GeneralConfig
 import org.plukh.mkvtool.core.GroupConfig
 import org.plukh.mkvtool.core.MainSourceConfig
+import org.plukh.mkvtool.core.MatcherConfig
 import org.plukh.mkvtool.core.Membership
 import org.plukh.mkvtool.core.SharedTrack
 import org.plukh.mkvtool.core.SourceTrackConfig
@@ -167,6 +168,29 @@ class MuxCommandTest : FunSpec({
             )
 
             muxConfigProblem(grouped, "config.yaml") shouldBe "config.yaml declares groups, which mux does not run yet"
+        }
+
+        test("a binding key is refused until mux binds files to episodes, naming the key") {
+            val named = config().copy(general = GeneralConfig(destinationDir = "mkv", outputName = Template("x")))
+
+            muxConfigProblem(named, "config.yaml") shouldBe
+                "config.yaml sets general.outputName, which mux does not run yet"
+        }
+
+        test("a source with files is not reported as having no file; the binding refusal speaks for it") {
+            val bound = config(sources = listOf(AdditionalSource(files = listOf("Rus sound/*.mka"))))
+
+            muxConfigProblem(bound, "config.yaml") shouldBe
+                "config.yaml sets additionalSources[0].files, which mux does not run yet"
+        }
+
+        test("a binding problem is reported ahead of the not-run-yet refusal") {
+            val pinned = config().copy(
+                general = GeneralConfig(destinationDir = "mkv", matching = MatcherConfig(matcher = "fuzzy")),
+            )
+
+            muxConfigProblem(pinned, "config.yaml") shouldBe
+                "config.yaml has an unknown matcher 'fuzzy' at general.matcher"
         }
     }
 })

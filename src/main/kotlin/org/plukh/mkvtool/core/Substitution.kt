@@ -231,6 +231,7 @@ fun collectTemplateFields(config: Config?): List<TemplateField> {
     // A declared template with no value is still a template, and validating it as an empty one is what
     // keeps the field list honest; an absent key is no field at all.
     config.general.title?.let { fields += TemplateField("general.title", it.text, FILE_VARS) }
+    config.general.outputName?.let { fields += TemplateField("general.outputName", it.text, FILE_VARS) }
 
     config.groups.forEachIndexed { g, group ->
         val prefix = config.groupPrefix(g)

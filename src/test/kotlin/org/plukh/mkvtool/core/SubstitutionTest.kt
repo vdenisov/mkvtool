@@ -296,6 +296,18 @@ class SubstitutionTest : FunSpec({
             validation.offenses.single().allowed shouldBe FILE_VARS
         }
 
+        test("outputName is a file-scope template: an unknown variable and a track variable are both offenses") {
+            val validation = validateTemplates(
+                fieldsOf(mapOf("general" to mapOf("outputName" to "\${showName} - \${epsiodeName} \${codec}"))),
+            )
+
+            validation.offenses.map { it.path to it.token } shouldBe listOf(
+                "general.outputName" to "\${epsiodeName}",
+                "general.outputName" to "\${codec}",
+            )
+            validation.offenses.first().allowed shouldBe FILE_VARS
+        }
+
         test("a track variable in a file-scope field is out of scope") {
             val validation = validateTemplates(
                 fieldsOf(mapOf("general" to mapOf("title" to "\${codec}")))

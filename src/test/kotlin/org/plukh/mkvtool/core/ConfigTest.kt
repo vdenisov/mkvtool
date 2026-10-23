@@ -699,4 +699,279 @@ class ConfigTest : FunSpec({
             partitionByGroup(yaml("mainSource: {}\n").groups, all, dir, episodeOf).members shouldBe listOf(all)
         }
     }
+
+    context("matchers") {
+        test("a v1-shaped config sets no binding key") {
+            val config = yaml("general: {destinationDir: mkv}\nadditionalSources:\n  - file: \"\${fileName}.mka\"\n")
+
+            config.general.matching shouldBe MatcherConfig()
+            config.general.outputName shouldBe null
+            config.additionalSources.single().files shouldBe null
+            bindingKeys(config).shouldBeEmpty()
+        }
+
+        test("general carries the main files' matcher keys and outputName, as written") {
+            val general = yaml(
+                """
+                general:
+                  matcher: regex
+                  episodeRegex: ' - (\d+) '
+                  seasonRegex: 'S(\d+)'
+                  episodeMap:
+                    13-24: 1-12
+                  outputName: '${'$'}{showName} - ${'$'}{episodeName}'
+                """,
+            ).general
+
+            general.matching shouldBe MatcherConfig(
+                matcher = "regex",
+                episodeRegex = """ - (\d+) """,
+                seasonRegex = """S(\d+)""",
+                episodeMap = EpisodeMap(listOf(EpisodeMapEntry("13-24", "1-12"))),
+            )
+            general.outputName shouldBe Template("\${showName} - \${episodeName}")
+        }
+
+        test("a source carries files and its own matcher keys") {
+            val source = yaml(
+                "additionalSources:\n  - files: 'Rus sound/[MC-Ent]/*.mka'\n    matcher: suffix\n",
+            ).additionalSources.single()
+
+            source.files shouldBe listOf("Rus sound/[MC-Ent]/*.mka")
+            source.matching shouldBe MatcherConfig(matcher = "suffix")
+        }
+
+        test("files may be a list, and blank masks are dropped, down to an empty list") {
+            val sources = yaml(
+                "additionalSources:\n  - files: [a/*.mka, ' ', b/*.mka]\n  - files: ['']\n",
+            ).additionalSources
+
+            sources.map { it.files } shouldBe listOf(listOf("a/*.mka", "b/*.mka"), emptyList())
+        }
+
+        test("a matcher key with no value is declared, as empty") {
+            yaml("general:\n  matcher:\n").general.matching shouldBe MatcherConfig(matcher = "")
+        }
+
+        context("an episode map entry reads both sides as ranges") {
+            withData(
+                nameFn = { it.first },
+                "13-24: 1-12" to (13..24 to 1..12),
+                "25: 13" to (25..25 to 13..13),
+                // A release may number from 0, and the loader keeps a zero-padded 010 from becoming octal 8.
+                "0: 13" to (0..0 to 13..13),
+                "010: 10" to (10..10 to 10..10),
+            ) { (line, ranges) ->
+                val entry = yaml("general:\n  episodeMap:\n    $line\n").general.matching.episodeMap!!.entries.single()
+
+                (entry.fromRange to entry.toRange) shouldBe ranges
+            }
+        }
+
+        test("bindingKeys names every binding key in config order, groups included") {
+            val config = yaml(
+                """
+                general:
+                  outputName: x
+                  matcher: sxxeyy
+                groups:
+                  - episodes: 1
+                    additionalSources:
+                      - files: a/*.mka
+                        episodeMap: {1: 2}
+                """,
+            )
+
+            bindingKeys(config) shouldBe listOf(
+                "general.matcher",
+                "groups[0].additionalSources[0].files",
+                "groups[0].additionalSources[0].episodeMap",
+            )
+        }
+    }
+
+    context("bindingProblems") {
+        data class ProblemCase(val label: String, val yaml: String, val problems: List<String>)
+
+        val valid = """
+            general:
+              episodeRegex: ' - (\d+) \('
+              seasonRegex: 'S(\d+)'
+              episodeMap: {13-24: 1-12, 0: 13}
+              outputName: '${'$'}{showName} - ${'$'}{episodeName}'
+            additionalSources:
+              - files: 'Rus sound/*.mka'
+                matcher: sequence
+                episodeMap: {1-12: 13-24}
+              - file: '${'$'}{fileName}.srt'
+        """.trimIndent() + "\n"
+        withData(
+            nameFn = { it.label },
+            ProblemCase("a valid config with every key", valid, emptyList()),
+            ProblemCase(
+                "an unknown pin",
+                "general:\n  matcher: positional\n",
+                listOf("config.yaml has an unknown matcher 'positional' at general.matcher"),
+            ),
+            ProblemCase(
+                "a name pin on the main files",
+                "general:\n  matcher: suffix\n",
+                listOf(
+                    "config.yaml pins 'suffix' at general.matcher, which only an additional source can use: " +
+                        "a main file has nothing to be named after",
+                ),
+            ),
+            ProblemCase(
+                "a regex pin with no regex",
+                "general:\n  matcher: regex\n",
+                listOf("config.yaml pins 'regex' at general.matcher with no episodeRegex"),
+            ),
+            ProblemCase(
+                "a regex beside sequence, which binds by order",
+                "general:\n  matcher: sequence\n  episodeRegex: '(\\d+)'\n  seasonRegex: 'S(\\d+)'\n",
+                listOf(
+                    "config.yaml sets general.episodeRegex beside the 'sequence' pin, which reads no regex",
+                    "config.yaml sets general.seasonRegex beside the 'sequence' pin, which reads no regex",
+                ),
+            ),
+            ProblemCase(
+                "a season regex alone",
+                "general:\n  seasonRegex: 'S(\\d+)'\n",
+                listOf("config.yaml sets general.seasonRegex without an episodeRegex"),
+            ),
+            ProblemCase(
+                "a regex that does not compile",
+                "general:\n  episodeRegex: '(\\d+'\n",
+                listOf("config.yaml has a regex at general.episodeRegex that does not compile: Unclosed group"),
+            ),
+            ProblemCase(
+                "a regex that captures nothing",
+                "general:\n  episodeRegex: '\\d+'\n",
+                listOf(
+                    "config.yaml has a regex at general.episodeRegex that captures no group; group 1 is the number",
+                ),
+            ),
+            ProblemCase(
+                "an episode map that is not a mapping",
+                "general:\n  episodeMap: [1-2]\n",
+                listOf("config.yaml sets general.episodeMap to something that is not a mapping"),
+            ),
+            ProblemCase(
+                "an episode map entry with a bad side each",
+                "general:\n  episodeMap: {13-: 1-12, 1-2: 0}\n",
+                listOf(
+                    "config.yaml has a release range at general.episodeMap that is not one: '13-'",
+                    "config.yaml has an episode range at general.episodeMap that is not one: '0'",
+                ),
+            ),
+            ProblemCase(
+                "an episode map entry whose sides differ in length",
+                "general:\n  episodeMap: {13-24: 1-10}\n",
+                listOf("config.yaml maps 13-24 to 1-10 at general.episodeMap, which differ in length"),
+            ),
+            ProblemCase(
+                "an episode map claiming a release number twice, and an episode twice",
+                "general:\n  episodeMap: {1-3: 11-13, 3-4: 12-13}\n",
+                listOf(
+                    "config.yaml maps release episodes 3 twice at general.episodeMap",
+                    "config.yaml maps two release numbers onto episodes 12-13 at general.episodeMap",
+                ),
+            ),
+            ProblemCase(
+                "file and files on one source",
+                "additionalSources:\n  - file: a.mka\n    files: '*.mka'\n",
+                listOf(
+                    "config.yaml sets both file and files on additionalSources[0]; file names one file per " +
+                        "episode, files binds what its masks match",
+                ),
+            ),
+            ProblemCase(
+                "files with only blank masks",
+                "additionalSources:\n  - files: ['']\n",
+                listOf("config.yaml has no usable mask in additionalSources[0].files"),
+            ),
+            ProblemCase(
+                "matcher keys on a source with only file",
+                "additionalSources:\n  - file: a.mka\n    matcher: suffix\n",
+                listOf("config.yaml sets matcher on additionalSources[0], which has no files to bind"),
+            ),
+            ProblemCase(
+                "a source problem in a group names the group",
+                "groups:\n  - episodes: 1\n    additionalSources:\n      - files: '*.mka'\n        matcher: fuzzy\n",
+                listOf("config.yaml has an unknown matcher 'fuzzy' at groups[0].additionalSources[0].matcher"),
+            ),
+            ProblemCase(
+                "an empty outputName",
+                "general:\n  outputName:\n",
+                listOf("config.yaml has an empty general.outputName"),
+            ),
+            ProblemCase(
+                "a blank outputName, which sanitizes to nothing",
+                "general:\n  outputName: ' '\n",
+                listOf("config.yaml has an empty general.outputName"),
+            ),
+            ProblemCase(
+                "a pin with no value",
+                "general:\n  matcher:\n",
+                listOf("config.yaml has an empty general.matcher"),
+            ),
+            ProblemCase("a pin name in any case, padded", "general:\n  matcher: 'SxxEyy '\n", emptyList()),
+            ProblemCase(
+                "a blank pin",
+                "general:\n  matcher: ' '\n",
+                listOf("config.yaml has an empty general.matcher"),
+            ),
+            ProblemCase(
+                "a broken regex beside a pin that reads none, reported once",
+                "general:\n  matcher: sxxeyy\n  episodeRegex: '(\\d+'\n",
+                listOf("config.yaml sets general.episodeRegex beside the 'sxxeyy' pin, which reads no regex"),
+            ),
+            ProblemCase(
+                "an empty regex under a regex pin",
+                "general:\n  matcher: regex\n  episodeRegex:\n",
+                listOf(
+                    "config.yaml has an empty general.episodeRegex",
+                    "config.yaml pins 'regex' at general.matcher with no episodeRegex",
+                ),
+            ),
+            ProblemCase(
+                "an episode map with no value",
+                "general:\n  episodeMap:\n",
+                listOf("config.yaml has an empty general.episodeMap"),
+            ),
+            ProblemCase(
+                "an episode map with no entries",
+                "general:\n  episodeMap: {}\n",
+                listOf("config.yaml has an empty general.episodeMap"),
+            ),
+            ProblemCase(
+                "a name pin on the main files in any case, quoted as written",
+                "general:\n  matcher: Suffix\n",
+                listOf(
+                    "config.yaml pins 'Suffix' at general.matcher, which only an additional source can use: " +
+                        "a main file has nothing to be named after",
+                ),
+            ),
+            ProblemCase(
+                "a season regex beside a pin, reported once",
+                "general:\n  matcher: sxxeyy\n  seasonRegex: 'S(\\d+)'\n",
+                listOf("config.yaml sets general.seasonRegex beside the 'sxxeyy' pin, which reads no regex"),
+            ),
+            ProblemCase(
+                "a season regex alone under a regex pin, reported once",
+                "general:\n  matcher: regex\n  seasonRegex: 'S(\\d+)'\n",
+                listOf("config.yaml pins 'regex' at general.matcher with no episodeRegex"),
+            ),
+            ProblemCase(
+                "an episode map beside a name pin, which has no number to map",
+                "additionalSources:\n  - files: '*.mka'\n    matcher: suffix\n    episodeMap: {1: 2}\n",
+                listOf(
+                    "config.yaml sets additionalSources[0].episodeMap beside the 'suffix' pin, which binds by " +
+                        "name and reads no number",
+                ),
+            ),
+        ) { (_, text, problems) ->
+            bindingProblems(yaml(text), "config.yaml") shouldBe problems
+        }
+    }
 })
