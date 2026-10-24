@@ -1,16 +1,31 @@
 package org.plukh.mkvtool.cli.render
 
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.datatest.withData
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import org.plukh.mkvtool.core.BindingProblem
+import org.plukh.mkvtool.core.BindingResult
 import org.plukh.mkvtool.core.CompanionDrops
+import org.plukh.mkvtool.core.DuplicateEpisode
 import org.plukh.mkvtool.core.FileMux
 import org.plukh.mkvtool.core.MissingCompanion
 import org.plukh.mkvtool.core.MuxAbort
 import org.plukh.mkvtool.core.MuxOutcome
+import org.plukh.mkvtool.core.NameTie
+import org.plukh.mkvtool.core.SeasonConflict
+import org.plukh.mkvtool.core.SeasonUnknown
+import org.plukh.mkvtool.core.SequenceCount
+import org.plukh.mkvtool.core.SharedFile
+import org.plukh.mkvtool.core.SharedMain
+import org.plukh.mkvtool.core.SkippedMainFile
 import org.plukh.mkvtool.core.SubstitutionDrops
 import org.plukh.mkvtool.core.TrackOrder
+import org.plukh.mkvtool.core.TreeEntry
+import org.plukh.mkvtool.core.UnpairedFile
 import org.plukh.mkvtool.core.UnresolvedVariable
+import org.plukh.mkvtool.core.extensionOf
+import java.io.File
 
 /**
  * What a mux says beyond mkvmerge's own output — which is not much, and deliberately so: the child owns
@@ -167,6 +182,73 @@ class MuxRendererTest : FunSpec({
         }
     }
 
+    context("binding") {
+        test("a clean binding says nothing") {
+            renderResult(BindingResultRenderer, binding()).lf() shouldBe ("" to "")
+        }
+
+        test("a main no rule read is a warning naming it, and the batch goes on") {
+            val (out, err) = renderResult(BindingResultRenderer, binding(skipped = listOf(File("NCOP.mkv")))).lf()
+
+            out shouldBe ""
+            err shouldBe "*** Warning: 1 main file has no episode and will be skipped:\n      NCOP.mkv\n"
+        }
+
+        context("each problem is a line under the error, naming the files and the source") {
+            withData(
+                nameFn = { it.second },
+                SeasonUnknown to "no season: no file name and no episode metadata names one",
+                SeasonConflict(mapOf("01" to listOf("a.mkv"), "02" to listOf("b.mkv")), "01") to
+                    "more than one season; the episode metadata says 01:\n" +
+                    "        season 01:\n          a.mkv\n        season 02:\n          b.mkv",
+                DuplicateEpisode(3, listOf(File("a.mkv"), File("b.mkv"))) to
+                    "episode 3 is claimed by 2 main files: a.mkv, b.mkv",
+                SequenceCount("general", 11, 12) to
+                    "general.matcher is sequence over 11 main files, but the episode metadata lists 12",
+                SequenceCount("general", 11, null) to
+                    "general.matcher is sequence over 11 main files, but there is no episode metadata to count against",
+                SequenceCount("general", 1, 12) to
+                    "general.matcher is sequence over 1 main file, but the episode metadata lists 12",
+                SequenceCount("additionalSources[0]", 5, 1) to
+                    "additionalSources[0].matcher is sequence over 5 files, but 1 main file has an episode",
+                SequenceCount("additionalSources[0]", 1, 2) to
+                    "additionalSources[0].matcher is sequence over 1 file, but 2 main files have an episode",
+                UnpairedFile("additionalSources[0]", entry("Subs/x.srt")) to
+                    "additionalSources[0]: Subs/x.srt pairs with no main file",
+                SkippedMainFile("additionalSources[0]", entry("NCOP.ass"), File("NCOP.mkv")) to
+                    "additionalSources[0]: NCOP.ass is named after NCOP.mkv, which has no episode",
+                NameTie("additionalSources[0]", entry("X.srt"), listOf(File("X.mkv"), File("X.mp4"))) to
+                    "additionalSources[0]: X.srt is named after more than one main file: X.mkv, X.mp4",
+                SharedMain("additionalSources[0]", File("A.mkv"), listOf(entry("a.srt"), entry("b.srt"))) to
+                    "additionalSources[0]: more than one file pairs with A.mkv: a.srt, b.srt",
+                SharedFile(entry("Subs/x.srt"), listOf("additionalSources[0]", "additionalSources[1]")) to
+                    "Subs/x.srt is matched by more than one source: additionalSources[0], additionalSources[1]",
+            ) { (problem, lines) ->
+                val (out, err) = renderResult(BindingResultRenderer, binding(problems = listOf(problem))).lf()
+
+                out shouldBe ""
+                err shouldBe "*** Error: the files cannot be bound to episodes (1 problem):\n      $lines\n"
+            }
+        }
+
+        test("the refusal says nothing was muxed, on stderr") {
+            renderResult(UnboundAbortRenderer, MuxAbort.Unbound(2)).lf() shouldBe
+                ("" to "*** Nothing was muxed. Fix the file names or the config.\n")
+        }
+
+        test("an output collision names the path and the files resolving to it") {
+            val (out, err) = renderResult(
+                OutputCollisionsAbortRenderer,
+                MuxAbort.OutputCollisions(mapOf("mkv/Show.mkv" to listOf("a.mkv", "a.mp4"))),
+            ).lf()
+
+            out shouldBe ""
+            err shouldBe "*** Error: 2 files would be written to mkv/Show.mkv:\n" +
+                "      a.mkv\n      a.mp4\n" +
+                "*** Nothing was muxed. Give each episode its own output name.\n"
+        }
+    }
+
     context("one file") {
         test("a skipped file is one plain line, and nothing more") {
             val (out, err) = renderResult(FileMuxRenderer, FileMux("notes.txt", null, null, MuxOutcome.Skipped)).lf()
@@ -222,6 +304,16 @@ private fun configured(
     unknown: List<String> = emptyList(),
     missing: List<String> = emptyList(),
 ) = TrackOrder.Configured("0:0,0:1", malformed, unknown, missing)
+
+private fun binding(skipped: List<File> = emptyList(), problems: List<BindingProblem> = emptyList()) =
+    BindingResult("01", emptyList(), skipped, emptyList(), problems)
+
+private fun entry(relPath: String): TreeEntry {
+    val name = relPath.substringAfterLast('/')
+    val dir = relPath.substringBeforeLast('/', "")
+    val base = name.substringBeforeLast('.')
+    return TreeEntry(File(relPath), relPath, dir, dir.ifEmpty { null }, base, extensionOf(name))
+}
 
 private fun fileMux(outcome: MuxOutcome) =
     FileMux("a.mkv", "mkv/a.mkv", listOf("mkvmerge", "--output", "mkv/a.mkv"), outcome)

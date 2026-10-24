@@ -170,10 +170,10 @@ class MuxCommand : Callable<Int> {
             probe = { probeFile(it, mkvmergeExe) },
         )
 
-        // `--strict` is the only thing that stops a batch, and it has already said why. Everything else —
-        // a file mkvmerge rejected, an episode dropped for a missing companion — leaves the run a success:
-        // a partially muxed season is a normal outcome, and exiting non-zero over one bad episode would
-        // make the command unusable from a shell script for the twenty-three good ones.
+        // A stopped batch — `--strict`, a binding problem, two files on one output — has already said why.
+        // Everything else — a file mkvmerge rejected, an episode dropped for a missing companion — leaves the
+        // run a success: a partially muxed season is a normal outcome, and exiting non-zero over one bad
+        // episode would make the command unusable from a shell script for the twenty-three good ones.
         if (run.aborted != null) return 2
 
         renderer.render(Notice(""))

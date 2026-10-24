@@ -46,6 +46,30 @@ general:
   # stops both `mux` and `inspect` rather than falling back to auto-detection.
   # mkvmergeExe: "C:\\Program Files\\MKVToolNix\\mkvmerge.exe"
 
+  # The output's name, a template like the title above; `.mkv` is appended and the characters a file
+  # name cannot hold are dropped. Omit it to keep each main file's own name. Two episodes resolving to
+  # one name stop the batch before anything is written.
+  # outputName: "${showName} - S${seasonNum}E${episodeNum} - ${episodeName}"
+
+  # How each main file gets its episode number. Omitted, it is the SxxEyy in the name; set any of
+  # these to mux raw release names as they are. One rule per run, and every file of a run is one season.
+  #
+  # episodeRegex is *the* rule when set: group 1 of its first match in the base name is the number.
+  # seasonRegex reads the season the same way, and with it both must match; without it the season
+  # comes from episodes.yaml. A main file the rule cannot read (a creditless opening, say) is skipped
+  # with a warning.
+  # episodeRegex: " - (\\d+) "
+  # seasonRegex: "S(\\d+)"
+  #
+  # `sequence` numbers the main files 1..N in name order instead, and needs episodes.yaml listing
+  # exactly N episodes. It is never a default: positional matching can mis-pair silently.
+  # matcher: "sequence"
+  #
+  # Release numbers to real ones, range to range, for a release numbered across seasons. Every
+  # number read is mapped, the additional sources' included; a number no range covers stays itself.
+  # episodeMap:
+  #   13-24: 1-12
+
 # Tracks taken from the main source file — the episode itself. IDs are what `inspect --identify`
 # lists (`mkvmerge -i` reports the same numbers); track 0 is the video.
 mainSource:
@@ -119,6 +143,17 @@ mainSource:
 #       - language: "ru"
 #         title: "${languageName}"
 #         charset: "UTF-8"
+#         default: false
+#
+#   # `files` is the other way: masks over the directory tree, each match paired with a main file —
+#   # by name (the main's name plus a suffix), else by its SxxEyy, or by its own episodeRegex when set,
+#   # or by `matcher: "sequence"` in path order. A matched file that pairs with no main stops the batch;
+#   # an episode left with no file of this source is dropped from the batch with a warning.
+#   - files: ["Subs/*.srt"]
+#     episodeRegex: "^(\\d+)$"
+#     tracks:
+#       - language: "en"
+#         title: "${languageName}"
 #         default: false
 
 # Output track order, as `sourceIndex:trackId` pairs — source 0 is the main file, 1 and up are the

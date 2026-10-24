@@ -190,6 +190,21 @@ class SubstitutionTest : FunSpec({
 
             engine.fileVarsFor(file) shouldBe engine.fileVarsFor(file)
         }
+
+        test("bound, the episode is binding's, not the name's, and the title is looked up under it") {
+            // A regex read 13 and the map made it episode 1; the season is the metadata's, the run's only one.
+            val main = File("[Grp] Show - 13 (BD).mkv")
+            val mains = listOf(MainEpisode(main, 13, 1, BindingRule.REGEX))
+            val binding = BindingResult("01", mains, emptyList(), emptyList(), emptyList())
+            val data = EpisodeData(season = "01", byEpisode = mapOf("01" to "Pilot"))
+            val engine = SubstitutionEngine(data).boundTo(binding)
+
+            val vars = engine.fileVarsFor(main).vars
+            vars["seasonNum"] shouldBe "01"
+            vars["episodeNum"] shouldBe "01"
+            vars["episodeName"] shouldBe "Pilot"
+            vars["fileName"] shouldBe "[Grp] Show - 13 (BD)"
+        }
     }
 
     context("trackVarsFor") {

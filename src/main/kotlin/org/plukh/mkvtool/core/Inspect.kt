@@ -508,21 +508,8 @@ private fun listingOf(probed: ProbeResult): TrackListing = when (probed) {
     is ProbeResult.Probed -> TrackListing.Tracks(probed.allTracks)
 }
 
-/**
- * The output directory, excluded by canonical path: muxed results carry their sources' base names and
- * would otherwise come back as external files of themselves.
- */
-private fun excludedPaths(dir: File, config: Config?): Set<String> {
-    val destination = config?.general?.destinationDir?.takeIf { it.isNotEmpty() } ?: return emptySet()
-    val resolved = resolveAgainst(dir, destination)
-    return if (resolved.isDirectory) setOf(canonicalOrAbsolute(resolved)) else emptySet()
-}
-
 /** The identity two references to one file share. Canonical, so `x` and `./x` are the same file — which
  *  is what stops a configured source that is also a discovered companion being read twice. */
 private fun pathKey(file: File): String = canonicalOrAbsolute(file)
-
-private fun canonicalOrAbsolute(file: File): String =
-    runCatching { file.canonicalPath }.getOrElse { file.absolutePath }
 
 private fun String?.orIfEmpty(fallback: String): String = if (isNullOrEmpty()) fallback else this

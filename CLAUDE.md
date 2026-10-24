@@ -453,7 +453,8 @@ and setup errors exit 2 before touching anything: an unusable `--encoding`, a mi
 mkvmerge, a `general.mkvmergeExe` that cannot be run, an unusable config. `fetch-episodes` exits 2 on API-key
 problems and 3 on network or API failures. `mux` keeps continue-on-error and **always exits 0** — a
 partially successful batch mux is a normal outcome — except under `--strict`, which exits 2 when a
-discrepancy affects a selected track. `inspect` writes nothing and **exits 0 whatever it finds**; besides
+discrepancy affects a selected track, and on a binding problem or two files resolving to one output, which
+exit 2 before anything is written. `inspect` writes nothing and **exits 0 whatever it finds**; besides
 having no mkvmerge to run, `--strict` is its only non-zero path, a `--config` path that does not exist very
 much included (it warns and carries on, because a stale config must never stand
 between the user and the track table, least of all when reading that table is how they would fix it).
@@ -551,7 +552,7 @@ group it refuses a grouped config with exit 2, since muxing the empty top level 
 the groups' sources. The new keys stay out of `docs/` until then, and `ConfigDocsParityTest` holds them in
 a pending set.
 
-**Matchers, the episode map and `outputName` are parsed and validated, and not run yet.** They say how
+**Matchers, the episode map and `outputName`.** They say how
 each file gets its episode and what the output is called, which is what lets a config face raw release
 names instead of renamed ones. The main files' keys live in `general` (`matcher`, `episodeRegex`,
 `seasonRegex`, `episodeMap`), not in a group, because groups claim files *by* episode number, so a main
@@ -565,11 +566,12 @@ numbering per directory — so a source setting one is refused. It is range to r
 lengths, release side from 0 and real side from 1, absent meaning
 identity. `outputName` is a file-scope template, so stage one validates it like `general.title`; `.mkv` is
 appended. `bindingProblems` reports what the config alone can show: fatal in `mux`, counted in `inspect`.
-`bindingKeys` lists the binding keys set, `outputName` not among them. Until binding runs, `mux` refuses a
-config setting any of them or `outputName` with exit 2, since a v1 run would quietly ignore them, and
-`inspect` says it identifies files the v1 way and carries on, uncounted; it has nothing to say about
-`outputName`, naming no output. The keys join the docs parity test's pending set. The engine that runs them
-is `bindFiles` (see Binding below), and no command calls it yet.
+`bindingKeys` lists the binding keys set, `outputName` not among them, and any one of them is what puts
+`mux` on the binding path; with none it runs as v1 did. `outputName` is not a binding key because it needs
+no episode — `${fileName} fixed` is a fine name for files no rule could read — so it applies on either path.
+The output name is sanitized as `rename` sanitizes, at the point the template becomes a file name. `inspect`
+does not bind yet: it says it identifies files the v1 way and carries on, uncounted, and has nothing to say
+about `outputName`, naming no output. The engine is `bindFiles` (see Binding below).
 
 ### File selection and masks
 
@@ -786,14 +788,25 @@ per-file variable, and its job there is to identify which config entry a finding
 
 Discovers files, builds an `mkvmerge` command per file, and runs them, continuing past failures. The
 pre-flights, in order: stage-one template validation (fatal), the episode-metadata load (fatal on any
-problem), the consistency check (`Pre-flight check`, warn-only unless `--strict`), stage-two substitution
-drops, and the companion pre-flight — the last two report and drop rather than aborting, because those
-episodes would have failed in mkvmerge anyway and a partially released dub is a normal situation.
+problem), binding when the config sets a binding key (fatal on any problem; a main no rule reads leaves the
+batch with a warning), stage-two substitution drops, the companion pre-flight, output collisions (fatal),
+and the consistency check (`Pre-flight check`, warn-only unless `--strict`). The two drop stages report and
+drop rather than aborting, because those episodes would have failed in mkvmerge anyway and a partially
+released dub is a normal situation — which is also why a main that a `files:` source paired nothing with is
+a companion drop, not a binding problem.
 
-`--strict` stops the batch by *returning* an abort from the core rather than exiting from inside it; the
-command turns that into exit 2. The two aborts are distinct types because they are reached at different
-moments — one before a file has been read, one after the whole batch has been probed — and each says what
-it found.
+On the binding path, binding's episode replaces the `SxxEyy` in the name as the template engine's
+`${episodeNum}` and `${seasonNum}` (`SubstitutionEngine.boundTo`), and a `files:` source's paired file goes
+on the command line, a VobSub pair as its `.idx`. The collision check runs on every path, after the drops
+(a dropped episode writes nothing) and before anything is probed: on a v1 config it catches two mains
+sharing a base name, `a.mkv` and `a.mp4`, which would otherwise overwrite one another in silence. Paths
+compare ignoring case on every platform, unlike masks: Windows and macOS file systems ignore it by default,
+and an output muxed on Linux may well be copied to one.
+
+Every stop is an abort the core *returns* rather than an exit from inside it; the command turns it into
+exit 2. The aborts are distinct types because each is reached at its own moment and says what it found:
+`--strict`'s two (stage two, before a file has been read; the check, after the whole batch has been
+probed), a binding problem, and an output collision.
 
 Three config fields that were once dereferenced unconditionally are now refused or omitted rather than
 producing `null` in a command line: a missing `destinationDir` is a clean exit-2 error, a main-source

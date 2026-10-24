@@ -30,10 +30,14 @@ data class SourceTrackSpec(
     val charset: String? = null,
 )
 
+/** One additional source: a [file] template, or [files] masks that binding pairs with main files, by
+ *  [episodeRegex] when it is set. */
 data class AdditionalSourceSpec(
-    val file: String,
+    val file: String? = null,
     val tracks: List<SourceTrackSpec>,
     val additionalOptions: List<String> = emptyList(),
+    val files: List<String>? = null,
+    val episodeRegex: String? = null,
 )
 
 /**
@@ -41,7 +45,8 @@ data class AdditionalSourceSpec(
  *
  * [audioTracks] and [subtitleTracks] are null by default, meaning the key is omitted entirely. Pass
  * `emptyList()` to write `[]`, which is a different instruction. [trackOrder] is likewise omitted when
- * null, so a case can exercise the derivation.
+ * null, so a case can exercise the derivation. [generalExtra] is YAML written verbatim under `general`, one
+ * line each, for the keys this builder does not model.
  */
 fun cfg(
     destinationDir: String = "mkv",
@@ -57,6 +62,7 @@ fun cfg(
     mainAdditionalOptions: List<String> = emptyList(),
     trackOrder: String? = null,
     additionalSources: List<AdditionalSourceSpec> = emptyList(),
+    generalExtra: List<String> = emptyList(),
 ): String = buildString {
     append("general:\n")
     append("  destinationDir: \"$destinationDir\"\n")
@@ -64,6 +70,7 @@ fun cfg(
     append("  mkvmergeExe: \"${mkvmergeExe.yamlEscaped()}\"\n")
     // Omitted unless asked for, so the default — the file name — stays what every other case exercises.
     generalTitle?.let { append("  title: \"$it\"\n") }
+    generalExtra.forEach { append("  $it\n") }
 
     append("mainSource:\n")
     append("  videoTrack:\n")
@@ -83,8 +90,13 @@ fun cfg(
     if (additionalSources.isNotEmpty()) {
         append("additionalSources:\n")
         additionalSources.forEach { source ->
-            append("  - file: \"${source.file.yamlEscaped()}\"\n")
-            append("    tracks:\n")
+            val keys = listOfNotNull(
+                source.file?.let { "file: \"${it.yamlEscaped()}\"" },
+                source.files?.let { masks -> "files: [${masks.joinToString(", ") { "\"${it.yamlEscaped()}\"" }}]" },
+                source.episodeRegex?.let { "episodeRegex: \"${it.yamlEscaped()}\"" },
+                "tracks:",
+            )
+            keys.forEachIndexed { i, key -> append(if (i == 0) "  - $key\n" else "    $key\n") }
             source.tracks.forEach { track ->
                 append("      - language: \"${track.language}\"\n")
                 append("        title: \"${track.title}\"\n")

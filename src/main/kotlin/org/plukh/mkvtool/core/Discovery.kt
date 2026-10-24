@@ -153,6 +153,19 @@ fun walkTree(root: File, excluded: Set<String> = emptySet()): List<TreeEntry> {
     return out
 }
 
+/**
+ * What [walkTree] leaves out under [config]: the output directory, by canonical path, since muxed results
+ * carry their sources' base names and would otherwise come back as external files of themselves.
+ */
+internal fun excludedPaths(dir: File, config: Config?): Set<String> {
+    val destination = config?.general?.destinationDir?.takeIf { it.isNotEmpty() } ?: return emptySet()
+    val resolved = resolveAgainst(dir, destination)
+    return if (resolved.isDirectory) setOf(canonicalOrAbsolute(resolved)) else emptySet()
+}
+
+internal fun canonicalOrAbsolute(file: File): String =
+    runCatching { file.canonicalPath }.getOrElse { file.absolutePath }
+
 /** Which rule placed a companion with its main file. */
 enum class MatchTier {
     /** The candidate's base name starts with the main file's — the strongest evidence, and the only tier

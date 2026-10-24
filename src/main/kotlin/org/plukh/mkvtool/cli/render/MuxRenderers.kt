@@ -1,13 +1,25 @@
 package org.plukh.mkvtool.cli.render
 
+import org.plukh.mkvtool.core.BindingProblem
+import org.plukh.mkvtool.core.BindingResult
 import org.plukh.mkvtool.core.CompanionDrops
+import org.plukh.mkvtool.core.DuplicateEpisode
 import org.plukh.mkvtool.core.FileMux
 import org.plukh.mkvtool.core.MuxAbort
 import org.plukh.mkvtool.core.MuxOutcome
+import org.plukh.mkvtool.core.NameTie
+import org.plukh.mkvtool.core.SeasonConflict
+import org.plukh.mkvtool.core.SeasonUnknown
+import org.plukh.mkvtool.core.SequenceCount
+import org.plukh.mkvtool.core.SharedFile
+import org.plukh.mkvtool.core.SharedMain
+import org.plukh.mkvtool.core.SkippedMainFile
 import org.plukh.mkvtool.core.SubstitutionDrops
 import org.plukh.mkvtool.core.TrackOrder
+import org.plukh.mkvtool.core.UnpairedFile
 import org.plukh.mkvtool.out.ResultTextRenderer
 import org.plukh.mkvtool.out.plural
+import java.io.File
 
 /**
  * The derived track order, announced once before the batch.
@@ -154,3 +166,74 @@ val FileMuxRenderer = ResultTextRenderer<FileMux> { result, s ->
         }
     }
 }
+
+/**
+ * What binding had to say before the batch: the main files no rule read, which are passed over, and every
+ * problem, any one of which stops the batch. A clean binding says nothing.
+ */
+val BindingResultRenderer = ResultTextRenderer<BindingResult> { result, s ->
+    if (result.skipped.isNotEmpty()) {
+        val count = result.skipped.size
+        s.err.println(s.warningText("${plural(count, "main file")} ${have(count)} no episode and will be skipped:"))
+        formatFileList(result.skipped.map { it.name }, "      ").forEach { s.err.println(it) }
+    }
+    if (result.problems.isEmpty()) return@ResultTextRenderer
+    s.err.println(
+        s.errorText("the files cannot be bound to episodes (${plural(result.problems.size, "problem")}):"),
+    )
+    for (problem in result.problems) bindingProblemLines(problem).forEach { s.err.println("      $it") }
+}
+
+/** Binding's refusal: everything it found is already listed above, so this only says what it cost. */
+val UnboundAbortRenderer = ResultTextRenderer<MuxAbort.Unbound> { _, s ->
+    s.err.println(s.red("*** Nothing was muxed. Fix the file names or the config."))
+}
+
+/** Several files resolving to one output, per path: mkvmerge would overwrite each with the next. */
+val OutputCollisionsAbortRenderer = ResultTextRenderer<MuxAbort.OutputCollisions> { result, s ->
+    for ((path, names) in result.byPath) {
+        s.err.println(s.errorText("${plural(names.size, "file")} would be written to $path:"))
+        formatFileList(names, "      ").forEach { s.err.println(it) }
+    }
+    s.err.println(s.red("*** Nothing was muxed. Give each episode its own output name."))
+}
+
+/** One problem as the lines a reader acts on; a source is named by its config path. */
+private fun bindingProblemLines(problem: BindingProblem): List<String> = when (problem) {
+    SeasonUnknown -> listOf("no season: no file name and no episode metadata names one")
+    is SeasonConflict -> buildList {
+        add("more than one season" + problem.metadata?.let { "; the episode metadata says $it" }.orEmpty() + ":")
+        for ((season, names) in problem.bySeason) {
+            add("  season $season:")
+            addAll(formatFileList(names, "    "))
+        }
+    }
+    is DuplicateEpisode ->
+        listOf("episode ${problem.episode} is claimed by ${problem.mains.size} main files: ${names(problem.mains)}")
+    is SequenceCount -> {
+        val counted = plural(problem.files, if (problem.path == "general") "main file" else "file")
+        val expected = problem.expected ?: 0
+        val against = when {
+            problem.path != "general" -> "but ${plural(expected, "main file")} ${have(expected)} an episode"
+            problem.expected == null -> "but there is no episode metadata to count against"
+            else -> "but the episode metadata lists ${problem.expected}"
+        }
+        listOf("${problem.path}.matcher is sequence over $counted, $against")
+    }
+    is UnpairedFile -> listOf("${problem.path}: ${problem.entry.relPath} pairs with no main file")
+    is SkippedMainFile ->
+        listOf("${problem.path}: ${problem.entry.relPath} is named after ${problem.main.name}, which has no episode")
+    is NameTie -> listOf(
+        "${problem.path}: ${problem.entry.relPath} is named after more than one main file: ${names(problem.mains)}",
+    )
+    is SharedMain -> listOf(
+        "${problem.path}: more than one file pairs with ${problem.main.name}: " +
+            problem.entries.joinToString(", ") { it.relPath },
+    )
+    is SharedFile ->
+        listOf("${problem.entry.relPath} is matched by more than one source: ${problem.paths.joinToString(", ")}")
+}
+
+private fun names(files: List<File>): String = files.joinToString(", ") { it.name }
+
+private fun have(count: Int): String = if (count == 1) "has" else "have"
