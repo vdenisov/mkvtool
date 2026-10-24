@@ -466,7 +466,7 @@ class InspectTest : FunSpec({
         val workDir = tempdir()
         stageInput(workDir, "a.mkv")
         File(workDir, "config.yaml").writeText(
-            "general:\n  matcher: \"sxxeyy\"\nadditionalSources:\n  - files: \"Rus sound/*.mka\"\n",
+            "general:\n  matcher: \"sequence\"\nadditionalSources:\n  - files: \"Rus sound/*.mka\"\n",
             StandardCharsets.UTF_8,
         )
 
@@ -504,7 +504,9 @@ class InspectTest : FunSpec({
         val run = inspect(workDir, "--strict")
         withClue(run.output) {
             run.exitCode shouldBe 2
-            run.output shouldContain "*** Warning: config.yaml has an unknown matcher 'fuzzy' at general.matcher."
+            run.output shouldContain
+                "*** Warning: config.yaml has an unknown matcher 'fuzzy' at general.matcher; " +
+                "the only pin is 'sequence'."
             run.output shouldContain "config problem"
         }
     }

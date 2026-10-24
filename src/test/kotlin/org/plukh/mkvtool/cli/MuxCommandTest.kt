@@ -190,7 +190,7 @@ class MuxCommandTest : FunSpec({
             )
 
             muxConfigProblem(pinned, "config.yaml") shouldBe
-                "config.yaml has an unknown matcher 'fuzzy' at general.matcher"
+                "config.yaml has an unknown matcher 'fuzzy' at general.matcher; the only pin is 'sequence'"
         }
     }
 })

@@ -36,8 +36,8 @@ private val ILLEGAL_IN_FILENAME = Regex("""[\\/:*?"<>|]""")
 /** Trailing dots and spaces, which Windows also rejects at the end of a name. */
 private val TRAILING_DOTS_AND_SPACES = Regex("""[. ]+$""")
 
-/** A label that is a plain number, and therefore a candidate for run-collapsing in [formatRanges]. */
-private val ALL_DIGITS = Regex("""\d+""")
+/** A plain run of ASCII digits: a label [formatRanges] may collapse, or a number a regex captured. */
+internal val ALL_DIGITS = Regex("""\d+""")
 
 /** Trimmed off a batch's common prefix in [batchLabels], so a prefix cannot end mid-number. */
 private val TRAILING_DIGITS = Regex("""\d+$""")
@@ -303,7 +303,7 @@ fun loadEpisodeMetadata(dir: File, offset: Int): EpisodeMetadata {
 
 /** Two-digit zero padding, in the root locale: an episode number is a key and part of a file name, so it
  *  must be the same digits on a machine whose locale would otherwise number in its own script. */
-private fun pad(number: Int): String = String.format(Locale.ROOT, "%02d", number)
+internal fun pad(number: Int): String = String.format(Locale.ROOT, "%02d", number)
 
 /** A yaml scalar as an episode or season number, reproducing Groovy's `as int`: a number truncates toward
  *  zero, a quoted number parses (a hand-edited `episode: "12"` has always worked), and anything else —
