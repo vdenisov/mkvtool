@@ -224,7 +224,8 @@ hand-assembled `episodes.txt` — use `core/CharsetDetection.kt` rather than qui
 | `YamlMapping.kt` | `loadMapping`: "read this file, get a mapping or a named reason why not", with the numbers YAML 1.1 would misread kept as text |
 | `CharsetDetection.kt` | Groovy's auto-detection semantics, transcribed, for the files that need them |
 | `Episodes.kt` | the episode-metadata *shape*: `parseSeasonEpisode`, `parseCanonicalName`, `sanitizeForFilename`, `indexFromLines`, `normalizeYaml`, plus the display-only `formatRanges`/`batchLabels` |
-| `Discovery.kt` | external-file discovery: `walkTree`, `discoverCompanions`, the extension tables, `trimForDisplay` |
+| `Discovery.kt` | external-file discovery: `walkTree`, `discoverCompanions`, the extension tables, `trimForDisplay`, and the longest-prefix lookup binding shares |
+| `Binding.kt` | `bindFiles`: main files to episodes and `files:` sources' files to main files, by the cascade or a pinned rule, ambiguity reported rather than guessed |
 | `LanguageGuess.kt` | the CLDR-derived language tables and `guessLanguage` |
 | `Probe.kt` | `mkvmerge -J`: `parseProbe`, `probeFile`, typed track records, signatures, slot grouping, `layoutKey`, `findDuplicates` |
 | `CheckReport.kt` | `buildCheckReport` — the consistency **model**, with no presentation in it |
@@ -568,7 +569,8 @@ appended. `bindingProblems` reports what the config alone can show: fatal in `mu
 `bindingKeys` lists the binding keys set, `outputName` not among them. Until binding runs, `mux` refuses a
 config setting any of them or `outputName` with exit 2, since a v1 run would quietly ignore them, and
 `inspect` says it identifies files the v1 way and carries on, uncounted; it has nothing to say about
-`outputName`, naming no output. The keys join the docs parity test's pending set.
+`outputName`, naming no output. The keys join the docs parity test's pending set. The engine that runs them
+is `bindFiles` (see Binding below), and no command calls it yet.
 
 ### File selection and masks
 
@@ -688,6 +690,25 @@ real language and an empty name, never a guessed one. **`und` counts as missing*
 other spelling for "untagged" and untagged dubs are the common case in exactly the releases this exists
 for. Unprobed files report track id **0**, which is what mkvmerge calls their single track, and which is
 why an `additionalSources` track takes no `id`.
+
+### Binding
+
+`bindFiles` is what the config's matchers mean, and where discovery reports what a directory holds, binding
+decides from what the config says. A main file binds to an episode; a `files:` source's file binds to a
+**main file**, so a main with no episode is still a main and still receives the files named after it. The
+source cascade runs exact name, then name plus suffix, then `SxxEyy`; a pin runs its one rule, and a
+`suffix` pin binds an exact name as well. The name rules share discovery's longest-prefix lookup. The regex
+tier, `sequence` and the episode map are not run yet: a `regex` or `sequence` pin throws, and
+`episodeRegex`, `seasonRegex` and `episodeMap` are not read.
+
+Nothing is guessed, and a tie stops the cascade rather than falling through to a weaker rule: two mains with
+one base name bind no file by name; two mains with one episode both lose it, so no file binds to either by
+that episode, though files named after them still do; two files of one source on one main, or one file bound
+by two sources, leave all of them unbound, each reported with the rule that matched. A source's candidates
+are what its masks match against the relative path, the mains aside and with no extension filter, and a
+VobSub `.sub` beside its `.idx`, whatever the case of its name, travels with it rather than competing. Callers pass
+every main, before any command-line mask, since with the longest name winning a masked-out `X 2.mkv` would
+hand `X 2.srt` to `X.mkv`; and the tree leaves out `destinationDir`, as discovery's does.
 
 ### Language guessing
 
