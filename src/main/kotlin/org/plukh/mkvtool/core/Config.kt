@@ -47,17 +47,17 @@ data class GeneralConfig(
 )
 
 /**
- * How a source's files bind to episodes, as written: [matcher] pins one rule and bypasses the automatic
- * cascade, and nothing set is the cascade itself. Values stay raw so [bindingProblems] can quote them.
+ * How files get their episode numbers, as written: [matcher] pins `sequence`, an [episodeRegex] is the rule
+ * when set, and nothing set is the default. Values stay raw so [bindingProblems] can quote them.
  */
 data class MatcherConfig(
     val matcher: String? = null,
     val episodeRegex: String? = null,
     val seasonRegex: String? = null,
-    /** Null when absent, which is the identity map. */
+    /** Null when absent, which is the identity map; only `general` may set one. */
     val episodeMap: EpisodeMap? = null,
 ) {
-    /** [matcher] as the rule it names: pin names are trimmed and case-insensitive, so `SxxEyy` pins `sxxeyy`. */
+    /** [matcher] as the rule it names: pin names are trimmed and case-insensitive, so `Sequence` pins `sequence`. */
     val pin: String? get() = matcher?.trim()?.lowercase(Locale.ROOT)
 }
 
@@ -503,10 +503,8 @@ private fun overlap(a: IntRange, b: IntRange): IntRange? =
 
 private fun IntRange.spelled(): String = if (first == last) "$first" else "$first-$last"
 
-/** The pins a source accepts, cascade order then `sequence`. A main file takes no name pin: it has no main
- *  file of its own to be named after. */
-private val NAME_MATCHERS = setOf("exact", "suffix")
-private val MATCHERS = NAME_MATCHERS + setOf("regex", "sxxeyy", "sequence")
+/** The one pin: positional matching is never automatic, because it is the rule that can silently mis-pair. */
+private val MATCHERS = setOf("sequence")
 
 private fun MatcherConfig.declaredKeys(): List<String> = listOfNotNull(
     "matcher".takeIf { matcher != null },
@@ -534,19 +532,11 @@ private fun matcherProblems(matching: MatcherConfig, path: String, main: Boolean
             problems += "$configName sets $path.seasonRegex without an episodeRegex"
         }
         pin.isEmpty() -> problems += "$configName has an empty $path.matcher"
-        pin !in MATCHERS -> problems += "$configName has an unknown matcher '$written' at $path.matcher"
-        main && pin in NAME_MATCHERS -> problems += "$configName pins '$written' at $path.matcher, which only " +
-            "an additional source can use: a main file has nothing to be named after"
-        pin == "regex" && "episodeRegex" !in keys ->
-            problems += "$configName pins '$written' at $path.matcher with no episodeRegex"
-        pin != "regex" -> {
+        pin !in MATCHERS -> problems += "$configName has an unknown matcher '$written' at $path.matcher; " +
+            "the only pin is 'sequence'"
+        else -> {
             regexRead = false
             keys.forEach { problems += "$configName sets $path.$it beside the '$written' pin, which reads no regex" }
-            // A file bound by name takes its main file's episode, which general.episodeMap has already mapped.
-            if (pin in NAME_MATCHERS && matching.episodeMap != null) {
-                problems += "$configName sets $path.episodeMap beside the '$written' pin, which binds by name " +
-                    "and reads no number"
-            }
         }
     }
     for ((key, regex) in regexes.takeIf { regexRead }.orEmpty()) {
@@ -560,7 +550,13 @@ private fun matcherProblems(matching: MatcherConfig, path: String, main: Boolean
             problems += "$configName has a regex at $path.$key that captures no group; group 1 is the number"
         }
     }
-    matching.episodeMap?.let { problems += episodeMapProblems(it, "$path.episodeMap", configName) }
+    when {
+        matching.episodeMap == null -> {}
+        // One numbering per directory: a source's numbers go through the same map as the main files'.
+        !main -> problems += "$configName sets $path.episodeMap; the episode map belongs in general, which maps " +
+            "every number read"
+        else -> problems += episodeMapProblems(matching.episodeMap, "$path.episodeMap", configName)
+    }
     return problems
 }
 

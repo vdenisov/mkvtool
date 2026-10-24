@@ -714,7 +714,7 @@ class ConfigTest : FunSpec({
             val general = yaml(
                 """
                 general:
-                  matcher: regex
+                  matcher: sequence
                   episodeRegex: ' - (\d+) '
                   seasonRegex: 'S(\d+)'
                   episodeMap:
@@ -724,7 +724,7 @@ class ConfigTest : FunSpec({
             ).general
 
             general.matching shouldBe MatcherConfig(
-                matcher = "regex",
+                matcher = "sequence",
                 episodeRegex = """ - (\d+) """,
                 seasonRegex = """S(\d+)""",
                 episodeMap = EpisodeMap(listOf(EpisodeMapEntry("13-24", "1-12"))),
@@ -734,11 +734,11 @@ class ConfigTest : FunSpec({
 
         test("a source carries files and its own matcher keys") {
             val source = yaml(
-                "additionalSources:\n  - files: 'Rus sound/[MC-Ent]/*.mka'\n    matcher: suffix\n",
+                "additionalSources:\n  - files: 'Rus sound/[MC-Ent]/*.mka'\n    matcher: sequence\n",
             ).additionalSources.single()
 
             source.files shouldBe listOf("Rus sound/[MC-Ent]/*.mka")
-            source.matching shouldBe MatcherConfig(matcher = "suffix")
+            source.matching shouldBe MatcherConfig(matcher = "sequence")
         }
 
         test("files may be a list, and blank masks are dropped, down to an empty list") {
@@ -773,7 +773,7 @@ class ConfigTest : FunSpec({
                 """
                 general:
                   outputName: x
-                  matcher: sxxeyy
+                  matcher: sequence
                 groups:
                   - episodes: 1
                     additionalSources:
@@ -802,7 +802,6 @@ class ConfigTest : FunSpec({
             additionalSources:
               - files: 'Rus sound/*.mka'
                 matcher: sequence
-                episodeMap: {1-12: 13-24}
               - file: '${'$'}{fileName}.srt'
         """.trimIndent() + "\n"
         withData(
@@ -811,20 +810,14 @@ class ConfigTest : FunSpec({
             ProblemCase(
                 "an unknown pin",
                 "general:\n  matcher: positional\n",
-                listOf("config.yaml has an unknown matcher 'positional' at general.matcher"),
-            ),
-            ProblemCase(
-                "a name pin on the main files",
-                "general:\n  matcher: suffix\n",
                 listOf(
-                    "config.yaml pins 'suffix' at general.matcher, which only an additional source can use: " +
-                        "a main file has nothing to be named after",
+                    "config.yaml has an unknown matcher 'positional' at general.matcher; the only pin is 'sequence'",
                 ),
             ),
             ProblemCase(
-                "a regex pin with no regex",
+                "a pin other than sequence: a regex is the rule when set, names and SxxEyy the default",
                 "general:\n  matcher: regex\n",
-                listOf("config.yaml pins 'regex' at general.matcher with no episodeRegex"),
+                listOf("config.yaml has an unknown matcher 'regex' at general.matcher; the only pin is 'sequence'"),
             ),
             ProblemCase(
                 "a regex beside sequence, which binds by order",
@@ -892,13 +885,16 @@ class ConfigTest : FunSpec({
             ),
             ProblemCase(
                 "matcher keys on a source with only file",
-                "additionalSources:\n  - file: a.mka\n    matcher: suffix\n",
+                "additionalSources:\n  - file: a.mka\n    matcher: sequence\n",
                 listOf("config.yaml sets matcher on additionalSources[0], which has no files to bind"),
             ),
             ProblemCase(
                 "a source problem in a group names the group",
                 "groups:\n  - episodes: 1\n    additionalSources:\n      - files: '*.mka'\n        matcher: fuzzy\n",
-                listOf("config.yaml has an unknown matcher 'fuzzy' at groups[0].additionalSources[0].matcher"),
+                listOf(
+                    "config.yaml has an unknown matcher 'fuzzy' at groups[0].additionalSources[0].matcher; " +
+                        "the only pin is 'sequence'",
+                ),
             ),
             ProblemCase(
                 "an empty outputName",
@@ -915,7 +911,7 @@ class ConfigTest : FunSpec({
                 "general:\n  matcher:\n",
                 listOf("config.yaml has an empty general.matcher"),
             ),
-            ProblemCase("a pin name in any case, padded", "general:\n  matcher: 'SxxEyy '\n", emptyList()),
+            ProblemCase("a pin name in any case, padded", "general:\n  matcher: 'Sequence '\n", emptyList()),
             ProblemCase(
                 "a blank pin",
                 "general:\n  matcher: ' '\n",
@@ -923,16 +919,13 @@ class ConfigTest : FunSpec({
             ),
             ProblemCase(
                 "a broken regex beside a pin that reads none, reported once",
-                "general:\n  matcher: sxxeyy\n  episodeRegex: '(\\d+'\n",
-                listOf("config.yaml sets general.episodeRegex beside the 'sxxeyy' pin, which reads no regex"),
+                "general:\n  matcher: sequence\n  episodeRegex: '(\\d+'\n",
+                listOf("config.yaml sets general.episodeRegex beside the 'sequence' pin, which reads no regex"),
             ),
             ProblemCase(
-                "an empty regex under a regex pin",
-                "general:\n  matcher: regex\n  episodeRegex:\n",
-                listOf(
-                    "config.yaml has an empty general.episodeRegex",
-                    "config.yaml pins 'regex' at general.matcher with no episodeRegex",
-                ),
+                "an empty regex, reported once",
+                "general:\n  episodeRegex:\n",
+                listOf("config.yaml has an empty general.episodeRegex"),
             ),
             ProblemCase(
                 "an episode map with no value",
@@ -945,29 +938,21 @@ class ConfigTest : FunSpec({
                 listOf("config.yaml has an empty general.episodeMap"),
             ),
             ProblemCase(
-                "a name pin on the main files in any case, quoted as written",
+                "an unknown pin in any case, quoted as written",
                 "general:\n  matcher: Suffix\n",
-                listOf(
-                    "config.yaml pins 'Suffix' at general.matcher, which only an additional source can use: " +
-                        "a main file has nothing to be named after",
-                ),
+                listOf("config.yaml has an unknown matcher 'Suffix' at general.matcher; the only pin is 'sequence'"),
             ),
             ProblemCase(
                 "a season regex beside a pin, reported once",
-                "general:\n  matcher: sxxeyy\n  seasonRegex: 'S(\\d+)'\n",
-                listOf("config.yaml sets general.seasonRegex beside the 'sxxeyy' pin, which reads no regex"),
+                "general:\n  matcher: sequence\n  seasonRegex: 'S(\\d+)'\n",
+                listOf("config.yaml sets general.seasonRegex beside the 'sequence' pin, which reads no regex"),
             ),
             ProblemCase(
-                "a season regex alone under a regex pin, reported once",
-                "general:\n  matcher: regex\n  seasonRegex: 'S(\\d+)'\n",
-                listOf("config.yaml pins 'regex' at general.matcher with no episodeRegex"),
-            ),
-            ProblemCase(
-                "an episode map beside a name pin, which has no number to map",
-                "additionalSources:\n  - files: '*.mka'\n    matcher: suffix\n    episodeMap: {1: 2}\n",
+                "an episode map on a source, where the one in general already maps every number",
+                "additionalSources:\n  - files: '*.mka'\n    episodeMap: {1: 2}\n",
                 listOf(
-                    "config.yaml sets additionalSources[0].episodeMap beside the 'suffix' pin, which binds by " +
-                        "name and reads no number",
+                    "config.yaml sets additionalSources[0].episodeMap; the episode map belongs in general, which " +
+                        "maps every number read",
                 ),
             ),
         ) { (_, text, problems) ->

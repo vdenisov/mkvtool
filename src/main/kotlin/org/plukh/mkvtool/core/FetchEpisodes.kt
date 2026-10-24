@@ -61,7 +61,6 @@ sealed interface ShowRef {
     data class Problem(val message: String) : ShowRef
 }
 
-private val ALL_DIGITS = Regex("""\d+""")
 private val ID_IN_URL = Regex("""/tv/(\d+)""")
 private val SEASON_IN_URL = Regex("""/season/(\d+)""")
 

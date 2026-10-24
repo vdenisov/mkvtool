@@ -225,7 +225,7 @@ hand-assembled `episodes.txt` — use `core/CharsetDetection.kt` rather than qui
 | `CharsetDetection.kt` | Groovy's auto-detection semantics, transcribed, for the files that need them |
 | `Episodes.kt` | the episode-metadata *shape*: `parseSeasonEpisode`, `parseCanonicalName`, `sanitizeForFilename`, `indexFromLines`, `normalizeYaml`, plus the display-only `formatRanges`/`batchLabels` |
 | `Discovery.kt` | external-file discovery: `walkTree`, `discoverCompanions`, the extension tables, `trimForDisplay`, and the longest-prefix lookup binding shares |
-| `Binding.kt` | `bindFiles`: main files to episodes and `files:` sources' files to main files, by the cascade or a pinned rule, ambiguity reported rather than guessed |
+| `Binding.kt` | `bindFiles`: main files to episodes by one rule per run, and `files:` sources' files to main files; anything ambiguous or unpaired is a problem that fails the batch |
 | `LanguageGuess.kt` | the CLDR-derived language tables and `guessLanguage` |
 | `Probe.kt` | `mkvmerge -J`: `parseProbe`, `probeFile`, typed track records, signatures, slot grouping, `layoutKey`, `findDuplicates` |
 | `CheckReport.kt` | `buildCheckReport` — the consistency **model**, with no presentation in it |
@@ -555,15 +555,14 @@ a pending set.
 each file gets its episode and what the output is called, which is what lets a config face raw release
 names instead of renamed ones. The main files' keys live in `general` (`matcher`, `episodeRegex`,
 `seasonRegex`, `episodeMap`), not in a group, because groups claim files *by* episode number, so a main
-file's number has to be known before its group is. An additional source binds the same way with the same
-keys, over the files its `files:` masks match; `file:` keeps naming one file per episode through the
-template engine, and a source may not set both. Without a pin the cascade runs (exact name, name plus
-suffix, the regex when given, `SxxEyy`), a main file's from the regex on, since it has nothing to be named
-after; `matcher:` pins one of `exact`, `suffix`, `regex`, `sxxeyy` or `sequence`, case-insensitively, and a
-main file takes no name pin for the same reason. `sequence` is pin-only,
-because positional matching is the one rule that can silently mis-pair: the files sort by name and the Nth
-is episode N, so a regex beside it is an error, while an `episodeMap` still applies after it. The map is
-range to range (`13-24: 1-12`), equal lengths, release side from 0 and real side from 1, absent meaning
+file's number has to be known before its group is. An additional source pairs its files with main files
+over what its `files:` masks match, with its own `matcher`, `episodeRegex` and `seasonRegex`; `file:` keeps
+naming one file per episode through the template engine, and a source may not set both. An `episodeRegex`
+is *the* rule wherever it is set. `matcher:` pins `sequence`, case-insensitively, and nothing else:
+positional matching is the one rule that can silently mis-pair, so it is never a default, and a regex beside
+it is an error. The map lives in `general` alone, because it maps every number read anywhere — one
+numbering per directory — so a source setting one is refused. It is range to range (`13-24: 1-12`), equal
+lengths, release side from 0 and real side from 1, absent meaning
 identity. `outputName` is a file-scope template, so stage one validates it like `general.title`; `.mkv` is
 appended. `bindingProblems` reports what the config alone can show: fatal in `mux`, counted in `inspect`.
 `bindingKeys` lists the binding keys set, `outputName` not among them. Until binding runs, `mux` refuses a
@@ -694,21 +693,34 @@ why an `additionalSources` track takes no `id`.
 ### Binding
 
 `bindFiles` is what the config's matchers mean, and where discovery reports what a directory holds, binding
-decides from what the config says. A main file binds to an episode; a `files:` source's file binds to a
-**main file**, so a main with no episode is still a main and still receives the files named after it. The
-source cascade runs exact name, then name plus suffix, then `SxxEyy`; a pin runs its one rule, and a
-`suffix` pin binds an exact name as well. The name rules share discovery's longest-prefix lookup. The regex
-tier, `sequence` and the episode map are not run yet: a `regex` or `sequence` pin throws, and
-`episodeRegex`, `seasonRegex` and `episodeMap` are not read.
+decides from what the config says. It is deliberately plain: a sane release binds with no configuration or
+one regex, and anything else gets a precise diagnosis and a user who fixes the files by hand — renaming
+worked for years, so avoiding it is a convenience, not a requirement.
 
-Nothing is guessed, and a tie stops the cascade rather than falling through to a weaker rule: two mains with
-one base name bind no file by name; two mains with one episode both lose it, so no file binds to either by
-that episode, though files named after them still do; two files of one source on one main, or one file bound
-by two sources, leave all of them unbound, each reported with the rule that matched. A source's candidates
-are what its masks match against the relative path, the mains aside and with no extension filter, and a
-VobSub `.sub` beside its `.idx`, whatever the case of its name, travels with it rather than competing. Callers pass
-every main, before any command-line mask, since with the longest name winning a masked-out `X 2.mkv` would
-hand `X 2.srt` to `X.mkv`; and the tree leaves out `destinationDir`, as discovery's does.
+A main file gets its episode by **one rule per run**: `sequence` when pinned, the regex when given,
+`SxxEyy` otherwise. A main the rule cannot read is **skipped with a warning** (a top-level extra such as
+`NCOP.mkv`), and it keeps its place in name matching so its own companions never fall to a shorter name. A
+`files:` source's file pairs with a **main file**, never with an episode on its own: by its regex when it has
+one, by `sequence` when pinned, and otherwise by name (discovery's longest-prefix lookup — an equal base is
+EXACT, a longer one SUFFIX) and, only when no main name starts its own, by `SxxEyy`. The regex is a `find`
+over the base name with group 1 the number, and with a `seasonRegex` both must match. `sequence` numbers the
+files 1..N in plain name order, the mains by name and a source's by relative path; the mains' count must
+equal the metadata's episode count, a source's the mains that bound an episode. Every number read goes
+through the one episode map, episode only, a number no range covers staying itself, and a main records the
+number it read beside the episode it maps to.
+
+**The files of one run share one season**, from what they read (`SxxEyy`, `seasonRegex`) and the metadata.
+Numbers therefore pair on the episode alone, and a season nobody names, or two of them, is a problem.
+
+Beyond the skip, **nothing is soft**: every other failure is a typed `BindingProblem`, and any one of them
+fails the batch — two mains on one episode, a `sequence` count mismatch, a file that pairs with no main or
+with a skipped one, a name tie, two files of one source on one main, one file in two sources. An episode the
+metadata lacks is not binding's concern; stage-two substitution drops that file, as it always has. A
+source's candidates are what its masks match against the relative path, the mains aside and with no
+extension filter, and a VobSub `.sub` beside its `.idx`, whatever the case of its name, travels with it
+rather than competing. Callers pass every main, before any command-line mask, since with the longest name
+winning a masked-out `X 2.mkv` would hand `X 2.srt` to `X.mkv`; and the tree leaves out `destinationDir`, as
+discovery's does.
 
 ### Language guessing
 
