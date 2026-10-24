@@ -1,6 +1,6 @@
 package org.plukh.mkvtool.cli.render
 
-import org.plukh.mkvtool.core.BindingResult
+import org.plukh.mkvtool.core.BindingReport
 import org.plukh.mkvtool.core.CheckReport
 import org.plukh.mkvtool.core.CompanionDrops
 import org.plukh.mkvtool.core.ConversionRun
@@ -65,7 +65,7 @@ fun textResultRenderers(hints: RenderHints = RenderHints()): ResultRendererRegis
         .register(CompanionDrops::class, CompanionDropsRenderer)
         .register(MuxAbort.UnresolvedVariables::class, UnresolvedVariablesAbortRenderer)
         .register(MuxAbort.BlockingDiscrepancies::class, BlockingDiscrepanciesAbortRenderer)
-        .register(BindingResult::class, BindingResultRenderer)
+        .register(BindingReport::class, BindingReportRenderer(hints.bindingTable))
         .register(MuxAbort.Unbound::class, UnboundAbortRenderer)
         .register(MuxAbort.OutputCollisions::class, OutputCollisionsAbortRenderer)
         .register(FileMux::class, FileMuxRenderer)

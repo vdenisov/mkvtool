@@ -485,6 +485,121 @@ class InspectTest : FunSpec({
             probed shouldContainExactly listOf("a.mkv", "b.mkv")
         }
     }
+
+    context("binding") {
+        val byRegex = Config(general = GeneralConfig(matching = MatcherConfig(episodeRegex = """E(\d+)""")))
+
+        test("a main no rule reads is neither probed nor identified, and is reported as an extra") {
+            val dir = tempdir()
+            listOf("Show - S01E01.mkv", "NCOP.mkv").forEach { File(dir, it).writeText("x") }
+            val probed = mutableListOf<String>()
+
+            val report = inspectDirectory(
+                dir, options(identify = true, config = byRegex, episodes = EpisodeData(season = "01")), SilentRenderer,
+            ) { probed += it.name; probedResult(it) }
+
+            probed shouldContainExactly listOf("Show - S01E01.mkv")
+            report.files.map { it.fileName } shouldContainExactly listOf("Show - S01E01.mkv")
+            report.leftovers.extras shouldContainExactly listOf("NCOP.mkv")
+            report.bindingProblems shouldBe 0
+        }
+
+        test("a files: source lists the file it paired with each episode, and the masks where it paired none") {
+            val dir = tempdir()
+            listOf("Show - S01E01.mkv", "Show - S01E02.mkv").forEach { File(dir, it).writeText("x") }
+            File(dir, "Subs").mkdirs()
+            File(dir, "Subs/Show - S01E01.mka").writeText("x")
+            val config = Config(additionalSources = listOf(AdditionalSource(files = listOf("Subs/*.mka"))))
+
+            val report = inspectDirectory(dir, options(identify = true, config = config), SilentRenderer) {
+                probedResult(it, track(0, "audio"))
+            }
+
+            val (first, second) = report.files.map { it.configuredSources.single() }
+            first.path shouldBe "Subs/Show - S01E01.mka"
+            first.listing.shouldBeInstanceOf<SourceListing.Tracks>()
+            second shouldBe ConfiguredSource("additionalSources[0].files: Subs/*.mka", SourceListing.Missing)
+        }
+
+        test("a file a files: source paired is not listed as unmatched, whatever discovery made of its name") {
+            val dir = tempdir()
+            File(dir, "Show - S01E01.mkv").writeText("x")
+            File(dir, "Subs").mkdirs()
+            File(dir, "Subs/01.srt").writeText("x")
+            val source = AdditionalSource(
+                files = listOf("Subs/*.srt"),
+                matching = MatcherConfig(episodeRegex = """^(\d+)$"""),
+            )
+
+            val config = Config(additionalSources = listOf(source))
+
+            val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }
+
+            report.leftovers.unmatched.shouldBeEmpty()
+        }
+
+        test("a config the binding checks refused, or one declaring groups, is not bound at all") {
+            val dir = tempdir()
+            File(dir, "Show - S01E01.mkv").writeText("x")
+            val badRegex = Config(general = GeneralConfig(matching = MatcherConfig(episodeRegex = "(")))
+            val grouped = byRegex.copy(declaredGroups = listOf(GroupConfig(name = "all")))
+
+            // A regex that does not compile would throw inside binding; inspect has already warned about it.
+            inspectDirectory(dir, options(config = badRegex), SilentRenderer) { probedResult(it) }.binding shouldBe null
+            inspectDirectory(dir, options(config = grouped), SilentRenderer) { probedResult(it) }.binding shouldBe null
+        }
+
+        test("a skipped main of a type companions share is still an extra, never a companion") {
+            val dir = tempdir()
+            listOf("Show - S01E01.mkv", "NCOP.mka").forEach { File(dir, it).writeText("x") }
+            val config = byRegex.copy(general = byRegex.general.copy(allowedExtensions = setOf("mkv", "mka")))
+
+            val report = inspectDirectory(
+                dir, options(config = config, episodes = EpisodeData(season = "01")), SilentRenderer,
+            ) { probedResult(it) }
+
+            report.leftovers.extras shouldContainExactly listOf("NCOP.mka")
+            report.leftovers.unmatched.shouldBeEmpty()
+        }
+
+        test("a main-type file a files: source paired is a source, not an extra") {
+            val dir = tempdir()
+            File(dir, "Show - S01E01.mkv").writeText("x")
+            File(dir, "Rus").mkdirs()
+            File(dir, "Rus/Show - S01E01.mkv").writeText("x")
+            val config = Config(additionalSources = listOf(AdditionalSource(files = listOf("Rus/*.mkv"))))
+
+            val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }
+
+            report.leftovers.extras.shouldBeEmpty()
+        }
+
+        test("a binding problem is reported as a warning and counted, and the inspection carries on") {
+            val dir = tempdir()
+            listOf("A E01.mkv", "B E01.mkv").forEach { File(dir, it).writeText("x") }
+            val renderer = RecordingRenderer()
+
+            val report = inspectDirectory(
+                dir, options(config = byRegex, episodes = EpisodeData(season = "01")), renderer,
+            ) { probedResult(it) }
+
+            report.bindingProblems shouldBe 1
+            report.mediaFiles shouldContainExactly listOf("A E01.mkv", "B E01.mkv")
+            renderer.results.filterIsInstance<BindingReport>().single().fatal shouldBe false
+        }
+
+        test("a config with no binding key binds nothing and says nothing about it") {
+            val dir = tempdir()
+            File(dir, "NoEpisodeHere.mkv").writeText("x")
+            val renderer = RecordingRenderer()
+
+            val report = inspectDirectory(dir, options(), renderer) { probedResult(it) }
+
+            report.binding shouldBe null
+            report.mediaFiles shouldContainExactly listOf("NoEpisodeHere.mkv")
+            renderer.results.none { it is BindingReport } shouldBe true
+        }
+    }
 })
 
 private val identityA =
@@ -512,11 +627,12 @@ private fun options(
     check: Boolean = !identify,
     config: Config? = null,
     fileMasks: List<String> = emptyList(),
+    episodes: EpisodeData? = null,
 ): InspectOptions = InspectOptions(
     identify = identify,
     check = check,
     config = config,
-    substitution = SubstitutionEngine(),
+    substitution = SubstitutionEngine(episodes),
     fileMasks = fileMasks,
 )
 

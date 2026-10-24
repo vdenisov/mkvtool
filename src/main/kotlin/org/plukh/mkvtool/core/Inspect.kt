@@ -162,7 +162,7 @@ data class ExternalLeftovers(val unmatched: List<String>, val extras: List<Strin
 }
 
 /** Why `--strict` is about to exit 2. Emitted only when it fires. */
-data class StrictVerdict(val blockingCount: Int, val configProblems: Int) : CommandResult
+data class StrictVerdict(val blockingCount: Int, val configProblems: Int, val bindingProblems: Int) : CommandResult
 
 /**
  * Everything one inspection found, and the document a machine-readable mode would serialize.
@@ -181,8 +181,13 @@ data class InspectReport(
     /** Null in an `--identify`-only run. */
     val check: CheckReport?,
     val configProblems: Int,
+    /** Null when the config sets no binding key, and the main files' own names give their episodes. */
+    val binding: BindingResult? = null,
 ) : CommandResult {
     val blockingCount: Int get() = check?.blockingCount ?: 0
+
+    /** What would make `mux` refuse this batch, which is why `--strict` counts it. */
+    val bindingProblems: Int get() = binding?.problems?.size ?: 0
 }
 
 /**
@@ -234,14 +239,54 @@ fun inspectDirectory(
         )
     }
 
+    val tree = walkTree(dir, excludedPaths(dir, options.config))
+
+    // With a binding key set, the episodes are binding's, as in mux: a main no rule reads is no episode, so it
+    // is neither probed nor checked, and is reported as an extra. Nothing binding finds stops this. Not over a
+    // config the binding checks refused (binding takes one that passed them; a bad regex would throw), nor
+    // over groups, which inspect does not run and whose sources would all bind against every main.
+    val binding = options.config
+        ?.takeIf { bindingKeys(it).isNotEmpty() && it.declaredGroups == null && bindingProblems(it, "").isEmpty() }
+        ?.let { bindFiles(it, selection.all, tree, options.substitution.episodeData) }
+    val skipped = binding?.skipped.orEmpty().mapTo(HashSet()) { it.absolutePath }
+    val selected = selection.selected.filterNot { it.absolutePath in skipped }
+    // A batch with binding problems has no episodes to trust, so its templates resolve the v1 way.
+    val substitution = binding?.takeIf { it.problems.isEmpty() }?.let { options.substitution.boundTo(it) }
+        ?: options.substitution
+    // Reported only as far as this run reaches: a masked-out episode or NCOP.mkv was never asked about.
+    val bindingReport = binding?.let { BindingReport(it.narrowedTo(selection.matched.toSet()), fatal = false) }
+
     // Discovery first: pure name work, no subprocesses, and its answer decides which files are worth
     // probing. It runs over every media file, *before* the masks — matching against the masked list would
-    // dump the rest of the season's dubs into "unmatched", the exact opposite of what a mask asks for.
+    // dump the rest of the season's dubs into "unmatched", the exact opposite of what a mask asks for. The
+    // skipped mains stay out of it: an `NCOP.mka` would otherwise read as a companion.
+    val (skippedEntries, discoverable) = tree.partition { it.file.absolutePath in skipped }
     val discovered = discoverCompanions(
-        mains = selection.all,
-        tree = walkTree(dir, excludedPaths(dir, options.config)),
+        mains = selection.all.filterNot { it.absolutePath in skipped },
+        tree = discoverable,
         mainExtensions = options.allowedExtensions,
     )
+    // A file a files: source paired is a source, whatever discovery made of its name or its type.
+    val paired = binding?.sources.orEmpty().flatMap { source -> source.bound.flatMap { it.files } }.toSet()
+    val leftovers = ExternalLeftovers(
+        unmatched = discovered.unmatched.filterNot { it in paired }.map { it.relPath },
+        extras = (discovered.extras.filterNot { it in paired } + skippedEntries).map { it.relPath }.sorted(),
+    )
+
+    // Every selected main had no episode: what binding said and where those files went is the whole report.
+    if (selected.isEmpty()) {
+        bindingReport?.let(renderer::render)
+        renderer.render(leftovers)
+        return InspectReport(
+            mediaFiles = emptyList(),
+            files = emptyList(),
+            legend = ExternalLegend(emptyList()),
+            leftovers = leftovers,
+            check = null,
+            configProblems = options.configProblems,
+            binding = binding,
+        )
+    }
 
     // One probe per file, keyed canonically so the same file reached by two different paths — a companion
     // that is also a configured source, which the canonical `${fileName}[Studio].mka` layout produces
@@ -253,35 +298,36 @@ fun inspectDirectory(
 
     val probeWorthy = discovered.variants
         .flatMap { it.entries }
-        .filter { it.entry.ext in PROBE_EXTENSIONS && it.main in selection.selected }
+        .filter { it.entry.ext in PROBE_EXTENSIONS && it.main in selected }
         .distinctBy { pathKey(it.entry.file) }
 
     // Only --identify resolves them, so a check-only run costs no substitution and no extra subprocess.
     val configuredSources: Map<File, List<ResolvedSource>> =
-        if (options.identify) selection.selected.associateWith { resolveSources(dir, it, options) }
+        if (options.identify) selected.associateWith { resolveSources(dir, it, options.config, substitution, binding) }
         else emptyMap()
 
     val companionProbes = (probeWorthy.map { it.entry.file } +
-        configuredSources.values.flatten().map { it.file }.filter { it.isFile })
+        configuredSources.values.flatten().mapNotNull { it.file }.filter { it.isFile })
         .distinctBy { pathKey(it) }
 
     // Everything costing a subprocess goes into one meter, so its total is the real one and nothing runs
     // on after it says it has finished. A season over a slow share is seconds of silence otherwise.
-    val label = "*** Reading ${plural(selection.selected.size, "file")}" +
+    val label = "*** Reading ${plural(selected.size, "file")}" +
         if (companionProbes.isEmpty()) "" else " + ${plural(companionProbes.size, "companion file")}"
-    val meter = renderer.progress(label, selection.selected.size + companionProbes.size)
+    val meter = renderer.progress(label, selected.size + companionProbes.size)
 
     val infos = LinkedHashMap<File, ProbeResult>()
-    selection.selected.forEach { file ->
+    selected.forEach { file ->
         infos[file] = probe(file).also { probeCache[pathKey(file)] = it }
         meter.tick()
     }
     companionProbes.forEach { probeCached(it); meter.tick() }
     meter.finish()
     renderer.render(Notice(""))
+    bindingReport?.let(renderer::render)
 
     // Built from the cache alone: everything below is already probed, which is what keeps the meter honest.
-    val externalsByFile = selection.selected.associateWith { main ->
+    val externalsByFile = selected.associateWith { main ->
         externalsFor(discovered, main) { file, ext -> probeExternal(file, ext, probeCache) }
     }
 
@@ -294,7 +340,7 @@ fun inspectDirectory(
     val check = if (options.check) {
         val slotsByFile = externalsByFile.mapValues { (_, externals) -> externalSlotsFor(externals) }
         buildCheckReport(
-            infos = selection.selected.map { infos.getValue(it) },
+            infos = selected.map { infos.getValue(it) },
             externalsOf = { slotsByFile[it.file].orEmpty() },
             selection = trackSelectionOf(options.config),
             headerLabel = "Consistency check",
@@ -304,7 +350,7 @@ fun inspectDirectory(
     }
 
     val files = if (options.identify) {
-        selection.selected.map { file ->
+        selected.map { file ->
             FileIdentification(
                 fileName = file.name,
                 listing = listingOf(infos.getValue(file)),
@@ -316,19 +362,16 @@ fun inspectDirectory(
         emptyList()
     }
 
-    val leftovers = ExternalLeftovers(
-        unmatched = discovered.unmatched.map { it.relPath },
-        extras = discovered.extras.map { it.relPath },
-    )
     renderer.render(leftovers)
 
     return InspectReport(
-        mediaFiles = selection.selected.map { it.name },
+        mediaFiles = selected.map { it.name },
         files = files,
         legend = legend,
         leftovers = leftovers,
         check = check,
         configProblems = options.configProblems,
+        binding = binding,
     )
 }
 
@@ -479,11 +522,12 @@ private fun externalsFor(
     }
 }
 
-/** An `additionalSources` path resolved for one episode, before it was read. */
-private data class ResolvedSource(val path: String, val file: File) {
+/** An `additionalSources` path resolved for one episode, before it was read; [file] is null when a `files:`
+ *  source paired none, and [path] then names the source by its masks. */
+private data class ResolvedSource(val path: String, val file: File?) {
     fun toResult(cache: Map<String, ProbeResult?>): ConfiguredSource = ConfiguredSource(
         path = path,
-        listing = when (val probed = cache[pathKey(file)]) {
+        listing = when (val probed = file?.let { cache[pathKey(it)] }) {
             null -> SourceListing.Missing
             is ProbeResult.Failed -> SourceListing.Unreadable(probed.reason)
             is ProbeResult.Probed -> SourceListing.Tracks(probed.allTracks)
@@ -491,13 +535,32 @@ private data class ResolvedSource(val path: String, val file: File) {
     )
 }
 
-private fun resolveSources(dir: File, main: File, options: InspectOptions): List<ResolvedSource> =
-    options.config?.additionalSources.orEmpty()
-        .mapNotNull { it.file }
-        .map { template ->
-            val path = substitute(template, options.substitution.fileVarsFor(main).vars)
-            ResolvedSource(path, resolveAgainst(dir, path))
+/** [main]'s configured sources: a `file:` template resolved for it, or the file a `files:` source paired with it. */
+private fun resolveSources(
+    dir: File,
+    main: File,
+    config: Config?,
+    substitution: SubstitutionEngine,
+    binding: BindingResult?,
+): List<ResolvedSource> {
+    if (config == null) return emptyList()
+    return config.additionalSources.mapIndexedNotNull { i, source ->
+        val masks = source.files
+        val template = source.file
+        when {
+            masks != null -> {
+                val path = config.sourcePath(0, i)
+                binding?.boundFile(path, main)?.let { ResolvedSource(it.entry.relPath, it.entry.file) }
+                    ?: ResolvedSource("$path.files: ${masks.joinToString(", ")}", null)
+            }
+            template != null -> {
+                val path = substitute(template, substitution.fileVarsFor(main).vars)
+                ResolvedSource(path, resolveAgainst(dir, path))
+            }
+            else -> null
         }
+    }
+}
 
 /** Only the formats worth a subprocess are ever read; everything else describes itself from its name. */
 private fun probeExternal(file: File, ext: String, cache: Map<String, ProbeResult?>): ProbeResult? =

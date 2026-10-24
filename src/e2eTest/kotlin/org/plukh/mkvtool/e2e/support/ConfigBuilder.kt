@@ -156,6 +156,28 @@ fun companionCfg(
     ),
 )
 
+/**
+ * The config the raw-release binding cases run against: main files named `[Grp] Show - 13 (BD).mkv` read by
+ * an `episodeRegex` and mapped `13-14` to `1-2`, and a `files:` source of bare-numbered `Subs/13.srt` paired
+ * by its own regex. The season comes from `episodes.yaml`, which each case writes.
+ */
+fun rawReleaseCfg(
+    mkvmergeExe: String = requireNotNull(org.plukh.mkvtool.e2e.support.mkvmergeExe) {
+        "mkvmerge is required to build a config — this case should have been gated on needsMkvmerge"
+    },
+): String = cfg(
+    mkvmergeExe = mkvmergeExe,
+    audioTracks = listOf(TrackSpec(id = 1, language = "ja", title = "Japanese", default = true)),
+    generalExtra = listOf("""episodeRegex: ' - (\d+) \('""", "episodeMap:", "  13-14: 1-2"),
+    additionalSources = listOf(
+        AdditionalSourceSpec(
+            files = listOf("Subs/*.srt"),
+            episodeRegex = """^(\d+)$""",
+            tracks = listOf(SourceTrackSpec(language = "en", title = "English")),
+        ),
+    ),
+)
+
 /** An empty list is written as `[]` rather than omitted — see the distinction in the file comment. */
 private fun trackList(key: String, tracks: List<TrackSpec>, indent: String): String {
     if (tracks.isEmpty()) return "$indent$key: []\n"

@@ -13,7 +13,7 @@ import org.plukh.mkvtool.core.ExternalLegend
 import org.plukh.mkvtool.core.FileConversion
 import org.plukh.mkvtool.core.FileFix
 import org.plukh.mkvtool.core.FileIdentification
-import org.plukh.mkvtool.core.BindingResult
+import org.plukh.mkvtool.core.BindingReport
 import org.plukh.mkvtool.core.CompanionDrops
 import org.plukh.mkvtool.core.FileMux
 import org.plukh.mkvtool.core.MuxAbort
@@ -73,7 +73,7 @@ class TextResultRenderersTest : FunSpec({
             CompanionDrops::class,
             MuxAbort.UnresolvedVariables::class,
             MuxAbort.BlockingDiscrepancies::class,
-            BindingResult::class,
+            BindingReport::class,
             MuxAbort.Unbound::class,
             MuxAbort.OutputCollisions::class,
             FileMux::class,

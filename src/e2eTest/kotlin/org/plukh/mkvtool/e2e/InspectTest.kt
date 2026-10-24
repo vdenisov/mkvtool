@@ -21,12 +21,14 @@ import org.plukh.mkvtool.e2e.support.mkvtool
 import org.plukh.mkvtool.e2e.support.needsMkvmerge
 import org.plukh.mkvtool.e2e.support.pathShadowing
 import org.plukh.mkvtool.e2e.support.posixOnly
+import org.plukh.mkvtool.e2e.support.rawReleaseCfg
 import org.plukh.mkvtool.e2e.support.stageBatch
 import org.plukh.mkvtool.e2e.support.stageExternalText
 import org.plukh.mkvtool.e2e.support.stageExternalTrack
 import org.plukh.mkvtool.e2e.support.stageInput
 import org.plukh.mkvtool.e2e.support.stageTree
 import org.plukh.mkvtool.e2e.support.writeConfig
+import org.plukh.mkvtool.e2e.support.writeEpisodesYaml
 import java.io.File
 import java.nio.charset.StandardCharsets
 
@@ -461,8 +463,8 @@ class InspectTest : FunSpec({
         }
     }
 
-    // Binding is not wired in yet, which inspect says; a valid binding key is still no problem.
-    test("a valid binding key is a warning and no config problem").config(enabledOrReasonIf = needsMkvmerge) {
+    // inspect binds as mux does, so what would make mux refuse the batch is a warning here and fails --strict.
+    test("a binding problem is a warning, and --strict fails on it").config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()
         stageInput(workDir, "a.mkv")
         File(workDir, "config.yaml").writeText(
@@ -472,11 +474,36 @@ class InspectTest : FunSpec({
 
         val run = inspect(workDir, "--strict")
         withClue(run.output) {
-            run.exitCode shouldBe 0
+            run.exitCode shouldBe 2
+            run.output shouldContain "*** Warning: the files cannot be bound to episodes (1 problem):"
             run.output shouldContain
-                "*** Warning: config.yaml sets general.matcher, which inspect does not use yet; " +
-                "files are identified the v1 way, and --identify does not list a source's files."
+                "general.matcher is sequence over 1 main file, but there is no episode metadata to count against"
+            run.output shouldContain "*** Strict mode: 1 binding problem (mux would refuse this batch)."
             run.output shouldNotContain "config problem"
+        }
+    }
+
+    test("--identify prints the binding table, a files: source's file per episode, and an unread main as an extra")
+        .config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "[Grp] Show - 13 (BD).mkv")
+        stageInput(workDir, "[Grp] Show - 14 (BD).mkv")
+        stageInput(workDir, "NCOP.mkv")
+        stageExternalText(workDir, "Subs/13.srt")
+        stageExternalText(workDir, "Subs/14.srt")
+        writeEpisodesYaml(workDir, episodes = mapOf(1 to "One", 2 to "Two"))
+        writeConfig(workDir, rawReleaseCfg())
+
+        val run = inspect(workDir, "--identify")
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldContain "*** Binding: 2 main files, season 01, by episodeRegex"
+            run.output shouldContain "  01   13    [Grp] Show - 13 (BD).mkv"
+            run.output shouldContain "             additionalSources[0]  Subs/13.srt  (regex)"
+            run.output shouldContain "  + Subs/13.srt"
+            run.output shouldContain "*** Extras: 1 file of a main type, not scanned as sources"
+            run.output shouldNotContain "*** NCOP.mkv"
+            run.output shouldNotContain "Unmatched external files"
         }
     }
 

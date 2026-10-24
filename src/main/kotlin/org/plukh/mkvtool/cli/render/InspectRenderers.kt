@@ -104,8 +104,7 @@ val ExternalLeftoversRenderer = ResultTextRenderer<ExternalLeftovers> { result, 
     if (result.extras.isNotEmpty()) {
         s.out.println(
             s.cyan(
-                "*** Extras: ${plural(result.extras.size, "file")} of a main type in subdirectories, " +
-                    "not scanned as sources",
+                "*** Extras: ${plural(result.extras.size, "file")} of a main type, not scanned as sources",
             ),
         )
         formatFileList(result.extras, "      ").forEach { s.out.println(it) }
@@ -113,7 +112,7 @@ val ExternalLeftoversRenderer = ResultTextRenderer<ExternalLeftovers> { result, 
     }
 }
 
-/** Both lines can print in one run: they are two independent reasons for the same exit. */
+/** Every line can print in one run: they are independent reasons for the same exit. */
 val StrictVerdictRenderer = ResultTextRenderer<StrictVerdict> { result, s ->
     if (result.blockingCount > 0) {
         s.err.println(
@@ -128,6 +127,14 @@ val StrictVerdictRenderer = ResultTextRenderer<StrictVerdict> { result, s ->
             s.red(
                 "*** Strict mode: ${plural(result.configProblems, "config problem")} " +
                     "(the report above was not classified against a config).",
+            ),
+        )
+    }
+    if (result.bindingProblems > 0) {
+        s.err.println(
+            s.red(
+                "*** Strict mode: ${plural(result.bindingProblems, "binding problem")} " +
+                    "(mux would refuse this batch).",
             ),
         )
     }

@@ -280,8 +280,8 @@ data class VariantIdentity(
 
 /**
  * Everything one walk found: the [variants], the companion-extension files that belong to no main file,
- * and the main-type files sitting in subdirectories (BD menus, trailers, creditless openings), which are
- * reported so they are not a surprise but are never treated as sources.
+ * and the main-type files that are not main files (BD menus, trailers, creditless openings, in a folder or
+ * beside the episodes), which are reported so they are not a surprise but are never treated as sources.
  */
 data class DiscoveryResult(
     val variants: List<Variant>,
@@ -328,7 +328,8 @@ fun discoverCompanions(
         if (entry.file.absolutePath in mainPaths) continue
 
         if (entry.ext !in COMPANION_EXTENSIONS) {
-            if (entry.dirRel.isNotEmpty() && entry.ext in mainExtensions) extras += entry
+            // Wherever it sits: a creditless opening beside the episodes is as much an extra as one in a folder.
+            if (entry.ext in mainExtensions) extras += entry
             continue
         }
 

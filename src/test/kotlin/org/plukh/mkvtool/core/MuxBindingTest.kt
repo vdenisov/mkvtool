@@ -76,7 +76,10 @@ class MuxBindingTest : FunSpec({
             renderer = renderer, fileMasks = listOf("Show E01.mkv"),
         )
 
-        renderer.results.filterIsInstance<BindingResult>().single().skipped.shouldBeEmpty()
+        // The report covers the run, not the directory: the episode the mask left out is not in it either.
+        val reported = renderer.results.filterIsInstance<BindingReport>().single().binding
+        reported.skipped.shouldBeEmpty()
+        reported.mains.map { it.main.name } shouldContainExactly listOf("Show E01.mkv")
     }
 
     test("a binding problem stops the batch before anything is written, whatever --strict says") {
@@ -96,7 +99,8 @@ class MuxBindingTest : FunSpec({
         ran shouldBe false
         File(dir, "mkv").exists() shouldBe false
         // The problems first, then what they cost.
-        renderer.results.map { it::class } shouldContainExactly listOf(BindingResult::class, MuxAbort.Unbound::class)
+        renderer.results.map { it::class } shouldContainExactly listOf(BindingReport::class, MuxAbort.Unbound::class)
+        renderer.results.filterIsInstance<BindingReport>().single().fatal shouldBe true
     }
 
     test("a main its files: source paired nothing with is dropped like a missing companion, and the rest muxes") {

@@ -310,13 +310,14 @@ class InspectRendererTest : FunSpec({
             out shouldContain "      Bonus.ass"
         }
 
-        test("main-type files in subdirectories are reported but never scanned") {
+        test("main-type files that are not main files are reported but never scanned, wherever they sit") {
             val (out, _) = renderResult(
                 ExternalLeftoversRenderer,
-                ExternalLeftovers(emptyList(), listOf("extras/Sample.mkv")),
+                ExternalLeftovers(emptyList(), listOf("NCOP.mkv", "extras/Sample.mkv")),
             )
 
-            out shouldContain "*** Extras: 1 file of a main type in subdirectories, not scanned as sources"
+            out shouldContain "*** Extras: 2 files of a main type, not scanned as sources"
+            out shouldContain "      NCOP.mkv"
             out shouldContain "      extras/Sample.mkv"
         }
 
@@ -337,21 +338,27 @@ class InspectRendererTest : FunSpec({
 
     context("the strict verdict") {
         test("both reasons can print, in red, on stderr") {
-            val (out, err) = renderResult(StrictVerdictRenderer, StrictVerdict(2, 1), colorEnabled = true)
+            val (out, err) = renderResult(StrictVerdictRenderer, StrictVerdict(2, 1, 0), colorEnabled = true)
 
             out shouldBe ""
             err shouldContain "$esc[31m*** Strict mode: 2 discrepancies affecting selected tracks.$esc[0m"
             err shouldContain "1 config problem (the report above was not classified against a config)."
         }
 
+        test("binding problems are a reason of their own: mux would refuse the batch") {
+            val (_, err) = renderResult(StrictVerdictRenderer, StrictVerdict(0, 0, 1))
+
+            err.trimEnd() shouldBe "*** Strict mode: 1 binding problem (mux would refuse this batch)."
+        }
+
         test("one discrepancy is singular") {
-            val (_, err) = renderResult(StrictVerdictRenderer, StrictVerdict(1, 0))
+            val (_, err) = renderResult(StrictVerdictRenderer, StrictVerdict(1, 0, 0))
 
             err shouldContain "1 discrepancy affecting selected tracks."
         }
 
         test("nothing to say prints nothing") {
-            val (out, err) = renderResult(StrictVerdictRenderer, StrictVerdict(0, 0))
+            val (out, err) = renderResult(StrictVerdictRenderer, StrictVerdict(0, 0, 0))
 
             out shouldBe ""
             err shouldBe ""

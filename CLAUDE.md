@@ -397,7 +397,8 @@ supertype walk would need `kotlin-reflect`, which native-image does without — 
 type registers itself or fails loudly on first emission. Renderers are named for the data they draw, never
 for a command, because the same renderer serves every command emitting that type. `out/RenderHints.kt` is
 the only channel by which a command may tune presentation, and its whole vocabulary today is
-`verboseFileLists`.
+`verboseFileLists` and `bindingTable` (the per-episode binding table, under `mux --dry-run` and
+`inspect --identify`).
 
 **Renderers project, never compute.** A parent may change *what* the answer is; a renderer only changes
 how much of it you see and how it looks. All human message text is composed in renderers — command logic
@@ -570,8 +571,8 @@ appended. `bindingProblems` reports what the config alone can show: fatal in `mu
 `mux` on the binding path; with none it runs as v1 did. `outputName` is not a binding key because it needs
 no episode — `${fileName} fixed` is a fine name for files no rule could read — so it applies on either path.
 The output name is sanitized as `rename` sanitizes, at the point the template becomes a file name. `inspect`
-does not bind yet: it says it identifies files the v1 way and carries on, uncounted, and has nothing to say
-about `outputName`, naming no output. The engine is `bindFiles` (see Binding below).
+binds on the same condition (see its section) and has nothing to say about `outputName`, naming no output.
+The engine is `bindFiles` (see Binding below).
 
 ### File selection and masks
 
@@ -680,7 +681,9 @@ The walk is recursive with dot-directories skipped, the caller's exclusions hono
 and a visited-path set against junction loops. `destinationDir` is excluded, because muxed output carries
 its sources' base names and would otherwise come back as an external file of itself. The main-file scan
 stays **flat**: a media file in a subdirectory is an extra (a menu, a trailer, a creditless opening),
-never an episode.
+never an episode. A main-type file that is not among the mains is an extra wherever it sits; on the v1 path
+every top-level media file is a main, so only `inspect` on the binding path, which leaves out the mains no
+rule read, ever has a top-level one.
 
 Discovery runs once per process and **pre-mask on purpose** — matching against the masked list would dump
 the rest of the season's dubs into "unmatched", the opposite of what a mask asks for. What the masks narrow
@@ -840,6 +843,19 @@ indent, so the columns line up straight down the report.
 `--strict` fails on config problems whether or not the batch is empty: a problem belongs to the config, not
 to the files, so a script gating on `inspect --strict` must not pass a broken config because the directory
 held no media.
+
+With a binding key set — on a config that passed `bindingProblems` (binding takes one that did; a bad regex
+would throw) and declares no groups (whose sources would all bind against every main) — `inspect` binds as
+`mux` does and emits the same `BindingReport`, narrowed to the masked run, with
+`fatal = false`: problems print as warnings and the run carries on. They are not config problems, but
+`--strict` counts them, because they are what `mux` would refuse the batch for, and a script gating on
+`inspect --strict` should fail exactly where `mux` would. A main no rule reads is not an episode: it is
+neither probed nor checked (it would only read as a layout outlier) and is listed as an extra, kept out of
+discovery so that an `NCOP.mka` cannot read as a companion.
+`--identify` lists a `files:` source's paired file per episode beside the `file:` sources, or `(not found)`
+under the source's masks, and a file a source paired is never listed as unmatched or as an extra, whatever
+discovery made of its name. A batch with binding problems resolves its `file:` templates the v1 way, having
+no episodes to trust.
 
 ### `rename` and `--external`
 
