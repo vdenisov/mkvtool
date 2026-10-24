@@ -103,7 +103,7 @@ sealed interface MuxAbort : CommandResult {
     /** The pre-flight check found discrepancies on tracks the config selects by id. */
     data class BlockingDiscrepancies(val count: Int) : MuxAbort
 
-    /** Binding found [count] problems, which the [BindingResult] emitted before it lists. */
+    /** Binding found [count] problems, which the [BindingReport] emitted before it lists. */
     data class Unbound(val count: Int) : MuxAbort
 
     /** Several files would be written to one output: each such path, with the files resolving to it. */
@@ -317,14 +317,11 @@ class MuxCommandBuilder(
     private val options: MuxOptions,
     private val probe: (File) -> ProbeResult,
     /** What binding paired each `files:` source's files with; null when the config sets no binding key. */
-    binding: BindingResult? = null,
+    private val binding: BindingResult? = null,
 ) {
     val config: Config = options.config
     val substitution: SubstitutionEngine = options.substitution
     private val companionProbes = HashMap<String, ProbeResult?>()
-    private val boundFiles: Map<Pair<String, File>, BoundFile> = binding?.sources.orEmpty()
-        .flatMap { source -> source.bound.map { (source.path to it.main) to it } }
-        .toMap()
 
     /**
      * Where [file] will be written — always with a forward slash, and relative unless the config wrote an
@@ -339,7 +336,7 @@ class MuxCommandBuilder(
     }
 
     /** The file binding paired [file] with for `files:` source [index], or null when it paired none. */
-    fun boundFileFor(index: Int, file: File): BoundFile? = boundFiles[config.sourcePath(0, index) to file]
+    fun boundFileFor(index: Int, file: File): BoundFile? = binding?.boundFile(config.sourcePath(0, index), file)
 
     fun commandFor(file: File): List<String> {
         val base = file.nameWithoutExtension
@@ -563,9 +560,8 @@ fun muxDirectory(
         val tree = if (walks) walkTree(dir, excludedPaths(dir, config)) else emptyList()
         val result = bindFiles(config, selection.all, tree, options.substitution.episodeData)
         binding = result
-        // Warned about only as far as this run reaches: a masked-out NCOP.mkv was never asked for.
-        val matched = selection.matched.toSet()
-        renderer.render(result.copy(skipped = result.skipped.filter { it in matched }))
+        // Reported only as far as this run reaches: a masked-out episode or NCOP.mkv was never asked for.
+        renderer.render(BindingReport(result.narrowedTo(selection.matched.toSet()), fatal = true))
         if (result.problems.isNotEmpty()) {
             val abort = MuxAbort.Unbound(result.problems.size)
             renderer.render(abort)

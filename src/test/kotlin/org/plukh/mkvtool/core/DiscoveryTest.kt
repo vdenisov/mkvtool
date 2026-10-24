@@ -367,15 +367,14 @@ class DiscoveryTest : FunSpec({
     }
 
     context("discoverCompanions leftovers") {
-        test("a main-type file counts as an extra only in a subdirectory") {
-            // A stray at the top level is neither an extra (that rule needs a subdirectory) nor unmatched
-            // (its extension is not a companion one), so it is dropped silently. Latent v1 quirk.
+        test("a main-type file that is not a main file is an extra, wherever it sits") {
+            // A creditless opening beside the episodes is as much an extra as one in a folder.
             val dir = tempdir()
             stageAll(dir, "Show - S01E01 - Title.mkv", "Stray.mkv", "extras/Sample.mkv", "notes.txt", "sub/notes.txt")
 
             val result = discover(dir, "Show - S01E01 - Title.mkv")
 
-            result.extras.map { it.relPath } shouldContainExactly listOf("extras/Sample.mkv")
+            result.extras.map { it.relPath } shouldContainExactly listOf("Stray.mkv", "extras/Sample.mkv")
             result.unmatched.shouldBeEmpty()
         }
 

@@ -14,6 +14,7 @@ import org.plukh.mkvtool.e2e.support.mkvtool
 import org.plukh.mkvtool.e2e.support.needsMkvmerge
 import org.plukh.mkvtool.e2e.support.outputNames
 import org.plukh.mkvtool.e2e.support.probe
+import org.plukh.mkvtool.e2e.support.rawReleaseCfg
 import org.plukh.mkvtool.e2e.support.stageExternalText
 import org.plukh.mkvtool.e2e.support.stageInput
 import org.plukh.mkvtool.e2e.support.writeConfig
@@ -52,6 +53,29 @@ class MuxBindingTest : FunSpec({
             run.exitCode shouldBe 0
             // The colon is dropped from the file name; the metadata keeps it.
             outputNames(workDir) shouldBe listOf("Show - S01E01 - One Start.mkv", "Show - S01E02 - Two.mkv")
+        }
+    }
+
+    test("a dry run prints the binding table and writes nothing").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "[Grp] Show - 13 (BD).mkv")
+        stageInput(workDir, "[Grp] Show - 14 (BD).mkv")
+        stageExternalText(workDir, "Subs/13.srt")
+        stageExternalText(workDir, "Subs/14.srt")
+        writeEpisodesYaml(workDir, episodes = mapOf(1 to "One", 2 to "Two"))
+        writeConfig(workDir, rawReleaseCfg())
+
+        val run = mux(workDir, "--dry-run")
+
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldContain "*** Binding: 2 main files, season 01, by episodeRegex\n" +
+                "  EP   READ  MAIN\n" +
+                "  01   13    [Grp] Show - 13 (BD).mkv\n" +
+                "             additionalSources[0]  Subs/13.srt  (regex)\n" +
+                "  02   14    [Grp] Show - 14 (BD).mkv\n" +
+                "             additionalSources[0]  Subs/14.srt  (regex)\n"
+            File(workDir, "mkv").exists() shouldBe false
         }
     }
 
@@ -184,5 +208,5 @@ class MuxBindingTest : FunSpec({
 private val JAPANESE = TrackSpec(id = 1, language = "ja", title = "Japanese", default = true)
 
 /** Output with the platform separator folded to a bare newline, for the multi-line assertions. */
-private fun mux(workDir: File): Run =
-    mkvtool("mux", workDir = workDir).let { it.copy(output = it.output.replace("\r\n", "\n")) }
+private fun mux(workDir: File, vararg args: String): Run =
+    mkvtool("mux", *args, workDir = workDir).let { it.copy(output = it.output.replace("\r\n", "\n")) }

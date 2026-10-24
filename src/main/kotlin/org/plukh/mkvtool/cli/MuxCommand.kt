@@ -19,6 +19,7 @@ import org.plukh.mkvtool.core.resolveUiLanguage
 import org.plukh.mkvtool.core.validateTemplates
 import org.plukh.mkvtool.out.Error
 import org.plukh.mkvtool.out.Notice
+import org.plukh.mkvtool.out.RenderHints
 import org.plukh.mkvtool.out.Renderer
 import org.plukh.mkvtool.out.Success
 import picocli.CommandLine.Command
@@ -103,7 +104,8 @@ class MuxCommand : Callable<Int> {
     var output: OutputOptions = OutputOptions()
 
     override fun call(): Int {
-        val renderer = output.renderer()
+        // A dry run is where a reader checks what binding decided before anything is muxed.
+        val renderer = output.renderer(RenderHints(bindingTable = dryRun))
         val dir = File(".")
 
         val configFile = configPath?.let(::File) ?: File(dir, "config.yaml")

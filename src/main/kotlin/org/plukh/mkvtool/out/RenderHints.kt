@@ -7,8 +7,10 @@ package org.plukh.mkvtool.out
  * or ignore it.
  *
  * [verboseFileLists] is `--check-verbose`: the check report's file-evidence lists print in full instead
- * of truncating past a limit. It is the whole hint vocabulary today.
+ * of truncating past a limit. [bindingTable] is `mux --dry-run` and `inspect --identify`: a binding report
+ * draws its per-episode table as well as its warnings and problems.
  */
 data class RenderHints(
     val verboseFileLists: Boolean = false,
+    val bindingTable: Boolean = false,
 )

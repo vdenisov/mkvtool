@@ -175,7 +175,9 @@ Directories whose name starts with `.` are skipped, as is `destinationDir` when 
 config names one — muxed output carries the same base names as its sources and
 would otherwise come back as an external file of itself. **The main-file scan
 stays flat**: a media file in a subdirectory is an extra (a menu, a trailer, a
-creditless opening), never an episode.
+creditless opening), never an episode. When the config
+[binds files to episodes](#binding-files-to-episodes), a top-level media file the
+episode rule cannot read is an extra too.
 
 ### How files are matched
 
@@ -591,6 +593,28 @@ and run again; nothing is guessed.
 
 An episode that `episodes.yaml` does not list is not a binding problem: a title
 asking for its name drops that file, as it always has.
+
+`mux --dry-run` and `inspect --identify` print what binding decided, once per
+batch: each main file's episode (and the number it read, when `episodeMap`
+changed it), each source's file beneath it with the rule that paired it, and
+the main files no rule read:
+
+```
+*** Binding: 2 main files, season 01, by episodeRegex
+  EP   READ  MAIN
+  01   13    [Grp] Show - 13 (BD).mkv
+             additionalSources[0]  Subs/13.srt  (regex)
+  02   14    [Grp] Show - 14 (BD).mkv
+             additionalSources[0]  Subs/14.srt  (regex)
+*** Skipped: no episode
+      NCOP.mkv
+```
+
+`inspect` binds exactly as `mux` does, but never stops: a problem is a warning
+there, a skipped main is not inspected as an episode and is listed under the
+extras, and `--identify` lists each episode's file from a `files` source with its
+tracks. Under `inspect --strict`, a binding problem fails the run, since it is
+exactly what `mux` would refuse the batch for.
 
 ### Example configurations
 

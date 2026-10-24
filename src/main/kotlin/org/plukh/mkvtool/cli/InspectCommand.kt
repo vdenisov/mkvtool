@@ -8,7 +8,6 @@ import org.plukh.mkvtool.core.MkvToolNotFoundException
 import org.plukh.mkvtool.core.StrictVerdict
 import org.plukh.mkvtool.core.SubstitutionEngine
 import org.plukh.mkvtool.core.additionalSourceIdProblems
-import org.plukh.mkvtool.core.bindingKeys
 import org.plukh.mkvtool.core.bindingProblems
 import org.plukh.mkvtool.core.collectTemplateFields
 import org.plukh.mkvtool.core.groupProblems
@@ -117,7 +116,7 @@ class InspectCommand : Callable<Int> {
     var output: OutputOptions = OutputOptions()
 
     override fun call(): Int {
-        val renderer = output.renderer(RenderHints(verboseFileLists = checkVerbose))
+        val renderer = output.renderer(RenderHints(verboseFileLists = checkVerbose, bindingTable = identifyOnly))
         val dir = File(".")
 
         var configProblems = 0
@@ -169,24 +168,9 @@ class InspectCommand : Callable<Int> {
             renderer.render(Warning("$it."))
             configProblems++
         }
-        // Not counted either, for the same reason as the groups warning above.
-        config?.let { bindingKeys(it).firstOrNull() }?.let { key ->
-            // A group's sources are already said to be unlisted, by the groups warning.
-            val unlisted = if (config.additionalSources.any { it.files != null }) {
-                ", and --identify does not list a source's files"
-            } else {
-                ""
-            }
-            renderer.render(
-                Warning(
-                    "$configName sets $key, which inspect does not use yet; files are identified the v1 way$unlisted.",
-                ),
-            )
-        }
-
-        // Episode metadata only decorates the source paths --identify resolves; it produces no findings,
-        // so an unusable one is a warning and deliberately *not* a config problem. --strict must not fail
-        // over something the report never classified anything against.
+        // Episode metadata produces no findings of its own, so an unusable one is a warning and deliberately
+        // *not* a config problem. It can still fail --strict through binding — a `sequence` with no episode
+        // count to meet — because that is a batch mux would refuse.
         val episodes = loadEpisodeMetadata(dir, offset = 1)
         if (episodes is EpisodeMetadata.Unusable) {
             renderer.render(Warning("${episodes.message}; continuing without episode metadata."))
@@ -223,8 +207,9 @@ class InspectCommand : Callable<Int> {
         )
 
         // Config problems count in an empty batch too: they belong to the config, not to the files.
-        if (strict && (report.blockingCount > 0 || report.configProblems > 0)) {
-            renderer.render(StrictVerdict(report.blockingCount, report.configProblems))
+        // Binding problems too: they are what mux would refuse this batch for.
+        if (strict && (report.blockingCount > 0 || report.configProblems > 0 || report.bindingProblems > 0)) {
+            renderer.render(StrictVerdict(report.blockingCount, report.configProblems, report.bindingProblems))
             return 2
         }
 

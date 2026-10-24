@@ -362,8 +362,8 @@ fun bindingProblems(config: Config, configName: String): List<String> {
 }
 
 /**
- * The config path of every key that binds files to episodes and is set, in config order: what a command that
- * does not bind yet has to refuse or warn about. `general.outputName` is not one; it names the output.
+ * The config path of every key that binds files to episodes and is set, in config order: any one of them puts
+ * `mux` and `inspect` on the binding path. `general.outputName` is not one; it names the output.
  */
 fun bindingKeys(config: Config): List<String> {
     val keys = ArrayList<String>()

@@ -59,7 +59,27 @@ data class BindingResult(
     val skipped: List<File>,
     val sources: List<SourceBinding>,
     val problems: List<BindingProblem>,
-) : CommandResult
+) {
+    private val byPathAndMain: Map<Pair<String, File>, BoundFile> by lazy {
+        sources.flatMap { source -> source.bound.map { (source.path to it.main) to it } }.toMap()
+    }
+
+    /** The file the `files:` source at config [path] paired with [main], or null when it paired none. */
+    fun boundFile(path: String, main: File): BoundFile? = byPathAndMain[path to main]
+
+    /** This binding as far as a run over [files] reaches; the problems stay whole, since they fail the batch. */
+    fun narrowedTo(files: Set<File>): BindingResult = copy(
+        mains = mains.filter { it.main in files },
+        skipped = skipped.filter { it in files },
+        sources = sources.map { source -> source.copy(bound = source.bound.filter { it.main in files }) },
+    )
+}
+
+/**
+ * What a command says about its batch's binding. [fatal] is the command's verdict on the problems: `mux`
+ * refuses a batch with any, `inspect` reports them and carries on.
+ */
+data class BindingReport(val binding: BindingResult, val fatal: Boolean) : CommandResult
 
 /**
  * Gives each of [mains] an episode by one rule (`sequence`, the regex, or `SxxEyy`), and pairs each file a
