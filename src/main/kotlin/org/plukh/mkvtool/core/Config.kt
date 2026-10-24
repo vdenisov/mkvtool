@@ -344,7 +344,7 @@ fun bindingProblems(config: Config, configName: String): List<String> {
 
     config.groups.forEachIndexed { g, group ->
         group.additionalSources.forEachIndexed { i, source ->
-            val path = "${config.groupPrefix(g)}additionalSources[$i]"
+            val path = config.sourcePath(g, i)
             val declared = source.matching.declaredKeys()
             when {
                 !source.file.isNullOrEmpty() && source.files != null ->
@@ -370,7 +370,7 @@ fun bindingKeys(config: Config): List<String> {
     keys += config.general.matching.declaredKeys().map { "general.$it" }
     config.groups.forEachIndexed { g, group ->
         group.additionalSources.forEachIndexed { i, source ->
-            val path = "${config.groupPrefix(g)}additionalSources[$i]"
+            val path = config.sourcePath(g, i)
             if (source.files != null) keys += "$path.files"
             keys += source.matching.declaredKeys().map { "$path.$it" }
         }
@@ -419,6 +419,9 @@ fun partitionByGroup(
 
 /** The config path group [index]'s entries start with: none for the implicit group, which is the top level. */
 internal fun Config.groupPrefix(index: Int): String = if (declaredGroups == null) "" else "groups[$index]."
+
+/** The config path of group [group]'s additional source [index]. */
+internal fun Config.sourcePath(group: Int, index: Int): String = "${groupPrefix(group)}additionalSources[$index]"
 
 /** [path], naming the shared track its entry is built on when there is one. */
 internal fun withRef(path: String, ref: String?): String = if (ref.isNullOrEmpty()) path else "$path (use: $ref)"

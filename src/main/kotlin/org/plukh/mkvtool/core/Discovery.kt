@@ -297,11 +297,7 @@ fun discoverCompanions(
     mainExtensions: Set<String> = emptySet(),
 ): DiscoveryResult {
     val mainPaths = mains.mapTo(HashSet()) { it.absolutePath }
-
-    // Longest first, so the first match found below is the longest match.
-    val candidates = mains
-        .map { MainFile(it, baseNameOf(it.name)) }
-        .sortedWith(compareByDescending<MainFile> { it.base.length }.thenBy { it.base })
+    val candidates = byLongestBase(mains)
 
     // "season/episode" -> the main file that claims it, or null once a second one does.
     val episodeIndex = HashMap<String, MainFile?>()
@@ -323,11 +319,7 @@ fun discoverCompanions(
             continue
         }
 
-        val lower = entry.base.lowercase()
-        // The empty base name guard is not hypothetical pedantry: a file called ".mkv" has one, and every
-        // string starts with the empty string, so without it that file would silently adopt every
-        // otherwise-unmatched companion in the tree.
-        val byName = candidates.firstOrNull { it.lower.isNotEmpty() && lower.startsWith(it.lower) }
+        val byName = candidates.longestPrefix(entry.base).firstOrNull()
         if (byName != null) {
             matched += CompanionEntry(entry, byName.file, MatchTier.NAME, entry.base.substring(byName.base.length))
             continue
@@ -346,9 +338,25 @@ fun discoverCompanions(
     )
 }
 
-/** A main file with its base name, cached in both cases so the tier-1 scan does no work per candidate. */
-private class MainFile(val file: File, val base: String) {
+/** A main file with its base name, cached in both cases so the name scan does no work per candidate. */
+internal class MainFile(val file: File) {
+    val base: String = baseNameOf(file.name)
     val lower: String = base.lowercase()
+}
+
+/** [mains] longest base name first, so the first prefix [longestPrefix] finds is the longest one. */
+internal fun byLongestBase(mains: List<File>): List<MainFile> =
+    mains.map(::MainFile).sortedWith(compareByDescending<MainFile> { it.base.length }.thenBy { it.base })
+
+/** The mains whose base name [base] starts with, at the longest such length (see [discoverCompanions]): one,
+ *  none, or several sharing one base name. The receiver is in [byLongestBase]'s order. */
+internal fun List<MainFile>.longestPrefix(base: String): List<MainFile> {
+    val lower = base.lowercase()
+    // The empty base name guard is not hypothetical pedantry: a file called ".mkv" has one, and every
+    // string starts with the empty string, so without it that file would silently adopt every
+    // otherwise-unmatched companion in the tree.
+    val longest = firstOrNull { it.lower.isNotEmpty() && lower.startsWith(it.lower) } ?: return emptyList()
+    return filter { it.lower == longest.lower }
 }
 
 /** One group of matches before it becomes a [Variant]: identity, members, and whether it was split apart. */
@@ -493,7 +501,7 @@ private fun realPathOrNull(file: File): String? =
     }
 
 /** Everything before the last dot, or the whole name when it has none. */
-private fun baseNameOf(name: String): String {
+internal fun baseNameOf(name: String): String {
     val dot = name.lastIndexOf('.')
     return if (dot < 0) name else name.substring(0, dot)
 }
