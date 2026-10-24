@@ -44,15 +44,12 @@ class ConfigDocsParityTest : FunSpec({
     )
 
     /**
-     * Keys the loader reads that are not documented yet, because no command acts on them yet: groups and
-     * the binding keys are parsed and validated, and mux refuses them until it runs one pass per group and
-     * binds files to episodes. The set empties when both land, and the test below keeps a documented key
-     * from lingering in it.
+     * Keys the loader reads that are not documented yet, because no command acts on them yet: groups are
+     * parsed and validated, and mux refuses them until it runs one pass per group. The set empties when it
+     * does, and the test below keeps a documented key from lingering in it. A group's `files` is not here:
+     * the leaf is documented as a source's.
      */
-    val pendingKeys = setOf(
-        "sharedTracks", "name", "use", "groups", "episodes", "files",
-        "matcher", "episodeRegex", "seasonRegex", "episodeMap", "outputName",
-    )
+    val pendingKeys = setOf("sharedTracks", "name", "use", "groups", "episodes")
 
     /**
      * A key line is `name:` followed by end of line or by something that looks like a YAML value — a

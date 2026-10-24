@@ -380,7 +380,21 @@ general:
   # title is optional: the segment (container) title, defaulting to the file
   # name. Separate from the video track name in mainSource below.
   title: "${showName} - S${seasonNum}E${episodeNum} - ${episodeName}"
+  # outputName is optional: the output's base name, templated like title,
+  # with ".mkv" appended. Omit it to keep each main file's own name.
+  outputName: "${showName} - S${seasonNum}E${episodeNum} - ${episodeName}"
 ```
+
+`outputName` drops the characters a file name cannot hold (`\ / : * ? " < > |`)
+and trailing dots and spaces, on every platform, as `rename` does; titles keep
+the original spelling. Two files resolving to one output path stop the batch
+before anything is written, whatever names them — an `outputName` that names no
+episode, or two main files sharing a base name (`a.mkv` and `a.mp4`), which
+would otherwise overwrite one another. Names that differ only in case count as
+one, as Windows and macOS see them.
+
+The matcher keys that also live under `general` are in
+[Binding files to episodes](#binding-files-to-episodes).
 
 ### Main source settings
 
@@ -501,6 +515,82 @@ additionalSources:
     #   - "--compression"
     #   - "0:none"
 ```
+
+A source can name its files with `files` instead of `file`: see
+[Binding files to episodes](#binding-files-to-episodes).
+
+### Binding files to episodes
+
+By default every main file's episode is the `SxxEyy` in its name, which is what
+`rename` writes. A few keys let `mux` work on raw release names as they are,
+without renaming anything first. None of them is needed for renamed files.
+
+```yaml
+general:
+  episodeRegex: " - (\\d+) \\("   # group 1 of the first match is the number
+  seasonRegex: "S(\\d+)"          # optional; with it, both must match
+  # matcher: "sequence"           # instead of a regex: 1..N in name order
+  episodeMap:
+    13-24: 1-12                   # release numbers to real ones
+additionalSources:
+  - files: ["Subs/*.srt", "Subs/*.ass"]
+    episodeRegex: "^(\\d+)"       # optional; this source's own rule
+    tracks:
+      - language: "en"
+        title: "English"
+```
+
+**Main files get their episode by one rule per run**: `matcher: "sequence"`
+when set, `episodeRegex` when set, `SxxEyy` otherwise. A regex is a search over
+the base name (no extension), and its group 1 is the number. `sequence`
+numbers the main files 1, 2, 3, … in name order, and the count must equal the
+number of episodes in `episodes.yaml`; it is never a default, because a
+positional match can pair the wrong files without a sign. A regex beside
+`sequence` is an error.
+
+**A main file the rule cannot read is skipped with a warning** — a creditless
+opening (`NCOP.mkv`) beside the episodes, say. It is not muxed.
+
+**One season per run.** The season comes from what the files read (`SxxEyy`,
+`seasonRegex`) and from `episodes.yaml`; when nothing names one, or two
+seasons appear, the batch stops. A regex without `seasonRegex` needs
+`episodes.yaml` for that reason.
+
+**`episodeMap`** turns release numbers into real ones, range to range with equal
+lengths: `13-24: 1-12` makes a season-two file numbered 13 episode 1. Every
+number read is mapped, the additional sources' included; a number no range
+covers stays itself, and with no map at all the number read is the episode.
+The release side may start at 0 (a `00` prologue), the real side at 1. The map
+lives under `general` only.
+
+**An additional source's `files`** are masks over the directory tree, relative to
+the media directory (`*` within a folder, `**` across folders), and each file
+they match is paired with a main file:
+
+1. by its own `episodeRegex` when the source sets one, the main with that
+   episode (a `seasonRegex` works as above);
+2. by `matcher: "sequence"`, the source's files in path order against the main
+   files that have an episode;
+3. otherwise by name — the main file whose name the file's name starts with,
+   the longest one winning (`Show - S01E01 - Title 2.srt` goes with
+   `…Title 2.mkv`, not `…Title.mkv`) — and only when no main name fits, by its
+   `SxxEyy`.
+
+A VobSub `.sub` travels with its `.idx`. A source sets `file` or `files`, not
+both.
+
+**An episode that has no file from a `files` source is dropped** with a warning,
+like a missing `file` companion, and the rest of the batch is muxed.
+
+**Anything else stops the batch with exit 2 before anything is written**, with
+every problem listed: two main files on one episode, a `sequence` count that is
+off, a matched file that pairs with no main file or with a skipped one, a file
+named after two main files that share a base name, two files of one source on
+one main file, or one file matched by two sources. Fix the names or the config
+and run again; nothing is guessed.
+
+An episode that `episodes.yaml` does not list is not a binding problem: a title
+asking for its name drops that file, as it always has.
 
 ### Example configurations
 

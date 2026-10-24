@@ -153,11 +153,22 @@ private infix fun String?.orIfEmpty(fallback: String?): String? =
  * The file-scope variable resolver for one batch, holding the per-file memo.
  *
  * [episodeData] is supplied already parsed — the same seam as [normalizeYaml]: the caller owns reading
- * and parsing, this owns the semantics.
+ * and parsing, this owns the semantics. [bound] is each main file's episode as binding decided it; when
+ * set, it replaces the `SxxEyy` in the file name.
  */
-class SubstitutionEngine(private val episodeData: EpisodeData? = null) {
+class SubstitutionEngine(
+    val episodeData: EpisodeData? = null,
+    private val bound: Map<File, SeasonEpisode>? = null,
+) {
 
     private val cache = HashMap<File, FileVars>()
+
+    /** This engine over [binding]'s episodes, which a batch with no binding problems always has a season for. */
+    fun boundTo(binding: BindingResult): SubstitutionEngine {
+        val season = binding.season.orEmpty()
+        val episodes = binding.mains.associate { it.main to SeasonEpisode(season, pad(it.episode)) }
+        return SubstitutionEngine(episodeData, episodes)
+    }
 
     /**
      * File-scope variables for one episode, memoized. Sources are tried in order: `episodes.yaml` (or
@@ -167,7 +178,7 @@ class SubstitutionEngine(private val episodeData: EpisodeData? = null) {
      */
     fun fileVarsFor(file: File): FileVars = cache.getOrPut(file) {
         val base = file.name.substringBeforeLast('.')
-        val parsed = parseSeasonEpisode(base)
+        val parsed = if (bound != null) bound[file] else parseSeasonEpisode(base)
         val canonical = parseCanonicalName(base)
 
         // Episode numbers are only meaningful within one season, so metadata for a different season must

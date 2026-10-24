@@ -1,5 +1,6 @@
 package org.plukh.mkvtool.core
 
+import org.plukh.mkvtool.out.CommandResult
 import java.io.File
 import java.util.Locale
 
@@ -58,7 +59,7 @@ data class BindingResult(
     val skipped: List<File>,
     val sources: List<SourceBinding>,
     val problems: List<BindingProblem>,
-)
+) : CommandResult
 
 /**
  * Gives each of [mains] an episode by one rule (`sequence`, the regex, or `SxxEyy`), and pairs each file a

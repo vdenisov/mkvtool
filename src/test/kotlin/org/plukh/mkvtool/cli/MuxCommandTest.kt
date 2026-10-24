@@ -170,21 +170,16 @@ class MuxCommandTest : FunSpec({
             muxConfigProblem(grouped, "config.yaml") shouldBe "config.yaml declares groups, which mux does not run yet"
         }
 
-        test("a binding key is refused until mux binds files to episodes, naming the key") {
+        test("binding keys and an outputName are muxed with, not refused") {
             val named = config().copy(general = GeneralConfig(destinationDir = "mkv", outputName = Template("x")))
-
-            muxConfigProblem(named, "config.yaml") shouldBe
-                "config.yaml sets general.outputName, which mux does not run yet"
-        }
-
-        test("a source with files is not reported as having no file; the binding refusal speaks for it") {
             val bound = config(sources = listOf(AdditionalSource(files = listOf("Rus sound/*.mka"))))
 
-            muxConfigProblem(bound, "config.yaml") shouldBe
-                "config.yaml sets additionalSources[0].files, which mux does not run yet"
+            muxConfigProblem(named, "config.yaml") shouldBe null
+            // A source with files: names no file on purpose, so it is not reported as having none.
+            muxConfigProblem(bound, "config.yaml") shouldBe null
         }
 
-        test("a binding problem is reported ahead of the not-run-yet refusal") {
+        test("a binding problem is a refusal") {
             val pinned = config().copy(
                 general = GeneralConfig(destinationDir = "mkv", matching = MatcherConfig(matcher = "fuzzy")),
             )
