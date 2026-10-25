@@ -482,11 +482,10 @@ needs an explicitly named option for it rather than a second meaning on this one
 token rather than being cut off — read as two digits, `S01E100` was taken for `S01E10`. Identity is the
 number: `E05` and `E005` are one episode, and the metadata keys stay two-digit-minimum (`"05"`, `"100"`).
 Only a *written* number has a width, and it is the **season's**: the digits of the largest episode the
-metadata or the main files name, so a 100-episode season writes `S01E005` in `rename`'s names and in
+metadata or the season's main files name, so a 100-episode season writes `S01E005` in `rename`'s names and in
 `${episodeNum}`, whatever the release spelled or a mask selected. The season is written as two digits.
-Off the binding path the engine sees one file at a time, so `${episodeNum}` there takes its width from the
-metadata and that file alone. `${episodeN}` and `${seasonN}` are the bare numbers, for prose; the padded
-pair keeps its names and meaning because released configs depend on them.
+`${episodeN}` and `${seasonN}` are the bare numbers, for prose; the padded pair keeps its names and meaning
+because released configs depend on them.
 
 `mux` reads `episodes.txt` as line N = episode N and takes no offset: it is not the command that decides
 numbering. A trimmed file therefore misses, and the stage-two pre-flight reports those files as dropped
@@ -577,12 +576,10 @@ numbering per directory — so a source setting one is refused. It is range to r
 lengths, release side from 0 and real side from 1, absent meaning
 identity. `outputName` is a file-scope template, so stage one validates it like `general.title`; `.mkv` is
 appended. `bindingProblems` reports what the config alone can show: fatal in `mux`, counted in `inspect`.
-`bindingKeys` lists the binding keys set, `outputName` not among them, and any one of them is what puts
-`mux` on the binding path; with none it runs as v1 did. `outputName` is not a binding key because it needs
-no episode — `${fileName} fixed` is a fine name for files no rule could read — so it applies on either path.
-The output name is sanitized as `rename` sanitizes, at the point the template becomes a file name. `inspect`
-binds on the same condition (see its section) and has nothing to say about `outputName`, naming no output.
-The engine is `bindFiles` (see Binding below).
+Binding runs on every `mux` and `inspect` run, with `SxxEyy` when no key says otherwise; there is no second
+path. `outputName` needs no episode — `${fileName} fixed` is a fine name for files no rule could read. The
+output name is sanitized as `rename` sanitizes, at the point the template becomes a file name. `inspect`
+has nothing to say about `outputName`, naming no output. The engine is `bindFiles` (see Binding below).
 
 ### File selection and masks
 
@@ -694,9 +691,8 @@ The walk is recursive with dot-directories skipped, the caller's exclusions hono
 and a visited-path set against junction loops. `destinationDir` is excluded, because muxed output carries
 its sources' base names and would otherwise come back as an external file of itself. The main-file scan
 stays **flat**: a media file in a subdirectory is an extra (a menu, a trailer, a creditless opening),
-never an episode. A main-type file that is not among the mains is an extra wherever it sits; on the v1 path
-every top-level media file is a main, so only `inspect` on the binding path, which leaves out the mains no
-rule read, ever has a top-level one.
+never an episode. A main-type file that is not among the mains is an extra wherever it sits; every
+top-level media file is a main, so that branch has no top-level case today.
 
 Discovery runs once per process and **pre-mask on purpose** — matching against the masked list would dump
 the rest of the season's dubs into "unmatched", the opposite of what a mask asks for. What the masks narrow
@@ -716,29 +712,37 @@ one regex, and anything else gets a precise diagnosis and a user who fixes the f
 worked for years, so avoiding it is a convenience, not a requirement.
 
 A main file gets its episode by **one rule per run**: `sequence` when pinned, the regex when given,
-`SxxEyy` otherwise. A main the rule cannot read is **skipped with a warning** (a top-level extra such as
-`NCOP.mkv`), and it keeps its place in name matching so its own companions never fall to a shorter name. A
+`SxxEyy` otherwise; the rule is the run's, on `BindingResult`, not each main's. **A main is any top-level
+media file; an episode is a main that read a number.** One that read none (`NCOP.mkv`, a movie) stays a main:
+muxed under its own name, inspected, checked, `-` in the table, and dropped by stage two only when a template
+needs its episode — when nothing does, nothing is missing and nothing is said. A name can pair with it; a
+number rule cannot reach it. A
 `files:` source's file pairs with a **main file**, never with an episode on its own: by its regex when it has
 one, by `sequence` when pinned, and otherwise by name (discovery's longest-prefix lookup — an equal base is
 EXACT, a longer one SUFFIX) and, only when no main name starts its own, by `SxxEyy`. The regex is a `find`
 over the base name with group 1 the number, and with a `seasonRegex` both must match. `sequence` numbers the
 files 1..N in plain name order, the mains by name and a source's by relative path; the mains' count must
-equal the metadata's episode count, a source's the mains that bound an episode. Every number read goes
+equal the metadata's episode count, a source's the episodes the mains read. Every number read goes
 through the one episode map, episode only, a number no range covers staying itself, and a main records the
-number it read beside the episode it maps to.
+number it read beside the episode it maps to, and the season its name gave.
 
 **The files of one run share one season**, from what they read (`SxxEyy`, `seasonRegex`) and the metadata.
-Numbers therefore pair on the episode alone, and a season nobody names, or two of them, is a problem.
+Numbers therefore pair on the episode alone, and a season nobody names, or two of them, is a problem. The
+season, duplicate-episode and `sequence` checks consider only mains that read an episode, so a directory of
+un-numbered files with no metadata has no season and no problem.
 
-Beyond the skip, **nothing is soft**: every other failure is a typed `BindingProblem`, and any one of them
-fails the batch — two mains on one episode, a `sequence` count mismatch, a file that pairs with no main or
-with a skipped one, a name tie, two files of one source on one main, one file in two sources. An episode the
+**Nothing is soft**: every failure is a typed `BindingProblem`, and any one of them fails the batch — two
+mains on one episode, a `sequence` count mismatch, a file that pairs with no main, a name tie, two files of
+one source on one main, one file in two sources. Since binding runs on every run, that includes a directory
+holding two seasons or metadata naming another season, with no matcher set at all. An episode the
 metadata lacks is not binding's concern; stage-two substitution drops that file, as it always has. A
 source's candidates are what its masks match against the relative path, the mains aside and with no
 extension filter, and a VobSub `.sub` beside its `.idx`, whatever the case of its name, travels with it
 rather than competing. Callers pass every main, before any command-line mask, since with the longest name
-winning a masked-out `X 2.mkv` would hand `X 2.srt` to `X.mkv`; and the tree leaves out `destinationDir`, as
-discovery's does.
+winning a masked-out `X 2.mkv` would hand `X 2.srt` to `X.mkv`, plus the run the masks chose: the season and
+duplicate-episode checks and pairing by number are about the run alone, so a sample beside its episode can be
+excluded rather than moved, while `sequence` still numbers every main. The tree leaves out `destinationDir`,
+as discovery's does.
 
 ### Language guessing
 
@@ -804,17 +808,17 @@ per-file variable, and its job there is to identify which config entry a finding
 
 Discovers files, builds an `mkvmerge` command per file, and runs them, continuing past failures. The
 pre-flights, in order: stage-one template validation (fatal), the episode-metadata load (fatal on any
-problem), binding when the config sets a binding key (fatal on any problem; a main no rule reads leaves the
-batch with a warning), stage-two substitution drops, the companion pre-flight, output collisions (fatal),
+problem), binding (fatal on any problem), stage-two substitution drops, the companion pre-flight, output
+collisions (fatal),
 and the consistency check (`Pre-flight check`, warn-only unless `--strict`). The two drop stages report and
 drop rather than aborting, because those episodes would have failed in mkvmerge anyway and a partially
 released dub is a normal situation — which is also why a main that a `files:` source paired nothing with is
 a companion drop, not a binding problem.
 
-On the binding path, binding's episode replaces the `SxxEyy` in the name as the template engine's
-`${episodeNum}` and `${seasonNum}` (`SubstitutionEngine.boundTo`), and a `files:` source's paired file goes
-on the command line, a VobSub pair as its `.idx`. The collision check runs on every path, after the drops
-(a dropped episode writes nothing) and before anything is probed: on a v1 config it catches two mains
+Binding's episode is the template engine's only source of `${episodeNum}`, `${seasonNum}` and the rest
+(`SubstitutionEngine.boundTo`); the engine reads no number out of a file name itself. A `files:` source's
+paired file goes on the command line, a VobSub pair as its `.idx`. The collision check runs after the drops
+(a dropped episode writes nothing) and before anything is probed: with no `outputName` it catches two mains
 sharing a base name, `a.mkv` and `a.mp4`, which would otherwise overwrite one another in silence. Paths
 compare ignoring case on every platform, unlike masks: Windows and macOS file systems ignore it by default,
 and an output muxed on Linux may well be copied to one.
@@ -857,18 +861,17 @@ indent, so the columns line up straight down the report.
 to the files, so a script gating on `inspect --strict` must not pass a broken config because the directory
 held no media.
 
-With a binding key set — on a config that passed `bindingProblems` (binding takes one that did; a bad regex
-would throw) and declares no groups (whose sources would all bind against every main) — `inspect` binds as
-`mux` does and emits the same `BindingReport`, narrowed to the masked run, with
-`fatal = false`: problems print as warnings and the run carries on. They are not config problems, but
-`--strict` counts them, because they are what `mux` would refuse the batch for, and a script gating on
-`inspect --strict` should fail exactly where `mux` would. A main no rule reads is not an episode: it is
-neither probed nor checked (it would only read as a layout outlier) and is listed as an extra, kept out of
-discovery so that an `NCOP.mka` cannot read as a companion.
+`inspect` binds as `mux` does and emits the same `BindingReport`, narrowed to the masked run, with
+`fatal = false`: problems print as warnings and the run carries on. With no config it binds over the default
+one. Over a config `bindingProblems` refused (binding takes one that passed; a bad regex would throw) or one
+declaring groups (whose sources would all bind against every main), it keeps `general`'s matchers when they
+passed and drops the sources, the config problem already reported. Binding problems are not config problems,
+but `--strict` counts them, because they are what `mux` would refuse the batch for, and a script gating on
+`inspect --strict` should fail exactly where `mux` would.
 `--identify` lists a `files:` source's paired file per episode beside the `file:` sources, or `(not found)`
 under the source's masks, and a file a source paired is never listed as unmatched or as an extra, whatever
-discovery made of its name. A batch with binding problems resolves its `file:` templates the v1 way, having
-no episodes to trust.
+discovery made of its name. A batch with binding problems still resolves its `file:` templates from what
+binding read, there being no other source of an episode.
 
 ### `rename` and `--external`
 

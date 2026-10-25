@@ -35,7 +35,8 @@ class MuxDirectoryTest : FunSpec({
         // mkvmerge's own output land under the right name.
         renderer.events.filterIsInstance<Header>().map { it.text } shouldContainExactly
             listOf("*** Processing a.mkv", "*** Processing b.mkv", "*** Processing c.mkv")
-        renderer.results.map { (it as FileMux).fileName } shouldContainExactly listOf("a.mkv", "b.mkv", "c.mkv")
+        renderer.results.filterIsInstance<FileMux>().map { it.fileName } shouldContainExactly
+            listOf("a.mkv", "b.mkv", "c.mkv")
     }
 
     test("a file that is not media is named and passed over, with nothing built for it") {

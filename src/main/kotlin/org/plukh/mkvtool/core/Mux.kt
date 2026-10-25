@@ -129,7 +129,7 @@ data class MuxRun(
     /** Null under `--no-check`: the field is empty because nothing computed it, not because a flag
      *  reshaped the document. */
     val check: CheckReport? = null,
-    /** Null when the config sets no binding key, and the main files' own names give their episodes. */
+    /** Null when the run stopped before binding: no file matched, or none was media. */
     val binding: BindingResult? = null,
     /** Set only when the batch was stopped; the caller turns it into exit 2. */
     val aborted: MuxAbort? = null,
@@ -248,7 +248,7 @@ fun muxConfigProblem(config: Config, configName: String): String? {
     config.additionalSources.forEachIndexed { i, source ->
         // A source with no file is nothing to mux: v1 threw on it, and passing mkvmerge an empty argument
         // between its parentheses would be a worse answer than saying so.
-        // A source with files: names none on purpose; binding names one per episode.
+        // A source with files: names none on purpose; binding pairs one with each main.
         if (source.file.isNullOrEmpty() && source.files == null) {
             return "$configName has no file for additionalSources[$i]"
         }
@@ -316,8 +316,8 @@ class MuxCommandBuilder(
     private val dir: File,
     private val options: MuxOptions,
     private val probe: (File) -> ProbeResult,
-    /** What binding paired each `files:` source's files with; null when the config sets no binding key. */
-    private val binding: BindingResult? = null,
+    /** The batch's binding, which says what each `files:` source's files paired with. */
+    private val binding: BindingResult,
 ) {
     val config: Config = options.config
     val substitution: SubstitutionEngine = options.substitution
@@ -336,7 +336,7 @@ class MuxCommandBuilder(
     }
 
     /** The file binding paired [file] with for `files:` source [index], or null when it paired none. */
-    fun boundFileFor(index: Int, file: File): BoundFile? = binding?.boundFile(config.sourcePath(0, index), file)
+    fun boundFileFor(index: Int, file: File): BoundFile? = binding.boundFile(config.sourcePath(0, index), file)
 
     fun commandFor(file: File): List<String> {
         val base = file.nameWithoutExtension
@@ -479,10 +479,9 @@ class MuxCommandBuilder(
 /**
  * Mux every media file in [dir], reporting each as it completes.
  *
- * Six gates run before anything is written, in this order: the masks, binding (when the config sets a
- * binding key), stage-two substitution, the companion pre-flight, output collisions, and the consistency
- * check. All of them run before the output directory is created, so a fully blocked batch leaves no litter
- * behind.
+ * Six gates run before anything is written, in this order: the masks, binding, stage-two substitution, the
+ * companion pre-flight, output collisions, and the consistency check. All of them run before the output
+ * directory is created, so a fully blocked batch leaves no litter behind.
  *
  * A binding problem, an output collision and `--strict` stop the run, by returning [MuxRun.aborted] rather
  * than by throwing. Otherwise nothing here aborts: a file that is not media is named and passed over, a file
@@ -550,28 +549,21 @@ fun muxDirectory(
     var batch = selection.matched
     fun media() = batch.filter { extensionOf(it.name) in options.allowedExtensions }
 
-    // Every main, before the masks: with the longest name winning, a masked-out `X 2.mkv` would hand
-    // `X 2.srt` to `X.mkv`.
-    var batchOptions = options
-    if (bindingKeys(options.config).isNotEmpty()) {
-        val config = options.config
-        // Only a files: source reads the tree, and on a network share the walk is the slow part.
-        val walks = config.groups.any { group -> group.additionalSources.any { it.files != null } }
-        val tree = if (walks) walkTree(dir, excludedPaths(dir, config)) else emptyList()
-        val result = bindFiles(config, selection.all, tree, options.substitution.episodeData)
-        binding = result
-        // Reported only as far as this run reaches: a masked-out episode or NCOP.mkv was never asked for.
-        renderer.render(BindingReport(result.narrowedTo(selection.matched.toSet()), fatal = true))
-        if (result.problems.isNotEmpty()) {
-            val abort = MuxAbort.Unbound(result.problems.size)
-            renderer.render(abort)
-            return stopped(abort)
-        }
-        val skipped = result.skipped.toSet()
-        batch = batch.filterNot { it in skipped }
-        if (media().isEmpty()) return nothingLeft()
-        batchOptions = options.copy(substitution = options.substitution.boundTo(result))
+    // Every main, or a masked-out `X 2.mkv` would hand `X 2.srt` to `X.mkv`; the episode checks take the run.
+    val config = options.config
+    // Only a files: source reads the tree, and on a network share the walk is the slow part.
+    val walks = config.groups.any { group -> group.additionalSources.any { it.files != null } }
+    val tree = if (walks) walkTree(dir, excludedPaths(dir, config)) else emptyList()
+    val bound = bindFiles(config, selection.all, tree, options.substitution.episodeData, run = selection.selected)
+    binding = bound
+    // Reported only as far as this run reaches: a masked-out episode was never asked for.
+    renderer.render(BindingReport(bound.narrowedTo(selection.matched.toSet()), fatal = true))
+    if (bound.problems.isNotEmpty()) {
+        val abort = MuxAbort.Unbound(bound.problems.size)
+        renderer.render(abort)
+        return stopped(abort)
     }
+    val batchOptions = options.copy(substitution = options.substitution.boundTo(bound))
 
     val dropped = substitutionDropsFor(media(), batchOptions)
     if (dropped != null) {
@@ -592,7 +584,7 @@ fun muxDirectory(
     // `${'$'}{codec}` reads in the builder, which is why the cache lives here rather than in the builder.
     val probeCache = HashMap<File, ProbeResult>()
     val probeCached = { file: File -> probeCache.getOrPut(file) { probe(file) } }
-    val builder = MuxCommandBuilder(dir, batchOptions, probeCached, binding)
+    val builder = MuxCommandBuilder(dir, batchOptions, probeCached, bound)
 
     // Never strict, unlike stage two: a dub studio releasing 22 of 24 episodes is ordinary, and the two
     // that are missing would have failed in mkvmerge anyway.

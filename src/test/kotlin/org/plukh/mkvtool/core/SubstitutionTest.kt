@@ -100,8 +100,9 @@ class SubstitutionTest : FunSpec({
 
     context("fileVarsFor") {
         test("takes the episode name from metadata, and everything else from the canonical name") {
-            val engine = SubstitutionEngine(
-                EpisodeData("Real Show", "2011", "01", "Book One", "en-US", mapOf("01" to "From Yaml"))
+            val engine = boundEngine(
+                EpisodeData("Real Show", "2011", "01", "Book One", "en-US", mapOf("01" to "From Yaml")),
+                "Show - S01E01 - Title.mkv",
             )
 
             val vars = engine.fileVarsFor(File("Show - S01E01 - Title.mkv")).vars
@@ -117,7 +118,7 @@ class SubstitutionTest : FunSpec({
         }
 
         test("falls back to the file's own canonical name when metadata has no entry") {
-            val engine = SubstitutionEngine(EpisodeData(show = "Real Show", season = "01"))
+            val engine = boundEngine(EpisodeData(show = "Real Show", season = "01"), "Show - S01E02 - Missing.mkv")
 
             val vars = engine.fileVarsFor(File("Show - S01E02 - Missing.mkv")).vars
 
@@ -127,8 +128,9 @@ class SubstitutionTest : FunSpec({
 
         test("an empty metadata value defers to the file name, as Groovy's elvis did") {
             // v1 chained its sources with `?:`, which falls through on an empty string as well as null.
-            val engine = SubstitutionEngine(
-                EpisodeData(show = "", season = "01", byEpisode = mapOf("01" to ""))
+            val engine = boundEngine(
+                EpisodeData(show = "", season = "01", byEpisode = mapOf("01" to "")),
+                "Show - S01E01 - Title.mkv",
             )
 
             val vars = engine.fileVarsFor(File("Show - S01E01 - Title.mkv")).vars
@@ -137,11 +139,12 @@ class SubstitutionTest : FunSpec({
             vars["episodeName"] shouldBe "Title"
         }
 
-        test("metadata for another season is not joined against this file") {
+        test("metadata for another season is not joined against a file that names its own") {
             // Episode numbers are only meaningful within one season, so this must be absent rather
             // than wrong.
-            val engine = SubstitutionEngine(
-                EpisodeData(show = "S2 Show", season = "02", byEpisode = mapOf("01" to "Season Two Ep"))
+            val engine = boundEngine(
+                EpisodeData(show = "S2 Show", season = "02", byEpisode = mapOf("01" to "Season Two Ep")),
+                "Show - S01E01 - Title.mkv",
             )
 
             val vars = engine.fileVarsFor(File("Show - S01E01 - Title.mkv")).vars
@@ -152,7 +155,7 @@ class SubstitutionTest : FunSpec({
         }
 
         test("episodes.txt metadata supplies names only, leaving the rest to the file name") {
-            val engine = SubstitutionEngine(EpisodeData(byEpisode = mapOf("01" to "From Txt")))
+            val engine = boundEngine(EpisodeData(byEpisode = mapOf("01" to "From Txt")), "Show - S01E01 - Title.mkv")
 
             val vars = engine.fileVarsFor(File("Show - S01E01 - Title.mkv")).vars
 
@@ -174,7 +177,7 @@ class SubstitutionTest : FunSpec({
         }
 
         test("a fully canonical name with no metadata leaves only the season-level fields missing") {
-            val engine = SubstitutionEngine(null)
+            val engine = boundEngine(null, "Show - S01E01 - Title.mkv")
 
             engine.fileVarsFor(File("Show - S01E01 - Title.mkv")).missing shouldContainExactly
                 setOf("seasonName", "showYear")
@@ -182,6 +185,13 @@ class SubstitutionTest : FunSpec({
 
         test("a file with no extension reports an empty one") {
             SubstitutionEngine(null).fileVarsFor(File("noextension")).vars["extension"] shouldBe ""
+        }
+
+        test("an engine binding gave no episode resolves none, whatever the file name says") {
+            val engine = SubstitutionEngine(EpisodeData(season = "01", byEpisode = mapOf("01" to "One")))
+
+            engine.fileVarsFor(File("Show.S01E01.mkv")).missing shouldContainExactly
+                setOf("episodeNum", "episodeN", "episodeName", "showName", "seasonName", "showYear")
         }
 
         test("results are memoized per file") {
@@ -194,8 +204,8 @@ class SubstitutionTest : FunSpec({
         test("bound, the episode is binding's, not the name's, and the title is looked up under it") {
             // A regex read 13 and the map made it episode 1; the season is the metadata's, the run's only one.
             val main = File("[Grp] Show - 13 (BD).mkv")
-            val mains = listOf(MainEpisode(main, 13, 1, BindingRule.REGEX))
-            val binding = BindingResult("01", mains, emptyList(), emptyList(), emptyList())
+            val mains = listOf(MainEpisode(main, 13, 1))
+            val binding = BindingResult("01", BindingRule.REGEX, mains, emptyList(), emptyList())
             val data = EpisodeData(season = "01", byEpisode = mapOf("01" to "Pilot"))
             val engine = SubstitutionEngine(data).boundTo(binding)
 
@@ -207,14 +217,16 @@ class SubstitutionTest : FunSpec({
         }
 
         test("episodeNum is written at the width of the season the metadata describes") {
-            val engine = SubstitutionEngine(EpisodeData(season = "01", byEpisode = mapOf("05" to "Five", "100" to "Hundred")))
+            val data = EpisodeData(season = "01", byEpisode = mapOf("05" to "Five", "100" to "Hundred"))
+            val engine = boundEngine(data, "Show - S01E05 - Five.mkv", "Show - S01E100 - Hundred.mkv")
 
             engine.fileVarsFor(File("Show - S01E05 - Five.mkv")).vars["episodeNum"] shouldBe "005"
             engine.fileVarsFor(File("Show - S01E100 - Hundred.mkv")).vars["episodeNum"] shouldBe "100"
         }
 
         test("seasonN and episodeN are the bare numbers, whatever the width or the spelling") {
-            val engine = SubstitutionEngine(EpisodeData(season = "01", byEpisode = mapOf("05" to "Five", "100" to "Hundred")))
+            val data = EpisodeData(season = "01", byEpisode = mapOf("05" to "Five", "100" to "Hundred"))
+            val engine = boundEngine(data, "Show - S01E005 - Five.mkv")
 
             val vars = engine.fileVarsFor(File("Show - S01E005 - Five.mkv")).vars
             vars["episodeNum"] shouldBe "005"
@@ -224,7 +236,8 @@ class SubstitutionTest : FunSpec({
         }
 
         test("metadata for another season lends episodeNum no width") {
-            val engine = SubstitutionEngine(EpisodeData(season = "02", byEpisode = mapOf("120" to "Later")))
+            val data = EpisodeData(season = "02", byEpisode = mapOf("120" to "Later"))
+            val engine = boundEngine(data, "Show - S01E05.mkv")
 
             engine.fileVarsFor(File("Show - S01E05.mkv")).vars["episodeNum"] shouldBe "05"
         }
@@ -232,12 +245,33 @@ class SubstitutionTest : FunSpec({
         test("bound, episodeNum takes its width from every main, a masked-out one included") {
             val five = File("Show - S01E05.mkv")
             val mains = listOf(
-                MainEpisode(five, 5, 5, BindingRule.SXXEYY),
-                MainEpisode(File("Show - S01E100.mkv"), 100, 100, BindingRule.SXXEYY),
+                MainEpisode(five, 5, 5),
+                MainEpisode(File("Show - S01E100.mkv"), 100, 100),
             )
-            val engine = SubstitutionEngine().boundTo(BindingResult("01", mains, emptyList(), emptyList(), emptyList()))
+            val binding = BindingResult("01", BindingRule.SXXEYY, mains, emptyList(), emptyList())
+            val engine = SubstitutionEngine().boundTo(binding)
 
             engine.fileVarsFor(five).vars["episodeNum"] shouldBe "005"
+        }
+
+        test("a masked-out main of another season lends episodeNum no width") {
+            val five = File("Show - S01E05.mkv")
+            val mains = listOf(five, File("Show - S02E120.mkv"))
+            val binding = bindFiles(Config(), mains, emptyList(), run = listOf(five))
+
+            SubstitutionEngine().boundTo(binding).fileVarsFor(five).vars["episodeNum"] shouldBe "05"
+        }
+
+        test("in a batch of two seasons each file keeps its own, and only its season's metadata") {
+            val one = File("Show - S01E01.mkv")
+            val two = File("Show - S02E02.mkv")
+            val data = EpisodeData(season = "01", byEpisode = mapOf("01" to "One", "02" to "Two"))
+            val engine = boundEngine(data, one.name, two.name)
+
+            engine.fileVarsFor(one).vars["seasonNum"] shouldBe "01"
+            engine.fileVarsFor(one).vars["episodeName"] shouldBe "One"
+            engine.fileVarsFor(two).vars["seasonNum"] shouldBe "02"
+            engine.fileVarsFor(two).vars["episodeName"] shouldBe null
         }
     }
 
@@ -490,3 +524,7 @@ private fun report(validation: TemplateValidation, fatal: Boolean, configName: S
 /** The fields of a config written as a raw mapping, which is how these cases spell one: for a caller,
  *  parsing and collecting are one step, and the reported paths have to survive both. */
 private fun fieldsOf(config: Map<*, *>): List<TemplateField> = collectTemplateFields(parseConfig(config))
+
+/** [data]'s engine bound to the files [names], by the rule a config with no matcher binds with. */
+private fun boundEngine(data: EpisodeData?, vararg names: String): SubstitutionEngine =
+    SubstitutionEngine(data).boundTo(bindFiles(Config(), names.map(::File), emptyList(), data))

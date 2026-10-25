@@ -12,7 +12,6 @@ import org.plukh.mkvtool.core.SeasonUnknown
 import org.plukh.mkvtool.core.SequenceCount
 import org.plukh.mkvtool.core.SharedFile
 import org.plukh.mkvtool.core.SharedMain
-import org.plukh.mkvtool.core.SkippedMainFile
 import org.plukh.mkvtool.core.UnpairedFile
 import org.plukh.mkvtool.core.pad as episodeNumber
 import org.plukh.mkvtool.out.ResultTextRenderer
@@ -22,9 +21,9 @@ import java.io.File
 import java.util.Locale
 
 /**
- * A batch's binding, identical in `mux` and `inspect` but for the verdict: the main files no rule read, and
- * every problem — errors where the command refuses the batch, warnings where it carries on. A clean binding
- * says nothing unless [table] asks for the per-episode table, which then lists the skipped mains itself.
+ * A batch's binding, identical in `mux` and `inspect` but for the verdict on its problems: errors where the
+ * command refuses the batch, warnings where it carries on. A clean binding says nothing unless [table] asks
+ * for the per-episode table.
  *
  * [table] is the `mux --dry-run` / `inspect --identify` render hint.
  */
@@ -32,16 +31,7 @@ class BindingReportRenderer(private val table: Boolean = false) : ResultTextRend
 
     override fun render(result: BindingReport, style: TextStyle) {
         val binding = result.binding
-        val tabled = table && binding.mains.isNotEmpty()
-        if (tabled) renderTable(binding, style)
-
-        if (binding.skipped.isNotEmpty() && !tabled) {
-            val count = binding.skipped.size
-            style.err.println(
-                style.warningText("${plural(count, "main file")} ${have(count)} no episode and will be skipped:"),
-            )
-            formatFileList(binding.skipped.map { it.name }, "      ").forEach { style.err.println(it) }
-        }
+        if (table && binding.mains.isNotEmpty()) renderTable(binding, style)
 
         if (binding.problems.isEmpty()) return
         val header = "the files cannot be bound to episodes (${plural(binding.problems.size, "problem")}):"
@@ -49,13 +39,13 @@ class BindingReportRenderer(private val table: Boolean = false) : ResultTextRend
         for (problem in binding.problems) bindingProblemLines(problem).forEach { style.err.println("      $it") }
     }
 
-    /** One row per main file, its sources' files beneath it; READ only when the map changed a number. */
+    /** One row per main file, `-` for one with no episode, its sources' files beneath it; READ only when the map
+     *  changed a number. */
     private fun renderTable(binding: BindingResult, s: TextStyle) {
         val mains = binding.mains
         val season = binding.season?.let { ", season $it" }.orEmpty()
-        s.out.println(
-            s.cyan("*** Binding: ${plural(mains.size, "main file")}$season, by ${mainRuleName(mains.first().rule)}"),
-        )
+        val rule = mainRuleName(binding.rule)
+        s.out.println(s.cyan("*** Binding: ${plural(mains.size, "main file")}$season, by $rule"))
 
         val mapped = mains.any { it.read != it.episode }
         val readWidth = if (mapped) READ_WIDTH else 0
@@ -67,16 +57,11 @@ class BindingReportRenderer(private val table: Boolean = false) : ResultTextRend
         val indent = " ".repeat(2 + EP_WIDTH + readWidth)
 
         for (main in mains) {
-            val read = if (mapped) pad(episodeNumber(main.read), READ_WIDTH) else ""
-            s.out.println("  ${pad(episodeNumber(main.episode), EP_WIDTH)}$read${main.main.name}")
+            val read = if (mapped) pad(numberOrDash(main.read), READ_WIDTH) else ""
+            s.out.println("  ${pad(numberOrDash(main.episode), EP_WIDTH)}$read${main.main.name}")
             byMain[main.main].orEmpty().forEach { (path, bound) ->
                 s.out.println("$indent${pad(path, pathWidth)}  ${boundName(bound)}  (${sourceRuleName(bound.rule)})")
             }
-        }
-
-        if (binding.skipped.isNotEmpty()) {
-            s.out.println(s.cyan("*** Skipped: no episode"))
-            formatFileList(binding.skipped.map { it.name }, "      ").forEach { s.out.println(it) }
         }
         s.out.println()
     }
@@ -104,15 +89,13 @@ private fun bindingProblemLines(problem: BindingProblem): List<String> = when (p
         val counted = plural(problem.files, if (problem.path == "general") "main file" else "file")
         val expected = problem.expected ?: 0
         val against = when {
-            problem.path != "general" -> "but ${plural(expected, "main file")} ${have(expected)} an episode"
+            problem.path != "general" -> "but the main files read ${plural(expected, "episode")}"
             problem.expected == null -> "but there is no episode metadata to count against"
             else -> "but the episode metadata lists ${problem.expected}"
         }
         listOf("${problem.path}.matcher is sequence over $counted, $against")
     }
     is UnpairedFile -> listOf("${problem.path}: ${problem.entry.relPath} pairs with no main file")
-    is SkippedMainFile ->
-        listOf("${problem.path}: ${problem.entry.relPath} is named after ${problem.main.name}, which has no episode")
     is NameTie -> listOf(
         "${problem.path}: ${problem.entry.relPath} is named after more than one main file: ${names(problem.mains)}",
     )
@@ -139,4 +122,5 @@ private fun boundName(bound: BoundFile): String =
 
 private fun names(files: List<File>): String = files.joinToString(", ") { it.name }
 
-private fun have(count: Int): String = if (count == 1) "has" else "have"
+/** A table cell's number, `-` (the report's one glyph for nothing here) when there is none. */
+private fun numberOrDash(number: Int?): String = number?.let(::episodeNumber) ?: "-"

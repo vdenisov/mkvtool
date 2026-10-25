@@ -517,7 +517,7 @@ class InspectTest : FunSpec({
         }
     }
 
-    test("--identify prints the binding table, a files: source's file per episode, and an unread main as an extra")
+    test("--identify prints the binding table, a files: source's file per episode, and an unread main as a main")
         .config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()
         stageInput(workDir, "[Grp] Show - 13 (BD).mkv")
@@ -531,12 +531,13 @@ class InspectTest : FunSpec({
         val run = inspect(workDir, "--identify")
         withClue(run.output) {
             run.exitCode shouldBe 0
-            run.output shouldContain "*** Binding: 2 main files, season 01, by episodeRegex"
+            run.output shouldContain "*** Binding: 3 main files, season 01, by episodeRegex"
             run.output shouldContain "  01   13    [Grp] Show - 13 (BD).mkv"
+            run.output shouldContain "  -    -     NCOP.mkv"
             run.output shouldContain "             additionalSources[0]  Subs/13.srt  (regex)"
             run.output shouldContain "  + Subs/13.srt"
-            run.output shouldContain "*** Extras: 1 file of a main type, not scanned as sources"
-            run.output shouldNotContain "*** NCOP.mkv"
+            run.output shouldContain "*** NCOP.mkv"
+            run.output shouldNotContain "*** Extras"
             run.output shouldNotContain "Unmatched external files"
         }
     }

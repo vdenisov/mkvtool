@@ -503,7 +503,7 @@ class InspectTest : FunSpec({
     context("binding") {
         val byRegex = Config(general = GeneralConfig(matching = MatcherConfig(episodeRegex = """E(\d+)""")))
 
-        test("a main no rule reads is neither probed nor identified, and is reported as an extra") {
+        test("a main no rule reads is a main with no episode: probed, identified and checked, never an extra") {
             val dir = tempdir()
             listOf("Show - S01E01.mkv", "NCOP.mkv").forEach { File(dir, it).writeText("x") }
             val probed = mutableListOf<String>()
@@ -512,9 +512,11 @@ class InspectTest : FunSpec({
                 dir, options(identify = true, config = byRegex, episodes = EpisodeData(season = "01")), SilentRenderer,
             ) { probed += it.name; probedResult(it) }
 
-            probed shouldContainExactly listOf("Show - S01E01.mkv")
-            report.files.map { it.fileName } shouldContainExactly listOf("Show - S01E01.mkv")
-            report.leftovers.extras shouldContainExactly listOf("NCOP.mkv")
+            probed shouldContainExactly listOf("NCOP.mkv", "Show - S01E01.mkv")
+            report.files.map { it.fileName } shouldContainExactly listOf("NCOP.mkv", "Show - S01E01.mkv")
+            report.binding!!.mains.map { it.main.name to it.episode } shouldContainExactly
+                listOf("NCOP.mkv" to null, "Show - S01E01.mkv" to 1)
+            report.leftovers.extras.shouldBeEmpty()
             report.bindingProblems shouldBe 0
         }
 
@@ -566,18 +568,41 @@ class InspectTest : FunSpec({
             report.leftovers.tied.shouldBeEmpty()
         }
 
-        test("a config the binding checks refused, or one declaring groups, is not bound at all") {
+        test("a config whose general matchers the binding checks refused binds as no config does: by SxxEyy") {
             val dir = tempdir()
             File(dir, "Show - S01E01.mkv").writeText("x")
             val badRegex = Config(general = GeneralConfig(matching = MatcherConfig(episodeRegex = "(")))
-            val grouped = byRegex.copy(declaredGroups = listOf(GroupConfig(name = "all")))
 
             // A regex that does not compile would throw inside binding; inspect has already warned about it.
-            inspectDirectory(dir, options(config = badRegex), SilentRenderer) { probedResult(it) }.binding shouldBe null
-            inspectDirectory(dir, options(config = grouped), SilentRenderer) { probedResult(it) }.binding shouldBe null
+            val report = inspectDirectory(dir, options(config = badRegex), SilentRenderer) { probedResult(it) }
+
+            val binding = report.binding!!
+            binding.rule shouldBe BindingRule.SXXEYY
+            binding.episodes.single().episode shouldBe 1
         }
 
-        test("a skipped main of a type companions share is still an extra, never a companion") {
+        test("a config refused elsewhere, or declaring groups, keeps its general matchers and pairs no source") {
+            val dir = tempdir()
+            File(dir, "Show E01.mkv").writeText("x")
+            File(dir, "Subs").mkdirs()
+            File(dir, "Subs/Show E01.srt").writeText("x")
+            val subs = listOf(AdditionalSource(files = listOf("Subs/*.srt")))
+            val emptyName = byRegex.copy(
+                general = byRegex.general.copy(outputName = Template("")),
+                additionalSources = subs,
+            )
+            val grouped = byRegex.copy(declaredGroups = listOf(GroupConfig(name = "all")), additionalSources = subs)
+
+            for (config in listOf(emptyName, grouped)) {
+                val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }
+                val binding = report.binding!!
+                binding.rule shouldBe BindingRule.REGEX
+                binding.episodes.single().episode shouldBe 1
+                binding.sources.shouldBeEmpty()
+            }
+        }
+
+        test("a main of a type companions share is a main, never a companion") {
             val dir = tempdir()
             listOf("Show - S01E01.mkv", "NCOP.mka").forEach { File(dir, it).writeText("x") }
             val config = byRegex.copy(general = byRegex.general.copy(allowedExtensions = setOf("mkv", "mka")))
@@ -586,7 +611,8 @@ class InspectTest : FunSpec({
                 dir, options(config = config, episodes = EpisodeData(season = "01")), SilentRenderer,
             ) { probedResult(it) }
 
-            report.leftovers.extras shouldContainExactly listOf("NCOP.mka")
+            report.mediaFiles shouldContainExactly listOf("NCOP.mka", "Show - S01E01.mkv")
+            report.leftovers.extras.shouldBeEmpty()
             report.leftovers.unmatched.shouldBeEmpty()
         }
 
@@ -616,16 +642,16 @@ class InspectTest : FunSpec({
             renderer.results.filterIsInstance<BindingReport>().single().fatal shouldBe false
         }
 
-        test("a config with no binding key binds nothing and says nothing about it") {
+        test("a run with no config binds by SxxEyy, and a main that reads nothing is no problem") {
             val dir = tempdir()
             File(dir, "NoEpisodeHere.mkv").writeText("x")
             val renderer = RecordingRenderer()
 
             val report = inspectDirectory(dir, options(), renderer) { probedResult(it) }
 
-            report.binding shouldBe null
+            report.binding!!.rule shouldBe BindingRule.SXXEYY
             report.mediaFiles shouldContainExactly listOf("NoEpisodeHere.mkv")
-            renderer.results.none { it is BindingReport } shouldBe true
+            renderer.results.filterIsInstance<BindingReport>().single().binding.problems.shouldBeEmpty()
         }
     }
 })

@@ -336,7 +336,7 @@ fun groupProblems(config: Config, configName: String): List<String> {
  */
 fun bindingProblems(config: Config, configName: String): List<String> {
     val problems = ArrayList<String>()
-    problems += matcherProblems(config.general.matching, "general", main = true, configName)
+    problems += mainMatcherProblems(config, configName)
     // A declared empty name would name every output `.mkv`, and so would a blank one once it is sanitized.
     config.general.outputName?.let {
         if (it.text.isNullOrBlank()) problems += "$configName has an empty general.outputName"
@@ -361,22 +361,9 @@ fun bindingProblems(config: Config, configName: String): List<String> {
     return problems
 }
 
-/**
- * The config path of every key that binds files to episodes and is set, in config order: any one of them puts
- * `mux` and `inspect` on the binding path. `general.outputName` is not one; it names the output.
- */
-fun bindingKeys(config: Config): List<String> {
-    val keys = ArrayList<String>()
-    keys += config.general.matching.declaredKeys().map { "general.$it" }
-    config.groups.forEachIndexed { g, group ->
-        group.additionalSources.forEachIndexed { i, source ->
-            val path = config.sourcePath(g, i)
-            if (source.files != null) keys += "$path.files"
-            keys += source.matching.declaredKeys().map { "$path.$it" }
-        }
-    }
-    return keys
-}
+/** What [bindingProblems] finds in `general`'s matchers alone, which every main file is read by. */
+fun mainMatcherProblems(config: Config, configName: String): List<String> =
+    matcherProblems(config.general.matching, "general", main = true, configName)
 
 /** A file list split by group. Data only: what a double claim or an unclaimed file *means* is the caller's to
  *  say. Every file is in exactly one of the three. */

@@ -175,9 +175,8 @@ Directories whose name starts with `.` are skipped, as is `destinationDir` when 
 config names one — muxed output carries the same base names as its sources and
 would otherwise come back as an external file of itself. **The main-file scan
 stays flat**: a media file in a subdirectory is an extra (a menu, a trailer, a
-creditless opening), never an episode. When the config
-[binds files to episodes](#binding-files-to-episodes), a top-level media file the
-episode rule cannot read is an extra too.
+creditless opening), never an episode. Every top-level media file is a main
+file, whether or not it has an episode.
 
 ### How files are matched
 
@@ -531,9 +530,10 @@ A source can name its files with `files` instead of `file`: see
 
 ### Binding files to episodes
 
-By default every main file's episode is the `SxxEyy` in its name, which is what
-`rename` writes. A few keys let `mux` work on raw release names as they are,
-without renaming anything first. None of them is needed for renamed files.
+Every `mux` and `inspect` run binds its files to episodes. By default every main
+file's episode is the `SxxEyy` in its name, which is what `rename` writes. A few
+keys let `mux` work on raw release names as they are, without renaming anything
+first. None of them is needed for renamed files.
 
 ```yaml
 general:
@@ -558,13 +558,16 @@ number of episodes in `episodes.yaml`; it is never a default, because a
 positional match can pair the wrong files without a sign. A regex beside
 `sequence` is an error.
 
-**A main file the rule cannot read is skipped with a warning** — a creditless
-opening (`NCOP.mkv`) beside the episodes, say. It is not muxed.
+**A main file the rule cannot read is still a main file** — a creditless
+opening (`NCOP.mkv`) beside the episodes, say, or a movie. It is muxed under its
+own name, inspected and checked; only a title or `outputName` that needs its
+episode drops it, with the usual warning.
 
 **One season per run.** The season comes from what the files read (`SxxEyy`,
 `seasonRegex`) and from `episodes.yaml`; when nothing names one, or two
-seasons appear, the batch stops. A regex without `seasonRegex` needs
-`episodes.yaml` for that reason.
+seasons appear, the batch stops — with no key set too, since binding runs on
+every run. A regex without `seasonRegex` needs `episodes.yaml` for that reason.
+Main files with no episode name no season, so a directory of them needs none.
 
 **`episodeMap`** turns release numbers into real ones, range to range with equal
 lengths: `13-24: 1-12` makes a season-two file numbered 13 episode 1. Every
@@ -579,8 +582,8 @@ they match is paired with a main file:
 
 1. by its own `episodeRegex` when the source sets one, the main with that
    episode (a `seasonRegex` works as above);
-2. by `matcher: "sequence"`, the source's files in path order against the main
-   files that have an episode;
+2. by `matcher: "sequence"`, the source's files in path order against the
+   episodes the main files read;
 3. otherwise by name — the main file whose name the file's name starts with,
    the longest one winning (`Show - S01E01 - Title 2.srt` goes with
    `…Title 2.mkv`, not `…Title.mkv`), and never one whose trailing number the
@@ -595,10 +598,11 @@ like a missing `file` companion, and the rest of the batch is muxed.
 
 **Anything else stops the batch with exit 2 before anything is written**, with
 every problem listed: two main files on one episode, a `sequence` count that is
-off, a matched file that pairs with no main file or with a skipped one, a file
-named after two main files that share a base name, two files of one source on
-one main file, or one file matched by two sources. Fix the names or the config
-and run again; nothing is guessed.
+off, a matched file that pairs with no main file, a file named after two main
+files that share a base name, two files of one source on one main file, or one
+file matched by two sources. Fix the names or the config and run again; nothing
+is guessed. The episode and season checks are about the files the run selects,
+so a sample beside its episode can be left out with `--exclude` instead.
 
 An episode that `episodes.yaml` does not list is not a binding problem: a title
 asking for its name drops that file, as it always has.
@@ -606,23 +610,23 @@ asking for its name drops that file, as it always has.
 `mux --dry-run` and `inspect --identify` print what binding decided, once per
 batch: each main file's episode (and the number it read, when `episodeMap`
 changed it), each source's file beneath it with the rule that paired it, and
-the main files no rule read:
+`-` for a main file no rule read:
 
 ```
-*** Binding: 2 main files, season 01, by episodeRegex
+*** Binding: 3 main files, season 01, by episodeRegex
   EP   READ  MAIN
   01   13    [Grp] Show - 13 (BD).mkv
              additionalSources[0]  Subs/13.srt  (regex)
   02   14    [Grp] Show - 14 (BD).mkv
              additionalSources[0]  Subs/14.srt  (regex)
-*** Skipped: no episode
-      NCOP.mkv
+  -    -     NCOP.mkv
 ```
 
 `inspect` binds exactly as `mux` does, but never stops: a problem is a warning
-there, a skipped main is not inspected as an episode and is listed under the
-extras, and `--identify` lists each episode's file from a `files` source with its
-tracks. Under `inspect --strict`, a binding problem fails the run, since it is
+there, and `--identify` lists each episode's file from a `files` source with its
+tracks. With no config it binds by `SxxEyy`. Over a config with a mistake in its
+binding keys, it binds by `general`'s keys if those are sound, and pairs no
+`files` source. Under `inspect --strict`, a binding problem fails the run, since it is
 exactly what `mux` would refuse the batch for.
 
 ### Example configurations
