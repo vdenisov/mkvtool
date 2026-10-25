@@ -38,7 +38,11 @@ class EpisodesTest : FunSpec({
             // Groovy truth on the matcher is find(), so the groups are the leftmost match's.
             Case("the leftmost token when a name holds two", "S01E01 vs S02E02", SeasonEpisode("01", "01")),
             Case("unpadded numbers do not match", "Show S1E1", null),
-            Case("three-digit numbering is out of scope", "Show s001e001", null),
+            Case("a three-digit episode is read in full", "Show - S01E100 - Title", SeasonEpisode("01", "100")),
+            Case("the episode is a canonical key, not its spelling", "Show S01E005", SeasonEpisode("01", "05")),
+            // Refused rather than read as E100, which is the misreading the boundary exists to stop.
+            Case("a fourth episode digit refuses the token", "Show S01E1000", null),
+            Case("the season stays two digits", "Show s001e001", null),
             Case("only a dot separates the two halves", "Show s01_e01", null),
             Case("a name with no token at all", "Alpha", null),
             Case("an empty name", "", null),
@@ -132,6 +136,16 @@ class EpisodesTest : FunSpec({
                 "My Show - S01E01 - Title\n",
                 CanonicalName("My Show", "01", "01", "Title"),
             ),
+            Case(
+                "a three-digit episode, as rename writes it for a long season",
+                "My Show - S01E100 - Title",
+                CanonicalName("My Show", "01", "100", "Title"),
+            ),
+            Case(
+                "a padded episode reads as its canonical key",
+                "My Show - S01E005 - Title",
+                CanonicalName("My Show", "01", "05", "Title"),
+            ),
             // Unlike parseSeasonEpisode, this one has no dotted variant and no separator tolerance.
             Case("the s01.e01 spelling is not canonical", "My Show - S01.E01 - Title", null),
             Case("the separator must be space-hyphen-space", "My Show S01E01 Title", null),
@@ -139,6 +153,21 @@ class EpisodesTest : FunSpec({
             Case("an empty name", "", null),
             Case("null", null, null),
         ) { parseCanonicalName(it.baseName) shouldBe it.expected }
+    }
+
+    context("episodeWidth") {
+        data class Case(val label: String, val episodes: List<Int>, val expected: Int)
+
+        withData(
+            nameFn = { it.label },
+            Case("two digits at least", listOf(1, 9), 2),
+            Case("nothing known is still two", emptyList(), 2),
+            Case("the largest number decides", listOf(5, 100, 12), 3),
+        ) { episodeWidth(it.episodes) shouldBe it.expected }
+
+        test("pad writes a number at that width") {
+            pad(5, episodeWidth(listOf(5, 100))) shouldBe "005"
+        }
     }
 
     context("indexFromLines") {

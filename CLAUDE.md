@@ -478,6 +478,15 @@ of *how it is read*: it is the episode number of the first line, which is what m
 ignored there. Anyone wanting genuine renumbering — anime absolute numbering against a season-split show —
 needs an explicitly named option for it rather than a second meaning on this one.
 
+**An `SxxEyy` token is two season digits and two or three episode digits**, and a fourth refuses the
+token rather than being cut off — read as two digits, `S01E100` was taken for `S01E10`. Identity is the
+number: `E05` and `E005` are one episode, and the metadata keys stay two-digit-minimum (`"05"`, `"100"`).
+Only a *written* number has a width, and it is the **season's**: the digits of the largest episode the
+metadata or the main files name, so a 100-episode season writes `S01E005` in `rename`'s names and in
+`${episodeNum}`, whatever the release spelled or a mask selected. The season is written as two digits.
+Off the binding path the engine sees one file at a time, so `${episodeNum}` there takes its width from the
+metadata and that file alone.
+
 `mux` reads `episodes.txt` as line N = episode N and takes no offset: it is not the command that decides
 numbering. A trimmed file therefore misses, and the stage-two pre-flight reports those files as dropped
 rather than stamping a wrong title into them. The alternative — sorting the files and matching
@@ -970,7 +979,7 @@ Consequences worth knowing before changing anything:
 
 - **Step 4 is why `rename` does not need to parse exotic names.** By the time it runs, every file is
   already `SxxEyy[suffix].ext`. A release like `[Salender-Raws] Hellsing OVA - 05 (…)` becomes
-  `S01E05[Salender-Raws].mka` first, which is why the strict `s(\d\d)\.?e(\d\d)` regex has never been a
+  `S01E05[Salender-Raws].mka` first, which is why the strict `s(\d\d)\.?e(\d{2,3})(?!\d)` regex has never been a
   problem in practice, and why automating step 4 rather than loosening step 5 is the right fix.
 - **Step 5 renames companions too**, which is why the extension list covers `.mka`/`.ass`/`.srt`/`.idx`/
   `.sub` and why a trailing `[...]` is preserved. The suffix identifies which dub or subtitle group a

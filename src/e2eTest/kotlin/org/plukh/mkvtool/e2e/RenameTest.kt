@@ -109,6 +109,22 @@ class RenameTest : FunSpec({
         File(workDir, "My Show - S01E11 - Episode 1.mkv").exists() shouldBe false
     }
 
+    // E100 was once read as E10; and one season writes one width, so its names sort in episode order.
+    test("a season past ninety-nine reads three digits and writes every episode at three") {
+        val workDir = tempdir()
+        stageInput(workDir, "Show.s01e05.mkv")
+        stageInput(workDir, "Show.s01e10.mkv")
+        stageInput(workDir, "Show.s01e100.mkv")
+        writeEpisodesYaml(workDir, show = "My Show", episodes = (1..100).associateWith { "Episode $it" })
+
+        val run = mkvtool("rename", workDir = workDir)
+
+        withClue(run.output) { run.exitCode shouldBe 0 }
+        File(workDir, "My Show - S01E005 - Episode 5.mkv").exists() shouldBe true
+        File(workDir, "My Show - S01E010 - Episode 10.mkv").exists() shouldBe true
+        File(workDir, "My Show - S01E100 - Episode 100.mkv").exists() shouldBe true
+    }
+
     test("no episode metadata at all exits 2 naming both files") {
         val workDir = tempdir()
 

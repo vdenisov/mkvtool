@@ -50,6 +50,12 @@ class BatchLabelsTest : FunSpec({
                 "01-03",
             ),
             Case("gaps break the run", listOf("Show - 01", "Show - 02", "Show - 05"), "01-02, 05"),
+            // Unpadded, "100" would sort before "98" and the run would split in two.
+            Case(
+                "an SxxEyy batch past ninety-nine labels at one width",
+                listOf("Show S01E98", "Show S01E99", "Show S01E100"),
+                "098-100",
+            ),
         ) { ranges(it.names) shouldBe it.expected }
 
         test("an unnumbered batch has no labels at all") {

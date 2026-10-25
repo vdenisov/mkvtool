@@ -163,6 +163,10 @@ class SubstitutionEngine(
 
     private val cache = HashMap<File, FileVars>()
 
+    /** The largest episode in the metadata and in the bound batch, which `episodeNum` takes its width from. */
+    private val metadataMax: Int? = episodeData?.byEpisode?.keys.orEmpty().mapNotNull { it.toIntOrNull() }.maxOrNull()
+    private val boundMax: Int? = bound?.values?.maxOfOrNull { it.episode.toInt() }
+
     /** This engine over [binding]'s episodes, which a batch with no binding problems always has a season for. */
     fun boundTo(binding: BindingResult): SubstitutionEngine {
         val season = binding.season.orEmpty()
@@ -194,7 +198,10 @@ class SubstitutionEngine(
             "fileName" to base,
             "extension" to file.name.substringAfterLast('.', ""),
             "seasonNum" to (parsed?.season orIfEmpty metadata?.season),
-            "episodeNum" to parsed?.episode,
+            // Unbound, the engine sees one file at a time, so the width is the metadata's and its own (#107).
+            "episodeNum" to parsed?.episode?.toInt()?.let {
+                pad(it, episodeWidth(listOfNotNull(it, boundMax, metadataMax.takeIf { metadata != null })))
+            },
             "episodeName" to (fromData orIfEmpty canonical?.title),
             "showName" to (metadata?.show orIfEmpty canonical?.showName),
             "seasonName" to metadata?.seasonName,

@@ -168,7 +168,9 @@ mkvtool rename "Show Name" --external   # rename the dubs and subs too
 
 Renames every media/subtitle file whose name contains an `sXXeYY` pattern to
 `Show Name - SXXEYY - <episode title>.<ext>`. A trailing `[suffix]` in the
-original name (e.g. a dub studio tag) is preserved.
+original name (e.g. a dub studio tag) is preserved. Episodes may have two or
+three digits (`S01E100`); a season that runs past 99 writes every episode with
+three (`S01E005`), so its files still sort in episode order.
 
 Titles come from `episodes.yaml` when it is present, and from `episodes.txt`
 otherwise. The yaml carries real episode numbers, so a season with a gap in its
@@ -566,7 +568,7 @@ field:
 | `extension` | `mkv` | the file being muxed |
 | `showName` | `Twin Peaks` | `episodes.yaml`, else the canonical file name |
 | `seasonNum` | `01` | the `SxxEyy` in the file name, else `episodes.yaml`; under [binding](docs/reference.md#binding-files-to-episodes), the run's season |
-| `episodeNum` | `02` | the `SxxEyy` in the file name, or the episode [binding](docs/reference.md#binding-files-to-episodes) gives it |
+| `episodeNum` | `02` | the `SxxEyy` in the file name, or the episode [binding](docs/reference.md#binding-files-to-episodes) gives it; three digits in a season past 99, as far as the metadata or binding shows one |
 | `episodeName` | `Traces to Nowhere` | `episodes.yaml` / `episodes.txt`, else the canonical file name |
 | `seasonName` | `Season 1` | `episodes.yaml` |
 | `showYear` | `1990` | `episodes.yaml` |

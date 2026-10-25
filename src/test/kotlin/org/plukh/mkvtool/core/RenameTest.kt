@@ -163,6 +163,23 @@ class RenameTest : FunSpec({
             problem.newName shouldBe "My Show - S01E01 - First Episode.mkv"
             problem.fileNames shouldContainExactlyInAnyOrder listOf("a.s01e01.mkv", "b.s01e01.mkv")
         }
+
+        test("a season past ninety-nine writes every episode at three digits, and E10 is not E100") {
+            val dir = tempdir()
+            touch(dir, "Show.s01e05.mkv")
+            touch(dir, "Show.s01e10.mkv")
+            touch(dir, "Show.s01e100.mkv")
+            val long = mapOf("05" to "Five", "10" to "Ten", "100" to "Hundred")
+
+            val result = buildRenamePlan(dir, "My Show", long, "episodes.yaml", external = false)
+
+            result.problems.shouldBeEmpty()
+            result.entries.map { it.newName } shouldContainExactlyInAnyOrder listOf(
+                "My Show - S01E005 - Five.mkv",
+                "My Show - S01E010 - Ten.mkv",
+                "My Show - S01E100 - Hundred.mkv",
+            )
+        }
     }
 
     context("--external") {

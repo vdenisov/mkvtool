@@ -192,6 +192,19 @@ class DiscoveryTest : FunSpec({
             matched.tier shouldBe MatchTier.EPISODE
         }
 
+        test("a three-digit episode is its own, so E10 and E100 each keep their companion") {
+            val dir = tempdir()
+            stageAll(dir, "A S01E10.mkv", "A S01E100.mkv", "Other S01E10.srt", "Other S01E100.srt")
+
+            val result = discover(dir, "A S01E10.mkv", "A S01E100.mkv")
+
+            result.unmatched.shouldBeEmpty()
+            result.variants.flatMap { it.entries }.associate { it.entry.relPath to it.main.name } shouldBe mapOf(
+                "Other S01E10.srt" to "A S01E10.mkv",
+                "Other S01E100.srt" to "A S01E100.mkv",
+            )
+        }
+
         test("a main file with an empty base name adopts nothing") {
             // Not hypothetical pedantry: a file called ".mkv" has an empty base name, and every string
             // starts with the empty string, so without the guard it would claim the whole tree.

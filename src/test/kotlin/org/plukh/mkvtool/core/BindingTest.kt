@@ -87,6 +87,19 @@ class BindingTest : FunSpec({
                 ),
             ),
             Case(
+                "a three-digit episode is its own, so E10 and E100 do not tie",
+                mains = listOf("Show S01E10.mkv", "Show S01E100.mkv"),
+                files = listOf("Subs/Other S01E10.srt", "Subs/Other S01E100.srt"),
+                sources = listOf(files("Subs/*")),
+                expected = listOf(
+                    "season 01",
+                    "main Show S01E10.mkv E10 SXXEYY",
+                    "main Show S01E100.mkv E100 SXXEYY",
+                    "additionalSources[0]: Subs/Other S01E10.srt -> Show S01E10.mkv SXXEYY",
+                    "additionalSources[0]: Subs/Other S01E100.srt -> Show S01E100.mkv SXXEYY",
+                ),
+            ),
+            Case(
                 "names match whatever their case",
                 mains = listOf("$e01.mkv"),
                 files = listOf("Subs/show - s01e01 - title.ASS"),
