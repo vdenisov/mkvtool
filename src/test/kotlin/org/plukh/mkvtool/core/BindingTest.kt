@@ -8,7 +8,8 @@ import java.io.File
 
 /**
  * The binding engine over name-only fixtures: binding reads no file, so no tree is staged on disk. Each
- * expectation is a digest line: the season, a main's episode and rule, a skipped main, a pairing, a problem.
+ * expectation is a digest line: the season, a main's episode and the run's rule (`-` for a main
+ * that read none), a pairing, a problem.
  */
 class BindingTest : FunSpec({
 
@@ -201,16 +202,36 @@ class BindingTest : FunSpec({
                 ),
             ),
             Case(
-                "a main no rule reads is skipped, and a file named after it is a problem",
+                "a main no rule reads has no episode, and a file named after it pairs with it",
                 mains = listOf("$e01.mkv", "NCOP.mkv"),
                 files = listOf("Subs/$e01.ass", "Subs/NCOP.ass"),
                 sources = listOf(files("Subs/*")),
                 expected = listOf(
                     "season 01",
                     "main $e01.mkv E01 SXXEYY",
-                    "skipped NCOP.mkv",
+                    "main NCOP.mkv -",
                     "additionalSources[0]: Subs/$e01.ass -> $e01.mkv EXACT",
-                    "problem: additionalSources[0]: Subs/NCOP.ass named after skipped NCOP.mkv",
+                    "additionalSources[0]: Subs/NCOP.ass -> NCOP.mkv EXACT",
+                ),
+            ),
+            Case(
+                "un-numbered mains with no metadata have no season, and that is no problem",
+                mains = listOf("Movie.mkv", "OVA.mkv"),
+                files = emptyList(),
+                sources = emptyList(),
+                expected = listOf("main Movie.mkv -", "main OVA.mkv -"),
+            ),
+            Case(
+                "a number rule cannot reach a main with no episode",
+                mains = listOf("$e01.mkv", "NCOP.mkv"),
+                files = listOf("Subs/01.srt", "Subs/02.srt"),
+                sources = listOf(files("Subs/*", regex = """^(\d+)$""")),
+                expected = listOf(
+                    "season 01",
+                    "main $e01.mkv E01 SXXEYY",
+                    "main NCOP.mkv -",
+                    "additionalSources[0]: Subs/01.srt -> $e01.mkv REGEX",
+                    "problem: additionalSources[0]: Subs/02.srt unpaired",
                 ),
             ),
             Case(
@@ -218,7 +239,7 @@ class BindingTest : FunSpec({
                 mains = listOf(".mkv"),
                 files = listOf("Subs/Orphan.srt"),
                 sources = listOf(files("Subs/*")),
-                expected = listOf("skipped .mkv", "problem: additionalSources[0]: Subs/Orphan.srt unpaired"),
+                expected = listOf("main .mkv -", "problem: additionalSources[0]: Subs/Orphan.srt unpaired"),
             ),
             Case(
                 "numbered-only mains take the metadata's season, and extras no mask reaches stay out",
@@ -312,21 +333,21 @@ class BindingTest : FunSpec({
                 ),
             ),
             Case(
-                "a main its seasonRegex misses is skipped",
+                "a main its seasonRegex misses has no episode",
                 mains = listOf("Season 1 E01.mkv", "Show E05.mkv"),
                 files = emptyList(),
                 sources = emptyList(),
                 general = MatcherConfig(episodeRegex = """ E(\d+)""", seasonRegex = """Season (\d+)"""),
-                expected = listOf("season 01", "main Season 1 E01.mkv E01 REGEX", "skipped Show E05.mkv"),
+                expected = listOf("season 01", "main Season 1 E01.mkv E01 REGEX", "main Show E05.mkv -"),
             ),
             Case(
-                "a main whose regex capture is not a number is skipped",
+                "a main whose regex capture is not a number has no episode",
                 mains = listOf("A - 05.mkv", "A - x5.mkv"),
                 files = emptyList(),
                 sources = emptyList(),
                 general = MatcherConfig(episodeRegex = """ - (\w+)$"""),
                 episodes = season1,
-                expected = listOf("season 01", "main A - 05.mkv E05 REGEX", "skipped A - x5.mkv"),
+                expected = listOf("season 01", "main A - 05.mkv E05 REGEX", "main A - x5.mkv -"),
             ),
             Case(
                 "a source's regex pairs a file named after nothing but its number",
@@ -405,7 +426,11 @@ class BindingTest : FunSpec({
                 general = MatcherConfig(matcher = "sequence"),
                 episodes = EpisodeData(season = "01", byEpisode = mapOf("01" to "One", "02" to "Two", "03" to "Three")),
                 // Refused, nothing else binds, so no season is settled and no source adds to the problem.
-                expected = listOf("problem: general sequence over 2 files, expected 3"),
+                expected = listOf(
+                    "main a.mkv -",
+                    "main b.mkv -",
+                    "problem: general sequence over 2 files, expected 3",
+                ),
             ),
             Case(
                 "the main files' sequence with no metadata is a problem",
@@ -413,7 +438,11 @@ class BindingTest : FunSpec({
                 files = emptyList(),
                 sources = emptyList(),
                 general = MatcherConfig(matcher = "sequence"),
-                expected = listOf("problem: general sequence over 2 files, expected nothing"),
+                expected = listOf(
+                    "main a.mkv -",
+                    "main b.mkv -",
+                    "problem: general sequence over 2 files, expected nothing",
+                ),
             ),
         ) { case ->
             val mainFiles = case.mains.map { File(ROOT, it) }
@@ -434,6 +463,44 @@ class BindingTest : FunSpec({
             bindFiles(config, emptyList(), emptyList()).sources.map { it.path } shouldContainExactly listOf(
                 "groups[0].additionalSources[0]",
                 "groups[1].additionalSources[1]",
+            )
+        }
+
+        test("only the run the masks chose can clash over an episode or a season, and a number pairs within it") {
+            // The sample beside episode 1 and a stray from season 2 are masked out, so this run has neither problem.
+            val mains = listOf("S01E01.mkv", "S01E01.sample.mkv", "S02E05.mkv").map { File(ROOT, it) }
+            val config = Config(additionalSources = listOf(files("Subs/*", regex = """^(\d+)$""")))
+
+            val result = bindFiles(config, mains, listOf(entry("Subs/01.srt")), run = mains.take(1))
+
+            digest(result) shouldContainExactlyInAnyOrder listOf(
+                "season 01",
+                "main S01E01.mkv E01 SXXEYY",
+                "main S01E01.sample.mkv E01 SXXEYY",
+                "main S02E05.mkv E05 SXXEYY",
+                "additionalSources[0]: Subs/01.srt -> S01E01.mkv REGEX",
+            )
+            // With no mask the same directory clashes, loudly.
+            val unmasked = bindFiles(config, mains, listOf(entry("Subs/01.srt")))
+            unmasked.problems.map { it::class } shouldContainExactlyInAnyOrder
+                listOf(DuplicateEpisode::class, SeasonConflict::class)
+        }
+
+        test("a source's sequence counts episodes, so a masked-out sample beside its episode needs no file") {
+            val mains = listOf("S01E01.mkv", "S01E01.sample.mkv", "S01E02.mkv").map { File(ROOT, it) }
+            val config = Config(additionalSources = listOf(files("Subs/*", pin = "sequence")))
+
+            val subs = listOf(entry("Subs/a.srt"), entry("Subs/b.srt"))
+
+            val result = bindFiles(config, mains, subs, run = mains - mains[1])
+
+            digest(result) shouldContainExactlyInAnyOrder listOf(
+                "season 01",
+                "main S01E01.mkv E01 SXXEYY",
+                "main S01E01.sample.mkv E01 SXXEYY",
+                "main S01E02.mkv E02 SXXEYY",
+                "additionalSources[0]: Subs/a.srt -> S01E01.mkv SEQUENCE",
+                "additionalSources[0]: Subs/b.srt -> S01E02.mkv SEQUENCE",
             )
         }
     }
@@ -464,10 +531,10 @@ private fun entry(relPath: String): TreeEntry {
 private fun digest(result: BindingResult): List<String> =
     listOfNotNull(result.season?.let { "season $it" }) +
         result.mains.map { main ->
-            val read = if (main.read == main.episode) "" else " (read ${main.read})"
-            "main ${main.main.name} ${spelled(main.episode)}$read ${main.rule}"
+            val episode = main.episode ?: return@map "main ${main.main.name} -"
+            val read = if (main.read == episode) "" else " (read ${main.read})"
+            "main ${main.main.name} ${spelled(episode)}$read ${result.rule}"
         } +
-        result.skipped.map { "skipped ${it.name}" } +
         result.sources.flatMap { source ->
             source.bound.map { "${source.path}: ${filesOf(it)} -> ${it.main.name} ${it.rule}" }
         } +
@@ -483,7 +550,6 @@ private fun problemLine(problem: BindingProblem): String = when (problem) {
     is SequenceCount ->
         "${problem.path} sequence over ${problem.files} files, expected ${problem.expected ?: "nothing"}"
     is UnpairedFile -> "${problem.path}: ${problem.entry.relPath} unpaired"
-    is SkippedMainFile -> "${problem.path}: ${problem.entry.relPath} named after skipped ${problem.main.name}"
     is NameTie -> "${problem.path}: ${problem.entry.relPath} named after ${names(problem.mains)}"
     is SharedMain -> "${problem.path}: ${problem.main.name} shared by ${problem.entries.joinToString { it.relPath }}"
     is SharedFile -> "${problem.entry.relPath} in ${problem.paths.joinToString()}"

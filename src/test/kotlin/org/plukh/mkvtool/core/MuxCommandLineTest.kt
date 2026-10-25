@@ -322,17 +322,18 @@ private fun Config.commandFor(
     uiLanguage: String? = null,
     usesCodec: Boolean = false,
     probe: (File) -> ProbeResult = { error("no probe expected") },
-): List<String> = MuxCommandBuilder(
-    File("."),
-    MuxOptions(
+): List<String> {
+    val binding = bindFiles(this, listOf(file), emptyList())
+    val options = MuxOptions(
         config = this,
         mkvmergeExe = EXE,
         uiLanguage = uiLanguage,
         trackOrder = ORDER,
         usesCodec = usesCodec,
-    ),
-    probe,
-).commandFor(file)
+        substitution = SubstitutionEngine().boundTo(binding),
+    )
+    return MuxCommandBuilder(File("."), options, probe, binding).commandFor(file)
+}
 
 /** The head every command shares, for the cases that spell out a whole argument list. */
 private fun base() = listOf(EXE, "--priority", "lower", "--output", "mkv/Show - S01E01.mkv")

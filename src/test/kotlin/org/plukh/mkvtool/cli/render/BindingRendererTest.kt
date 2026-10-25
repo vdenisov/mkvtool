@@ -16,7 +16,6 @@ import org.plukh.mkvtool.core.SeasonUnknown
 import org.plukh.mkvtool.core.SequenceCount
 import org.plukh.mkvtool.core.SharedFile
 import org.plukh.mkvtool.core.SharedMain
-import org.plukh.mkvtool.core.SkippedMainFile
 import org.plukh.mkvtool.core.SourceBinding
 import org.plukh.mkvtool.core.TreeEntry
 import org.plukh.mkvtool.core.UnpairedFile
@@ -24,8 +23,8 @@ import org.plukh.mkvtool.core.extensionOf
 import java.io.File
 
 /**
- * A batch's binding as `mux` and `inspect` both print it: the per-episode table under the render hint, the
- * skipped mains, and every problem — an error where the command refuses the batch, a warning where it
+ * A batch's binding as `mux` and `inspect` both print it: the per-episode table under the render hint, and
+ * every problem — an error where the command refuses the batch, a warning where it
  * carries on. The table is stdout; warnings and problems are stderr.
  */
 class BindingRendererTest : FunSpec({
@@ -36,8 +35,9 @@ class BindingRendererTest : FunSpec({
             val second = File("[Grp] Show - 14 (BD).mkv")
             val binding = binding(
                 mains = listOf(
-                    MainEpisode(first, 13, 1, BindingRule.REGEX),
-                    MainEpisode(second, 14, 2, BindingRule.REGEX),
+                    MainEpisode(first, 13, 1),
+                    MainEpisode(second, 14, 2),
+                    MainEpisode(File("NCOP.mkv"), null, null),
                 ),
                 sources = listOf(
                     SourceBinding(
@@ -52,29 +52,27 @@ class BindingRendererTest : FunSpec({
                         listOf(BoundFile(entry("Rus/[Grp] Show - 13 (BD).mka"), first, BindingRule.SUFFIX)),
                     ),
                 ),
-                skipped = listOf(File("NCOP.mkv")),
+                rule = BindingRule.REGEX,
             )
 
             val (out, err) = render(binding, table = true)
 
-            out shouldBe "*** Binding: 2 main files, season 01, by episodeRegex\n" +
+            out shouldBe "*** Binding: 3 main files, season 01, by episodeRegex\n" +
                 "  EP   READ  MAIN\n" +
                 "  01   13    [Grp] Show - 13 (BD).mkv\n" +
                 "             additionalSources[0]  Subs/13.srt  (regex)\n" +
                 "             additionalSources[1]  Rus/[Grp] Show - 13 (BD).mka  (suffix)\n" +
                 "  02   14    [Grp] Show - 14 (BD).mkv\n" +
                 "             additionalSources[0]  Subs/14.srt  (regex)\n" +
-                "*** Skipped: no episode\n" +
-                "      NCOP.mkv\n" +
+                "  -    -     NCOP.mkv\n" +
                 "\n"
-            // The table lists the skipped mains itself; a warning as well would say it twice.
             err shouldBe ""
         }
 
         test("with no map at work there is no READ column, and a VobSub pair is one line") {
             val main = File("Show - S01E01.mkv")
             val binding = binding(
-                mains = listOf(MainEpisode(main, 1, 1, BindingRule.SXXEYY)),
+                mains = listOf(MainEpisode(main, 1, 1)),
                 sources = listOf(
                     SourceBinding(
                         "additionalSources[0]",
@@ -98,24 +96,23 @@ class BindingRendererTest : FunSpec({
         }
 
         test("without the hint a clean binding says nothing at all") {
-            val binding = binding(mains = listOf(MainEpisode(File("Show - S01E01.mkv"), 1, 1, BindingRule.SXXEYY)))
+            val binding = binding(mains = listOf(MainEpisode(File("Show - S01E01.mkv"), 1, 1)))
 
             render(binding) shouldBe ("" to "")
         }
     }
 
-    context("skipped mains") {
-        test("are a warning without the table") {
-            val (out, err) = render(binding(skipped = listOf(File("NCOP.mkv"))))
+    test("a main with no episode is a row of its own, and the header names the run's rule, not a main's") {
+        val binding = binding(mains = listOf(MainEpisode(File("NCOP.mkv"), null, null)), rule = BindingRule.REGEX)
 
-            out shouldBe ""
-            err shouldBe "*** Warning: 1 main file has no episode and will be skipped:\n      NCOP.mkv\n"
-        }
-
-        test("are still a warning under the hint when no main bound, since there is no table to list them") {
-            render(binding(skipped = listOf(File("NCOP.mkv"))), table = true).second shouldBe
-                "*** Warning: 1 main file has no episode and will be skipped:\n      NCOP.mkv\n"
-        }
+        render(binding, table = true) shouldBe (
+            "*** Binding: 1 main file, season 01, by episodeRegex\n" +
+                "  EP   MAIN\n" +
+                "  -    NCOP.mkv\n" +
+                "\n" to ""
+        )
+        // Without the table nothing is said: an episode only matters where a template asks for one.
+        render(binding) shouldBe ("" to "")
     }
 
     context("each problem is a line under the error, naming the files and the source") {
@@ -134,13 +131,11 @@ class BindingRendererTest : FunSpec({
             SequenceCount("general", 11, null) to
                 "general.matcher is sequence over 11 main files, but there is no episode metadata to count against",
             SequenceCount("additionalSources[0]", 5, 1) to
-                "additionalSources[0].matcher is sequence over 5 files, but 1 main file has an episode",
+                "additionalSources[0].matcher is sequence over 5 files, but the main files read 1 episode",
             SequenceCount("additionalSources[0]", 1, 2) to
-                "additionalSources[0].matcher is sequence over 1 file, but 2 main files have an episode",
+                "additionalSources[0].matcher is sequence over 1 file, but the main files read 2 episodes",
             UnpairedFile("additionalSources[0]", entry("Subs/x.srt")) to
                 "additionalSources[0]: Subs/x.srt pairs with no main file",
-            SkippedMainFile("additionalSources[0]", entry("NCOP.ass"), File("NCOP.mkv")) to
-                "additionalSources[0]: NCOP.ass is named after NCOP.mkv, which has no episode",
             NameTie("additionalSources[0]", entry("X.srt"), listOf(File("X.mkv"), File("X.mp4"))) to
                 "additionalSources[0]: X.srt is named after more than one main file: X.mkv, X.mp4",
             SharedMain("additionalSources[0]", File("A.mkv"), listOf(entry("a.srt"), entry("b.srt"))) to
@@ -166,9 +161,9 @@ class BindingRendererTest : FunSpec({
 private fun binding(
     mains: List<MainEpisode> = emptyList(),
     sources: List<SourceBinding> = emptyList(),
-    skipped: List<File> = emptyList(),
     problems: List<BindingProblem> = emptyList(),
-) = BindingResult("01", mains, skipped, sources, problems)
+    rule: BindingRule = BindingRule.SXXEYY,
+) = BindingResult("01", rule, mains, sources, problems)
 
 private fun render(binding: BindingResult, table: Boolean = false, fatal: Boolean = true): Pair<String, String> {
     val (out, err) = renderResult(BindingReportRenderer(table), BindingReport(binding, fatal))

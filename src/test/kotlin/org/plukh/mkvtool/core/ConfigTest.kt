@@ -701,13 +701,12 @@ class ConfigTest : FunSpec({
     }
 
     context("matchers") {
-        test("a v1-shaped config sets no binding key") {
+        test("a v1-shaped config sets no matcher and no outputName") {
             val config = yaml("general: {destinationDir: mkv}\nadditionalSources:\n  - file: \"\${fileName}.mka\"\n")
 
             config.general.matching shouldBe MatcherConfig()
             config.general.outputName shouldBe null
             config.additionalSources.single().files shouldBe null
-            bindingKeys(config).shouldBeEmpty()
         }
 
         test("general carries the main files' matcher keys and outputName, as written") {
@@ -768,26 +767,6 @@ class ConfigTest : FunSpec({
             }
         }
 
-        test("bindingKeys names every binding key in config order, groups included") {
-            val config = yaml(
-                """
-                general:
-                  outputName: x
-                  matcher: sequence
-                groups:
-                  - episodes: 1
-                    additionalSources:
-                      - files: a/*.mka
-                        episodeMap: {1: 2}
-                """,
-            )
-
-            bindingKeys(config) shouldBe listOf(
-                "general.matcher",
-                "groups[0].additionalSources[0].files",
-                "groups[0].additionalSources[0].episodeMap",
-            )
-        }
     }
 
     context("bindingProblems") {

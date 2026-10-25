@@ -567,8 +567,8 @@ field:
 | `fileName` | `Show - S01E02 - Title` | the file being muxed |
 | `extension` | `mkv` | the file being muxed |
 | `showName` | `Twin Peaks` | `episodes.yaml`, else the canonical file name |
-| `seasonNum` | `01` | the `SxxEyy` in the file name, else `episodes.yaml`; under [binding](docs/reference.md#binding-files-to-episodes), the run's season |
-| `episodeNum` | `02` | the `SxxEyy` in the file name, or the episode [binding](docs/reference.md#binding-files-to-episodes) gives it; three digits in a season past 99, as far as the metadata or binding shows one |
+| `seasonNum` | `01` | the run's season as [binding](docs/reference.md#binding-files-to-episodes) settles it, else `episodes.yaml` |
+| `episodeNum` | `02` | the episode [binding](docs/reference.md#binding-files-to-episodes) gives the file, by default the `SxxEyy` in its name; three digits in a season past 99 |
 | `seasonN`, `episodeN` | `1`, `2` | the same numbers unpadded, for prose such as `Episode ${episodeN}` |
 | `episodeName` | `Traces to Nowhere` | `episodes.yaml` / `episodes.txt`, else the canonical file name |
 | `seasonName` | `Season 1` | `episodes.yaml` |

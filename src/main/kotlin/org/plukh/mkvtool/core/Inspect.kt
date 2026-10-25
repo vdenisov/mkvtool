@@ -188,7 +188,7 @@ data class InspectReport(
     /** Null in an `--identify`-only run. */
     val check: CheckReport?,
     val configProblems: Int,
-    /** Null when the config sets no binding key, and the main files' own names give their episodes. */
+    /** Null when there was no media file to bind. */
     val binding: BindingResult? = null,
 ) : CommandResult {
     val blockingCount: Int get() = check?.blockingCount ?: 0
@@ -248,56 +248,39 @@ fun inspectDirectory(
 
     val tree = walkTree(dir, excludedPaths(dir, options.config))
 
-    // With a binding key set, the episodes are binding's, as in mux: a main no rule reads is no episode, so it
-    // is neither probed nor checked, and is reported as an extra. Nothing binding finds stops this. Not over a
-    // config the binding checks refused (binding takes one that passed them; a bad regex would throw), nor
-    // over groups, which inspect does not run and whose sources would all bind against every main.
-    val binding = options.config
-        ?.takeIf { bindingKeys(it).isNotEmpty() && it.declaredGroups == null && bindingProblems(it, "").isEmpty() }
-        ?.let { bindFiles(it, selection.all, tree, options.substitution.episodeData) }
-    val skipped = binding?.skipped.orEmpty().mapTo(HashSet()) { it.absolutePath }
-    val selected = selection.selected.filterNot { it.absolutePath in skipped }
-    // A batch with binding problems has no episodes to trust, so its templates resolve the v1 way.
-    val substitution = binding?.takeIf { it.problems.isEmpty() }?.let { options.substitution.boundTo(it) }
-        ?: options.substitution
-    // Reported only as far as this run reaches: a masked-out episode or NCOP.mkv was never asked about.
-    val bindingReport = binding?.let { BindingReport(it.narrowedTo(selection.matched.toSet()), fatal = false) }
+    // Binding takes only what passed its checks (a bad regex would throw); a grouped config's sources bind to all.
+    val config = options.config
+    val bindingConfig = when {
+        config == null -> Config()
+        config.declaredGroups == null && bindingProblems(config, "").isEmpty() -> config
+        mainMatcherProblems(config, "").isEmpty() -> Config(general = GeneralConfig(matching = config.general.matching))
+        else -> Config()
+    }
+    val binding = bindFiles(bindingConfig, selection.all, tree, options.substitution.episodeData, selection.selected)
+    val selected = selection.selected
+    // Even with binding problems: binding is the only source of an episode.
+    val substitution = options.substitution.boundTo(binding)
+    // Reported only as far as this run reaches: a masked-out episode was never asked about.
+    val bindingReport = BindingReport(binding.narrowedTo(selection.matched.toSet()), fatal = false)
 
     // Discovery first: pure name work, no subprocesses, and its answer decides which files are worth
     // probing. It runs over every media file, *before* the masks — matching against the masked list would
-    // dump the rest of the season's dubs into "unmatched", the exact opposite of what a mask asks for. The
-    // skipped mains stay out of it: an `NCOP.mka` would otherwise read as a companion.
-    val (skippedEntries, discoverable) = tree.partition { it.file.absolutePath in skipped }
+    // dump the rest of the season's dubs into "unmatched", the exact opposite of what a mask asks for.
     val discovered = discoverCompanions(
-        mains = selection.all.filterNot { it.absolutePath in skipped },
-        tree = discoverable,
+        mains = selection.all,
+        tree = tree,
         mainExtensions = options.allowedExtensions,
     )
     // A file a files: source paired is a source, whatever discovery made of its name or its type.
-    val paired = binding?.sources.orEmpty().flatMap { source -> source.bound.flatMap { it.files } }.toSet()
+    val paired = binding.sources.flatMap { source -> source.bound.flatMap { it.files } }.toSet()
     // A tie among a source's files is binding's problem, and its report already names the mains.
-    val boundTies = binding?.problems.orEmpty().filterIsInstance<NameTie>().mapTo(HashSet()) { it.entry }
+    val boundTies = binding.problems.filterIsInstance<NameTie>().mapTo(HashSet()) { it.entry }
     val leftovers = ExternalLeftovers(
         unmatched = discovered.unmatched.filterNot { it in paired }.map { it.relPath },
-        extras = (discovered.extras.filterNot { it in paired } + skippedEntries).map { it.relPath }.sorted(),
+        extras = discovered.extras.filterNot { it in paired }.map { it.relPath },
         tied = discovered.tied.filterNot { it.entry in paired || it.entry in boundTies }
             .map { tie -> TiedFile(tie.entry.relPath, tie.mains.map { it.name }.sorted()) },
     )
-
-    // Every selected main had no episode: what binding said and where those files went is the whole report.
-    if (selected.isEmpty()) {
-        bindingReport?.let(renderer::render)
-        renderer.render(leftovers)
-        return InspectReport(
-            mediaFiles = emptyList(),
-            files = emptyList(),
-            legend = ExternalLegend(emptyList()),
-            leftovers = leftovers,
-            check = null,
-            configProblems = options.configProblems,
-            binding = binding,
-        )
-    }
 
     // One probe per file, keyed canonically so the same file reached by two different paths — a companion
     // that is also a configured source, which the canonical `${fileName}[Studio].mka` layout produces
@@ -335,7 +318,7 @@ fun inspectDirectory(
     companionProbes.forEach { probeCached(it); meter.tick() }
     meter.finish()
     renderer.render(Notice(""))
-    bindingReport?.let(renderer::render)
+    renderer.render(bindingReport)
 
     // Built from the cache alone: everything below is already probed, which is what keeps the meter honest.
     val externalsByFile = selected.associateWith { main ->
@@ -552,7 +535,7 @@ private fun resolveSources(
     main: File,
     config: Config?,
     substitution: SubstitutionEngine,
-    binding: BindingResult?,
+    binding: BindingResult,
 ): List<ResolvedSource> {
     if (config == null) return emptyList()
     return config.additionalSources.mapIndexedNotNull { i, source ->
@@ -561,7 +544,7 @@ private fun resolveSources(
         when {
             masks != null -> {
                 val path = config.sourcePath(0, i)
-                binding?.boundFile(path, main)?.let { ResolvedSource(it.entry.relPath, it.entry.file) }
+                binding.boundFile(path, main)?.let { ResolvedSource(it.entry.relPath, it.entry.file) }
                     ?: ResolvedSource("$path.files: ${masks.joinToString(", ")}", null)
             }
             template != null -> {

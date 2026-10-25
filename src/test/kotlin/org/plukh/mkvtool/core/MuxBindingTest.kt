@@ -10,8 +10,8 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import java.io.File
 
 /**
- * `mux` over a config that binds: the episodes binding reads, the companions it pairs, what it skips and
- * refuses, and the output names. Plus the collision check, which every run gets, binding or not.
+ * `mux`'s binding: the episodes it reads, the companions it pairs, the mains that read none and what it
+ * refuses, and the output names. Plus the collision check.
  *
  * mkvmerge is injected and the check is off, as in `MuxDirectoryTest`, so what is pinned is the batch and
  * the command lines.
@@ -51,22 +51,24 @@ class MuxBindingTest : FunSpec({
         second shouldContainInOrder listOf("(", "Subs/Show - S01E02.srt", ")")
     }
 
-    test("a main no rule reads is warned about and never muxed") {
+    test("a main no rule reads is muxed under its own name, and dropped only where a template needs its episode") {
         val dir = tempdir()
         touch(dir, "Show E01.mkv", "NCOP.mkv")
-        var ran = emptyList<String>()
+        val byRegex = MatcherConfig(episodeRegex = """E(\d+)""")
+        val season = EpisodeData(season = "01")
 
-        val run = mux(
-            dir, config(matching = MatcherConfig(episodeRegex = """E(\d+)""")), EpisodeData(season = "01"),
-            record = { ran = ran + it.joinToString(" ") },
+        val plain = mux(dir, config(matching = byRegex), season)
+        plain.files.map { it.fileName } shouldContainExactly listOf("NCOP.mkv", "Show E01.mkv")
+        plain.substitutionDrops shouldBe null
+
+        val named = mux(
+            dir, config(matching = byRegex, outputName = "E\${episodeNum}"), season, usedFileVars = setOf("episodeNum"),
         )
-
-        run.files.map { it.fileName } shouldContainExactly listOf("Show E01.mkv")
-        run.binding!!.skipped shouldContainExactly listOf(File(dir, "NCOP.mkv"))
-        ran.single() shouldNotContain "NCOP"
+        named.files.map { it.fileName } shouldContainExactly listOf("Show E01.mkv")
+        named.substitutionDrops!!.fileNames shouldContainExactly listOf("NCOP.mkv")
     }
 
-    test("a skipped main the masks left out of the run is not warned about") {
+    test("the binding report covers the run: a main the masks left out is not in it") {
         val dir = tempdir()
         touch(dir, "Show E01.mkv", "Show E02.mkv", "NCOP.mkv")
         val renderer = RecordingRenderer()
@@ -78,7 +80,6 @@ class MuxBindingTest : FunSpec({
 
         // The report covers the run, not the directory: the episode the mask left out is not in it either.
         val reported = renderer.results.filterIsInstance<BindingReport>().single().binding
-        reported.skipped.shouldBeEmpty()
         reported.mains.map { it.main.name } shouldContainExactly listOf("Show E01.mkv")
     }
 
@@ -115,7 +116,17 @@ class MuxBindingTest : FunSpec({
         run.files.map { it.fileName } shouldContainExactly listOf("Show - S01E01.mkv")
     }
 
-    context("two files resolving to one output stop the batch, binding or not") {
+    test("a config with no matcher still binds, so two seasons in one directory stop the batch") {
+        val dir = tempdir()
+        touch(dir, "Show - S01E01.mkv", "Show - S02E02.mkv")
+
+        val run = mux(dir, config())
+
+        run.aborted shouldBe MuxAbort.Unbound(1)
+        run.binding!!.problems.single().shouldBeInstanceOf<SeasonConflict>()
+    }
+
+    context("two files resolving to one output stop the batch") {
         test("an outputName that names no episode") {
             val dir = tempdir()
             touch(dir, "a.mkv", "b.mkv")
@@ -128,7 +139,7 @@ class MuxBindingTest : FunSpec({
             File(dir, "mkv").exists() shouldBe false
         }
 
-        test("a v1 config over two main files sharing a base name") {
+        test("two main files sharing a base name, with no matcher") {
             val dir = tempdir()
             touch(dir, "a.mkv", "a.mp4")
 

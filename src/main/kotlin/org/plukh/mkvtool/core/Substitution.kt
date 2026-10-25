@@ -153,24 +153,32 @@ private infix fun String?.orIfEmpty(fallback: String?): String? =
  * The file-scope variable resolver for one batch, holding the per-file memo.
  *
  * [episodeData] is supplied already parsed — the same seam as [normalizeYaml]: the caller owns reading
- * and parsing, this owns the semantics. [bound] is each main file's episode as binding decided it; when
- * set, it replaces the `SxxEyy` in the file name.
+ * and parsing, this owns the semantics. [bound] is each main file's episode as binding decided it, and the
+ * only source of one: a file it does not hold has no episode.
  */
 class SubstitutionEngine(
     val episodeData: EpisodeData? = null,
-    private val bound: Map<File, SeasonEpisode>? = null,
+    private val bound: Map<File, SeasonEpisode> = emptyMap(),
 ) {
 
     private val cache = HashMap<File, FileVars>()
 
     /** The largest episode in the metadata and in the bound batch, which `episodeNum` takes its width from. */
     private val metadataMax: Int? = episodeData?.byEpisode?.keys.orEmpty().mapNotNull { it.toIntOrNull() }.maxOrNull()
-    private val boundMax: Int? = bound?.values?.maxOfOrNull { it.episode.toInt() }
+    private val boundMax: Int? = bound.values.maxOfOrNull { it.episode.toInt() }
 
-    /** This engine over [binding]'s episodes, which a batch with no binding problems always has a season for. */
+    /**
+     * This engine over [binding]'s episodes, each in the batch's season, or its own where binding found none. A
+     * main whose name gave another season is left out: the masks kept it out of the run, and its number would
+     * widen this season's.
+     */
     fun boundTo(binding: BindingResult): SubstitutionEngine {
-        val season = binding.season.orEmpty()
-        val episodes = binding.mains.associate { it.main to SeasonEpisode(season, pad(it.episode)) }
+        val episodes = binding.episodes
+            .filter { binding.season == null || it.season == null || it.season == binding.season }
+            .associate { main ->
+                val season = binding.season ?: main.season ?: episodeData?.season.orEmpty()
+                main.main to SeasonEpisode(season, pad(main.episode!!))
+            }
         return SubstitutionEngine(episodeData, episodes)
     }
 
@@ -182,7 +190,7 @@ class SubstitutionEngine(
      */
     fun fileVarsFor(file: File): FileVars = cache.getOrPut(file) {
         val base = file.name.substringBeforeLast('.')
-        val parsed = if (bound != null) bound[file] else parseSeasonEpisode(base)
+        val parsed = bound[file]
         val canonical = parseCanonicalName(base)
 
         // Episode numbers are only meaningful within one season, so metadata for a different season must
@@ -201,7 +209,6 @@ class SubstitutionEngine(
             "extension" to file.name.substringAfterLast('.', ""),
             "seasonNum" to season,
             "seasonN" to season?.toIntOrNull()?.toString(),
-            // Unbound, the engine sees one file at a time, so the width is the metadata's and its own (#107).
             "episodeNum" to episode?.let {
                 pad(it, episodeWidth(listOfNotNull(it, boundMax, metadataMax.takeIf { metadata != null })))
             },

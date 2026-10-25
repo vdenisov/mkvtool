@@ -5,6 +5,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.plukh.mkvtool.e2e.support.AdditionalSourceSpec
 import org.plukh.mkvtool.e2e.support.Run
 import org.plukh.mkvtool.e2e.support.SourceTrackSpec
@@ -107,7 +108,9 @@ class MuxBindingTest : FunSpec({
         }
     }
 
-    test("a main file the rule cannot read is warned about and not muxed")
+    // A main with no episode is content all the same (a creditless opening, a movie); with no template needing
+    // its episode, nothing is missing and nothing is said.
+    test("a main file the rule cannot read is muxed under its own name, without a word")
         .config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()
         stageInput(workDir, "Show E01.mkv")
@@ -119,8 +122,44 @@ class MuxBindingTest : FunSpec({
 
         withClue(run.output) {
             run.exitCode shouldBe 0
-            run.output shouldContain "*** Warning: 1 main file has no episode and will be skipped:\n      NCOP.mkv"
-            outputNames(workDir) shouldBe listOf("Show E01.mkv")
+            run.output shouldNotContain "no episode"
+            outputNames(workDir) shouldBe listOf("NCOP.mkv", "Show E01.mkv")
+        }
+    }
+
+    test("a config with no binding key still prints the binding table on --dry-run, a main with no episode as -")
+        .config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "Show - S01E01.mkv")
+        stageInput(workDir, "Show - S01E02.mkv")
+        stageInput(workDir, "NCOP.mkv")
+        writeConfig(workDir, cfg(audioTracks = listOf(JAPANESE)))
+
+        val run = mux(workDir, "--dry-run")
+
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldContain "*** Binding: 3 main files, season 01, by SxxEyy\n" +
+                "  EP   MAIN\n" +
+                "  -    NCOP.mkv\n" +
+                "  01   Show - S01E01.mkv\n" +
+                "  02   Show - S01E02.mkv\n"
+        }
+    }
+
+    test("a config with no binding key refuses a directory holding two seasons")
+        .config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "Show - S01E01.mkv")
+        stageInput(workDir, "Show - S02E02.mkv")
+        writeConfig(workDir, cfg(audioTracks = listOf(JAPANESE)))
+
+        val run = mux(workDir)
+
+        withClue(run.output) {
+            run.exitCode shouldBe 2
+            run.output shouldContain "more than one season"
+            File(workDir, "mkv").exists() shouldBe false
         }
     }
 
