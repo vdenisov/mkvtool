@@ -677,7 +677,9 @@ name work, which is what keeps coverage free on a network share.
 Three rules are load-bearing:
 
 1. **Longest-prefix-wins** on name matching, or `Show - S01E01 - Title 2.srt` gets read as `…Title.mkv`
-   plus the suffix `" 2"` whenever both files exist.
+   plus the suffix `" 2"` whenever both files exist. A suffix may not continue a digit the main's name ends
+   in, or with `Ep 10.mkv` missing `Ep 10.srt` binds silently to `Ep 1.mkv`, and a shorter main (`Ep.mkv`)
+   does not take it instead; letters may (`Ep 01v2`).
 2. **An episode-number match requires a unique claimant.** Two main files for one episode makes the match
    ambiguous, and ambiguous means unmatched, never guessed.
 3. **Variant identity is `(leaf directory, raw suffix)`** with same-named leaves merged, which is what

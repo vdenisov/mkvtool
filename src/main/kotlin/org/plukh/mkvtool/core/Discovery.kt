@@ -295,7 +295,8 @@ data class DiscoveryResult(
  * Tier 1 is the name relation: the candidate's base name starts with a main file's base name, and
  * whatever trails it is the suffix (empty for the directory layout). The **longest** such main wins,
  * which is what stops `Show - S01E01 - Title 2.srt` from being read as main `…Title` plus suffix `" 2"`
- * when `…Title 2.mkv` also exists.
+ * when `…Title 2.mkv` also exists. A suffix may not continue a number the main's name ends in, so with no
+ * `Ep 10.mkv` an `Ep 10.srt` is no companion of `Ep 1.mkv`, nor of a shorter `Ep.mkv`.
  *
  * Tier 2 is the episode number: no name relation, but both sides carry the same SxxEyy and exactly one
  * main file claims it. Two main files for one episode make that episode ambiguous by design, and
@@ -362,16 +363,23 @@ internal class MainFile(val file: File) {
 internal fun byLongestBase(mains: List<File>): List<MainFile> =
     mains.map(::MainFile).sortedWith(compareByDescending<MainFile> { it.base.length }.thenBy { it.base })
 
-/** The mains whose base name [base] starts with, at the longest such length (see [discoverCompanions]): one,
- *  none, or several sharing one base name. The receiver is in [byLongestBase]'s order. */
+/** The mains whose base name [base] starts with, at the longest such length: one, none, or several sharing
+ *  one base name. None when [base] continues the number that name ends in (see [discoverCompanions]). The
+ *  receiver is in [byLongestBase]'s order. */
 internal fun List<MainFile>.longestPrefix(base: String): List<MainFile> {
     val lower = base.lowercase()
     // The empty base name guard is not hypothetical pedantry: a file called ".mkv" has one, and every
     // string starts with the empty string, so without it that file would silently adopt every
     // otherwise-unmatched companion in the tree.
     val longest = firstOrNull { it.lower.isNotEmpty() && lower.startsWith(it.lower) } ?: return emptyList()
+    // Not handed on to a shorter main either: with Ep 10.mkv missing, Ep.mkv has no claim on Ep 10.srt.
+    if (continuesNumber(longest.lower, lower)) return emptyList()
     return filter { it.lower == longest.lower }
 }
+
+/** [name] runs a digit on past [main]'s trailing one: `Ep 10` is not `Ep 1` plus the suffix `0`. */
+private fun continuesNumber(main: String, name: String): Boolean =
+    main.last().isDigit() && name.length > main.length && name[main.length].isDigit()
 
 /** One group of matches before it becomes a [Variant]: identity, members, and whether it was split apart. */
 private class MatchGroup(

@@ -76,14 +76,28 @@ class BindingTest : FunSpec({
                 // Why a caller passes every main, not the masked ones: this is what a masked-out sibling costs.
                 "without its own main, a sibling pairs with the shorter name and a suffix",
                 mains = listOf("Show #1.mkv"),
-                files = listOf("Show #12.srt"),
+                files = listOf("Show #1 2.srt"),
                 sources = listOf(files("*.srt")),
                 general = hash,
                 episodes = season1,
                 expected = listOf(
                     "season 01",
                     "main Show #1.mkv E01 REGEX",
-                    "additionalSources[0]: Show #12.srt -> Show #1.mkv SUFFIX",
+                    "additionalSources[0]: Show #1 2.srt -> Show #1.mkv SUFFIX",
+                ),
+            ),
+            Case(
+                "a suffix may not continue the main's number, so #12 without its main pairs with nothing",
+                mains = listOf("Show #1.mkv"),
+                files = listOf("Show #12.srt", "Show #1a.srt"),
+                sources = listOf(files("*.srt")),
+                general = hash,
+                episodes = season1,
+                expected = listOf(
+                    "season 01",
+                    "main Show #1.mkv E01 REGEX",
+                    "additionalSources[0]: Show #1a.srt -> Show #1.mkv SUFFIX",
+                    "problem: additionalSources[0]: Show #12.srt unpaired",
                 ),
             ),
             Case(

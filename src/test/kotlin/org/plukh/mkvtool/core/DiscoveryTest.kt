@@ -205,6 +205,25 @@ class DiscoveryTest : FunSpec({
             )
         }
 
+        test("a suffix may not continue the number a main's name ends in") {
+            // Ep 10's own main is missing; read as Ep 1 plus "0", or as Ep plus " 10", it would bind to the wrong
+            // episode in silence.
+            val dir = tempdir()
+            stageAll(
+                dir, "Ep.mkv", "Ep 1.mkv", "Ep 2.mkv", "Ep 01.mkv", "Ep 10.srt", "Ep 1a.srt", "Ep 01v2.ass", "Ep 2 2.srt",
+            )
+
+            val result = discover(dir, "Ep.mkv", "Ep 1.mkv", "Ep 2.mkv", "Ep 01.mkv")
+
+            result.unmatched.map { it.relPath } shouldContainExactly listOf("Ep 10.srt")
+            result.variants.flatMap { it.entries }.associate { it.entry.relPath to (it.main.name to it.suffix) } shouldBe
+                mapOf(
+                    "Ep 1a.srt" to ("Ep 1.mkv" to "a"),
+                    "Ep 01v2.ass" to ("Ep 01.mkv" to "v2"),
+                    "Ep 2 2.srt" to ("Ep 2.mkv" to " 2"),
+                )
+        }
+
         test("a main file with an empty base name adopts nothing") {
             // Not hypothetical pedantry: a file called ".mkv" has an empty base name, and every string
             // starts with the empty string, so without the guard it would claim the whole tree.
