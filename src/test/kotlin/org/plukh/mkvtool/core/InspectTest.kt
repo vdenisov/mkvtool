@@ -380,6 +380,20 @@ class InspectTest : FunSpec({
             report.leftovers.unmatched shouldContainExactly listOf("Bonus.ass")
             report.leftovers.extras shouldContainExactly listOf("extras/Sample.mkv")
         }
+
+        test("a companion named after two main files sharing a base name is a leftover naming both") {
+            val dir = tempdir()
+            File(dir, "Show - S01E01.mkv").writeText("x")
+            File(dir, "Show - S01E01.mp4").writeText("x")
+            File(dir, "Subs").mkdirs()
+            File(dir, "Subs/Show - S01E01.ass").writeText("x")
+
+            val report = inspectDirectory(dir, options(identify = true), SilentRenderer) { probedResult(it) }
+
+            report.leftovers.tied shouldContainExactly
+                listOf(TiedFile("Subs/Show - S01E01.ass", listOf("Show - S01E01.mkv", "Show - S01E01.mp4")))
+            report.files.flatMap { it.externals }.shouldBeEmpty()
+        }
     }
 
     context("external slots") {
@@ -536,6 +550,20 @@ class InspectTest : FunSpec({
             val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }
 
             report.leftovers.unmatched.shouldBeEmpty()
+        }
+
+        test("a tie among a files: source's candidates is reported by binding alone") {
+            val dir = tempdir()
+            listOf("Show - S01E01.mkv", "Show - S01E01.mp4").forEach { File(dir, it).writeText("x") }
+            File(dir, "Subs").mkdirs()
+            File(dir, "Subs/Show - S01E01.ass").writeText("x")
+            val config = Config(additionalSources = listOf(AdditionalSource(files = listOf("Subs/*.ass"))))
+
+            val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }
+
+            report.binding?.problems.orEmpty().filterIsInstance<NameTie>().map { it.entry.relPath } shouldContainExactly
+                listOf("Subs/Show - S01E01.ass")
+            report.leftovers.tied.shouldBeEmpty()
         }
 
         test("a config the binding checks refused, or one declaring groups, is not bound at all") {

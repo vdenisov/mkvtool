@@ -5,6 +5,7 @@ import io.kotest.datatest.withData
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import java.io.File
@@ -222,6 +223,20 @@ class DiscoveryTest : FunSpec({
                     "Ep 01v2.ass" to ("Ep 01.mkv" to "v2"),
                     "Ep 2 2.srt" to ("Ep 2.mkv" to " 2"),
                 )
+        }
+
+        test("a name two main files share is ambiguous, so its companion is tied, never given to one") {
+            val dir = tempdir()
+            stageAll(dir, "X - S01E01.mkv", "X - S01E01.mp4", "X - S01E02.mkv", "Subs/X - S01E01.ass", "Subs/X - S01E02.ass")
+
+            val result = discover(dir, "X - S01E01.mkv", "X - S01E01.mp4", "X - S01E02.mkv")
+
+            val tie = result.tied.single()
+            tie.entry.relPath shouldBe "Subs/X - S01E01.ass"
+            tie.mains.map { it.name } shouldContainExactlyInAnyOrder listOf("X - S01E01.mkv", "X - S01E01.mp4")
+            result.unmatched.shouldBeEmpty()
+            result.variants.flatMap { it.entries }.map { it.entry.relPath } shouldContainExactly
+                listOf("Subs/X - S01E02.ass")
         }
 
         test("a main file with an empty base name adopts nothing") {

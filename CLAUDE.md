@@ -680,8 +680,9 @@ Three rules are load-bearing:
    plus the suffix `" 2"` whenever both files exist. A suffix may not continue a digit the main's name ends
    in, or with `Ep 10.mkv` missing `Ep 10.srt` binds silently to `Ep 1.mkv`, and a shorter main (`Ep.mkv`)
    does not take it instead; letters may (`Ep 01v2`).
-2. **An episode-number match requires a unique claimant.** Two main files for one episode makes the match
-   ambiguous, and ambiguous means unmatched, never guessed.
+2. **Every match requires a unique claimant.** Two main files for one episode, or two sharing the base
+   name a file starts with (`X.mkv`, `X.mp4`), make the match ambiguous, and ambiguous means unmatched,
+   never guessed; a name tie is reported as one, naming the mains, as binding's is.
 3. **Variant identity is `(leaf directory, raw suffix)`** with same-named leaves merged, which is what
    turns `Rus sound/[MC-Ent]` + `Rus subs/[MC-Ent]` into one dub group. The merge is undone automatically
    when one episode would end up with two files of the same kind from different directories. Suffixes are
@@ -882,7 +883,8 @@ decides which files the ordinary pass must leave alone. A name match in the medi
 the external rule rather than the legacy one, which is strictly better there too — the legacy suffix rule
 keeps only a trailing `[...]`, so `Show.S01E01.rus.srt` would lose its `.rus` and collide with its own
 English sibling. Episode-number matches are reported and skipped: with no name relation there is no "same
-suffix" to preserve.
+suffix" to preserve. A name tie is renamed after either main: sharing a base name, they share an episode,
+so they take one new base name.
 
 The new name is the main file's new base name plus the file's **own suffix, verbatim**, and its own
 extension; the directory never changes, because the directory *is* the variant's identity. Two invariants

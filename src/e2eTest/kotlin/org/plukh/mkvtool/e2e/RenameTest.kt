@@ -215,4 +215,24 @@ class RenameTest : FunSpec({
         File(workDir, "S01E01.mkv").exists() shouldBe true
         File(workDir, "Rus sound/[GroupA]/S01E01.mka").exists() shouldBe true
     }
+
+    // Nothing says which of the two mains it belongs to, and nothing has to: both take one new base name.
+    test("--external renames a file named after two mains sharing a base name") {
+        val workDir = tempdir()
+        stageInput(workDir, "S01E01.mkv")
+        stageInput(workDir, "S01E01.mp4")
+        stageExternalText(workDir, "S01E01.rus.srt")
+        stageExternalText(workDir, "S01E01.eng.srt")
+        stageExternalText(workDir, "Subs/S01E01.ass")
+        writeEpisodes(workDir, listOf("First Episode"))
+
+        val run = mkvtool("rename", "My Show", "1", "--external", workDir = workDir)
+
+        withClue(run.output) { run.exitCode shouldBe 0 }
+        File(workDir, "My Show - S01E01 - First Episode.mkv").exists() shouldBe true
+        File(workDir, "My Show - S01E01 - First Episode.mp4").exists() shouldBe true
+        File(workDir, "My Show - S01E01 - First Episode.rus.srt").exists() shouldBe true
+        File(workDir, "My Show - S01E01 - First Episode.eng.srt").exists() shouldBe true
+        File(workDir, "Subs/My Show - S01E01 - First Episode.ass").exists() shouldBe true
+    }
 })

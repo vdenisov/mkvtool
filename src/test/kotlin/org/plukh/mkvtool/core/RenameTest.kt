@@ -247,6 +247,25 @@ class RenameTest : FunSpec({
             result.problems.shouldBeEmpty()
         }
 
+        // Which of the two it belongs to is unknowable, and does not matter: both take one new base name.
+        test("a file named after two mains sharing a base name takes their new name, its suffix kept") {
+            val dir = tempdir()
+            touch(dir, "S01E01.mkv")
+            touch(dir, "S01E01.mp4")
+            touch(dir, "S01E01.rus.srt")
+            touch(dir, "S01E01.eng.srt")
+            touch(File(dir, "Subs").apply { mkdirs() }, "S01E01.ass")
+
+            val result = plan(dir, external = true)
+
+            result.problems.shouldBeEmpty()
+            result.entries.filter { it.external }.associate { (it.relPath ?: it.file.name) to it.newName } shouldBe mapOf(
+                "S01E01.eng.srt" to "My Show - S01E01 - First Episode.eng.srt",
+                "S01E01.rus.srt" to "My Show - S01E01 - First Episode.rus.srt",
+                "Subs/S01E01.ass" to "My Show - S01E01 - First Episode.ass",
+            )
+        }
+
         test("a taken external target refuses the whole batch, main files included") {
             val dir = tempdir()
             touch(dir, "S01E01.mkv")

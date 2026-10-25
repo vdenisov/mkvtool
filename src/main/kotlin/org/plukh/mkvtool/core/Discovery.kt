@@ -278,15 +278,20 @@ data class VariantIdentity(
     )
 }
 
+/** A companion named after several [mains] at once, which share a base name: unmatched, never given to one. */
+data class TiedEntry(val entry: TreeEntry, val mains: List<File>)
+
 /**
- * Everything one walk found: the [variants], the companion-extension files that belong to no main file,
- * and the main-type files that are not main files (BD menus, trailers, creditless openings, in a folder or
- * beside the episodes), which are reported so they are not a surprise but are never treated as sources.
+ * Everything one walk found: the [variants], the companion-extension files that belong to no main file, those
+ * [tied] between mains, and the main-type files that are not main files (BD menus, trailers, creditless
+ * openings, in a folder or beside the episodes), which are reported so they are not a surprise but are never
+ * treated as sources.
  */
 data class DiscoveryResult(
     val variants: List<Variant>,
     val unmatched: List<TreeEntry>,
     val extras: List<TreeEntry>,
+    val tied: List<TiedEntry>,
 )
 
 /**
@@ -299,8 +304,8 @@ data class DiscoveryResult(
  * `Ep 10.mkv` an `Ep 10.srt` is no companion of `Ep 1.mkv`, nor of a shorter `Ep.mkv`.
  *
  * Tier 2 is the episode number: no name relation, but both sides carry the same SxxEyy and exactly one
- * main file claims it. Two main files for one episode make that episode ambiguous by design, and
- * ambiguous means unmatched — never guessed.
+ * main file claims it. Ambiguity on either tier means unmatched, never guessed: two main files for one
+ * episode, or two sharing the base name a candidate starts with (`X.mkv`, `X.mp4`), which is [tied].
  *
  * [mainExtensions] is what counts as a main-type file for the [DiscoveryResult.extras] rule; pass none to
  * report no extras at all.
@@ -324,6 +329,7 @@ fun discoverCompanions(
     val matched = ArrayList<CompanionEntry>()
     val unmatched = ArrayList<TreeEntry>()
     val extras = ArrayList<TreeEntry>()
+    val tied = ArrayList<TiedEntry>()
 
     for (entry in tree) {
         if (entry.file.absolutePath in mainPaths) continue
@@ -334,7 +340,13 @@ fun discoverCompanions(
             continue
         }
 
-        val byName = candidates.longestPrefix(entry.base).firstOrNull()
+        val named = candidates.longestPrefix(entry.base)
+        // Settled by the name either way: same-base mains share an SxxEyy too, so the episode tier cannot help.
+        if (named.size > 1) {
+            tied += TiedEntry(entry, named.map { it.file })
+            continue
+        }
+        val byName = named.singleOrNull()
         if (byName != null) {
             matched += CompanionEntry(entry, byName.file, MatchTier.NAME, entry.base.substring(byName.base.length))
             continue
@@ -350,6 +362,7 @@ fun discoverCompanions(
         variants = groupIntoVariants(matched),
         unmatched = unmatched.sortedBy { it.relPath },
         extras = extras.sortedBy { it.relPath },
+        tied = tied.sortedBy { it.entry.relPath },
     )
 }
 

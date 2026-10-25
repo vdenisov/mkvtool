@@ -188,7 +188,11 @@ episode rule cannot read is an extra too.
    `…Title 2.mkv` rather than being read as `…Title.mkv` plus the suffix `" 2"`.
    A suffix may not continue a number the main file's name ends in: with no
    `Ep 10.mkv`, an `Ep 10.srt` is not `Ep 1.mkv` plus `0`, nor a shorter
-   `Ep.mkv` plus `" 10"`. Letters may (`Ep 1a`, `Ep 01v2`).
+   `Ep.mkv` plus `" 10"`. Letters may (`Ep 1a`, `Ep 01v2`). A name two main
+   files share (`X.mkv` and `X.mp4`) is ambiguous: a file named after it is
+   listed under *External files named after more than one main file*, with both
+   of them, and paired with neither. `rename --external` still renames it, since
+   both mains take one new base name.
 2. **By episode number** — no name relation, but both sides carry the same
    `SxxEyy` and exactly one main file claims it. This is lower confidence by
    construction: it is reported as `(episode match)` with the file's own name, and

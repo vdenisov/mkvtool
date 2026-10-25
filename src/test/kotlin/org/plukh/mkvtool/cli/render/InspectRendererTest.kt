@@ -17,6 +17,7 @@ import org.plukh.mkvtool.core.MatchTier
 import org.plukh.mkvtool.core.ProbedTrack
 import org.plukh.mkvtool.core.SourceListing
 import org.plukh.mkvtool.core.StrictVerdict
+import org.plukh.mkvtool.core.TiedFile
 import org.plukh.mkvtool.core.TrackListing
 import org.plukh.mkvtool.core.VariantExternals
 import org.plukh.mkvtool.core.VariantIdentity
@@ -319,6 +320,24 @@ class InspectRendererTest : FunSpec({
             out shouldContain "*** Extras: 2 files of a main type, not scanned as sources"
             out shouldContain "      NCOP.mkv"
             out shouldContain "      extras/Sample.mkv"
+        }
+
+        test("a file tied between main files names every one of them") {
+            val (out, _) = renderResult(
+                ExternalLeftoversRenderer,
+                ExternalLeftovers(emptyList(), emptyList(), listOf(TiedFile("Subs/X.ass", listOf("X.mkv", "X.mp4")))),
+            )
+
+            out shouldContain "*** External files named after more than one main file (1)"
+            out shouldContain "      Subs/X.ass: X.mkv, X.mp4"
+        }
+
+        test("a long tie list is truncated like its neighbours") {
+            val many = (1..12).map { TiedFile("Subs/X$it.ass", listOf("X$it.mkv", "X$it.mp4")) }
+
+            val (out, _) = renderResult(ExternalLeftoversRenderer, ExternalLeftovers(emptyList(), emptyList(), many))
+
+            out shouldContain "      ... and 4 more"
         }
 
         test("a long list is truncated") {

@@ -101,6 +101,12 @@ val ExternalLeftoversRenderer = ResultTextRenderer<ExternalLeftovers> { result, 
         formatFileList(result.unmatched, "      ").forEach { s.out.println(it) }
         s.out.println()
     }
+    if (result.tied.isNotEmpty()) {
+        s.out.println(s.cyan("*** External files named after more than one main file (${result.tied.size})"))
+        formatFileList(result.tied.map { "${it.path}: ${it.mains.joinToString()}" }, "      ")
+            .forEach { s.out.println(it) }
+        s.out.println()
+    }
     if (result.extras.isNotEmpty()) {
         s.out.println(
             s.cyan(
