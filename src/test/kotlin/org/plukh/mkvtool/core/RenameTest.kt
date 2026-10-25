@@ -163,6 +163,23 @@ class RenameTest : FunSpec({
             problem.newName shouldBe "My Show - S01E01 - First Episode.mkv"
             problem.fileNames shouldContainExactlyInAnyOrder listOf("a.s01e01.mkv", "b.s01e01.mkv")
         }
+
+        test("a season past ninety-nine writes every episode at three digits, and E10 is not E100") {
+            val dir = tempdir()
+            touch(dir, "Show.s01e05.mkv")
+            touch(dir, "Show.s01e10.mkv")
+            touch(dir, "Show.s01e100.mkv")
+            val long = mapOf("05" to "Five", "10" to "Ten", "100" to "Hundred")
+
+            val result = buildRenamePlan(dir, "My Show", long, "episodes.yaml", external = false)
+
+            result.problems.shouldBeEmpty()
+            result.entries.map { it.newName } shouldContainExactlyInAnyOrder listOf(
+                "My Show - S01E005 - Five.mkv",
+                "My Show - S01E010 - Ten.mkv",
+                "My Show - S01E100 - Hundred.mkv",
+            )
+        }
     }
 
     context("--external") {
@@ -228,6 +245,25 @@ class RenameTest : FunSpec({
             result.skippedExternals shouldContainExactly listOf("Grp/AAA S01E01.mka")
             result.entries.none { it.external } shouldBe true
             result.problems.shouldBeEmpty()
+        }
+
+        // Which of the two it belongs to is unknowable, and does not matter: both take one new base name.
+        test("a file named after two mains sharing a base name takes their new name, its suffix kept") {
+            val dir = tempdir()
+            touch(dir, "S01E01.mkv")
+            touch(dir, "S01E01.mp4")
+            touch(dir, "S01E01.rus.srt")
+            touch(dir, "S01E01.eng.srt")
+            touch(File(dir, "Subs").apply { mkdirs() }, "S01E01.ass")
+
+            val result = plan(dir, external = true)
+
+            result.problems.shouldBeEmpty()
+            result.entries.filter { it.external }.associate { (it.relPath ?: it.file.name) to it.newName } shouldBe mapOf(
+                "S01E01.eng.srt" to "My Show - S01E01 - First Episode.eng.srt",
+                "S01E01.rus.srt" to "My Show - S01E01 - First Episode.rus.srt",
+                "Subs/S01E01.ass" to "My Show - S01E01 - First Episode.ass",
+            )
         }
 
         test("a taken external target refuses the whole batch, main files included") {

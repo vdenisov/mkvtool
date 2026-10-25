@@ -155,10 +155,17 @@ data class LegendRow(
     val fileCount: Int,
 )
 
+/** A companion at [path] named after several [mains] sharing a base name, so it belongs to none of them. */
+data class TiedFile(val path: String, val mains: List<String>)
+
 /** What the walk found that belongs to nothing. Names only: never probed, never treated as sources,
  *  listed so their presence is not a surprise. */
-data class ExternalLeftovers(val unmatched: List<String>, val extras: List<String>) : CommandResult {
-    val isEmpty: Boolean = unmatched.isEmpty() && extras.isEmpty()
+data class ExternalLeftovers(
+    val unmatched: List<String>,
+    val extras: List<String>,
+    val tied: List<TiedFile> = emptyList(),
+) : CommandResult {
+    val isEmpty: Boolean = unmatched.isEmpty() && extras.isEmpty() && tied.isEmpty()
 }
 
 /** Why `--strict` is about to exit 2. Emitted only when it fires. */
@@ -268,9 +275,13 @@ fun inspectDirectory(
     )
     // A file a files: source paired is a source, whatever discovery made of its name or its type.
     val paired = binding?.sources.orEmpty().flatMap { source -> source.bound.flatMap { it.files } }.toSet()
+    // A tie among a source's files is binding's problem, and its report already names the mains.
+    val boundTies = binding?.problems.orEmpty().filterIsInstance<NameTie>().mapTo(HashSet()) { it.entry }
     val leftovers = ExternalLeftovers(
         unmatched = discovered.unmatched.filterNot { it in paired }.map { it.relPath },
         extras = (discovered.extras.filterNot { it in paired } + skippedEntries).map { it.relPath }.sorted(),
+        tied = discovered.tied.filterNot { it.entry in paired || it.entry in boundTies }
+            .map { tie -> TiedFile(tie.entry.relPath, tie.mains.map { it.name }.sorted()) },
     )
 
     // Every selected main had no episode: what binding said and where those files went is the whole report.

@@ -143,7 +143,14 @@ fun buildRenamePlan(
     val skippedExternals = ArrayList<String>()
     if (external) {
         val mains = files.filter { fileExtension(it.name) in MAIN_EXTENSIONS }
-        discoverCompanions(mains, walkTree(dir)).variants.forEach { variant ->
+        val discovered = discoverCompanions(mains, walkTree(dir))
+        // Mains sharing a base name share an episode and so a new base name: any of them names the file alike.
+        discovered.tied.forEach { tie ->
+            val main = tie.mains.first()
+            val suffix = tie.entry.base.substring(baseNameOf(main.name).length)
+            externalMatches[tie.entry.file.absolutePath] = CompanionEntry(tie.entry, main, MatchTier.NAME, suffix)
+        }
+        discovered.variants.forEach { variant ->
             variant.entries.forEach { entry ->
                 if (entry.tier != MatchTier.NAME) skippedExternals += entry.entry.relPath
                 else externalMatches[entry.entry.file.absolutePath] = entry
@@ -153,6 +160,10 @@ fun buildRenamePlan(
 
     val entries = ArrayList<PlannedRename>()
     val problems = ArrayList<RenameProblem>()
+    val width = episodeWidth(
+        (episodeNames.keys + files.mapNotNull { parseSeasonEpisode(it.name.substringBeforeLast('.'))?.episode })
+            .mapNotNull { it.toIntOrNull() },
+    )
 
     for (file in files) {
         if (externalMatches.containsKey(file.absolutePath)) continue
@@ -173,7 +184,8 @@ fun buildRenamePlan(
         }
 
         val suffix = TRAILING_BRACKET_SUFFIX.find(baseName)?.groupValues?.get(1).orEmpty()
-        val newName = "$showName - S${parsed.season}E${parsed.episode} - $episodeName$suffix.$extension"
+        val episode = pad(parsed.episode.toInt(), width)
+        val newName = "$showName - S${parsed.season}E$episode - $episodeName$suffix.$extension"
 
         val target = File(file.parentFile, newName)
         if (target.exists() && target.absolutePath != file.absolutePath) {

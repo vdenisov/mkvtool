@@ -278,15 +278,20 @@ data class VariantIdentity(
     )
 }
 
+/** A companion named after several [mains] at once, which share a base name: unmatched, never given to one. */
+data class TiedEntry(val entry: TreeEntry, val mains: List<File>)
+
 /**
- * Everything one walk found: the [variants], the companion-extension files that belong to no main file,
- * and the main-type files that are not main files (BD menus, trailers, creditless openings, in a folder or
- * beside the episodes), which are reported so they are not a surprise but are never treated as sources.
+ * Everything one walk found: the [variants], the companion-extension files that belong to no main file, those
+ * [tied] between mains, and the main-type files that are not main files (BD menus, trailers, creditless
+ * openings, in a folder or beside the episodes), which are reported so they are not a surprise but are never
+ * treated as sources.
  */
 data class DiscoveryResult(
     val variants: List<Variant>,
     val unmatched: List<TreeEntry>,
     val extras: List<TreeEntry>,
+    val tied: List<TiedEntry>,
 )
 
 /**
@@ -295,11 +300,12 @@ data class DiscoveryResult(
  * Tier 1 is the name relation: the candidate's base name starts with a main file's base name, and
  * whatever trails it is the suffix (empty for the directory layout). The **longest** such main wins,
  * which is what stops `Show - S01E01 - Title 2.srt` from being read as main `…Title` plus suffix `" 2"`
- * when `…Title 2.mkv` also exists.
+ * when `…Title 2.mkv` also exists. A suffix may not continue a number the main's name ends in, so with no
+ * `Ep 10.mkv` an `Ep 10.srt` is no companion of `Ep 1.mkv`, nor of a shorter `Ep.mkv`.
  *
  * Tier 2 is the episode number: no name relation, but both sides carry the same SxxEyy and exactly one
- * main file claims it. Two main files for one episode make that episode ambiguous by design, and
- * ambiguous means unmatched — never guessed.
+ * main file claims it. Ambiguity on either tier means unmatched, never guessed: two main files for one
+ * episode, or two sharing the base name a candidate starts with (`X.mkv`, `X.mp4`), which is [tied].
  *
  * [mainExtensions] is what counts as a main-type file for the [DiscoveryResult.extras] rule; pass none to
  * report no extras at all.
@@ -323,6 +329,7 @@ fun discoverCompanions(
     val matched = ArrayList<CompanionEntry>()
     val unmatched = ArrayList<TreeEntry>()
     val extras = ArrayList<TreeEntry>()
+    val tied = ArrayList<TiedEntry>()
 
     for (entry in tree) {
         if (entry.file.absolutePath in mainPaths) continue
@@ -333,7 +340,13 @@ fun discoverCompanions(
             continue
         }
 
-        val byName = candidates.longestPrefix(entry.base).firstOrNull()
+        val named = candidates.longestPrefix(entry.base)
+        // Settled by the name either way: same-base mains share an SxxEyy too, so the episode tier cannot help.
+        if (named.size > 1) {
+            tied += TiedEntry(entry, named.map { it.file })
+            continue
+        }
+        val byName = named.singleOrNull()
         if (byName != null) {
             matched += CompanionEntry(entry, byName.file, MatchTier.NAME, entry.base.substring(byName.base.length))
             continue
@@ -349,6 +362,7 @@ fun discoverCompanions(
         variants = groupIntoVariants(matched),
         unmatched = unmatched.sortedBy { it.relPath },
         extras = extras.sortedBy { it.relPath },
+        tied = tied.sortedBy { it.entry.relPath },
     )
 }
 
@@ -362,16 +376,23 @@ internal class MainFile(val file: File) {
 internal fun byLongestBase(mains: List<File>): List<MainFile> =
     mains.map(::MainFile).sortedWith(compareByDescending<MainFile> { it.base.length }.thenBy { it.base })
 
-/** The mains whose base name [base] starts with, at the longest such length (see [discoverCompanions]): one,
- *  none, or several sharing one base name. The receiver is in [byLongestBase]'s order. */
+/** The mains whose base name [base] starts with, at the longest such length: one, none, or several sharing
+ *  one base name. None when [base] continues the number that name ends in (see [discoverCompanions]). The
+ *  receiver is in [byLongestBase]'s order. */
 internal fun List<MainFile>.longestPrefix(base: String): List<MainFile> {
     val lower = base.lowercase()
     // The empty base name guard is not hypothetical pedantry: a file called ".mkv" has one, and every
     // string starts with the empty string, so without it that file would silently adopt every
     // otherwise-unmatched companion in the tree.
     val longest = firstOrNull { it.lower.isNotEmpty() && lower.startsWith(it.lower) } ?: return emptyList()
+    // Not handed on to a shorter main either: with Ep 10.mkv missing, Ep.mkv has no claim on Ep 10.srt.
+    if (continuesNumber(longest.lower, lower)) return emptyList()
     return filter { it.lower == longest.lower }
 }
+
+/** [name] runs a digit on past [main]'s trailing one: `Ep 10` is not `Ep 1` plus the suffix `0`. */
+private fun continuesNumber(main: String, name: String): Boolean =
+    main.last().isDigit() && name.length > main.length && name[main.length].isDigit()
 
 /** One group of matches before it becomes a [Variant]: identity, members, and whether it was split apart. */
 private class MatchGroup(

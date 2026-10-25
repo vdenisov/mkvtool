@@ -12,19 +12,21 @@ import java.util.Locale
  * That seam predates the no-imports rule that forced it and outlives it — callers own reading, parsing
  * and charset policy ([loadMapping], [readLinesDetected]), and hand the result here.
  *
- * Episode numbers are **two-digit zero-padded strings** (`"01"`), both as map keys and in what the parsers
- * return, because they come from and go back into file names. Looking one up with an `Int` silently misses.
- * Three-digit numbering is out of scope: the SxxEyy pattern matches exactly two digits.
+ * Episode numbers are **canonical zero-padded strings** (`"01"`, `"100"`: [pad], two digits at least), both
+ * as map keys and in what the parsers return, however the file name spelled them (`E005` keys as `"05"`).
+ * Looking one up with an `Int` silently misses. Where a number is *written* — a new file name, `episodeNum` —
+ * it is padded to the season's [episodeWidth] instead, so a season of a hundred episodes writes `E005`.
  */
 
 /** The join key between a media file and its episode metadata, and the one pattern every command agrees on.
- *  Unanchored, so it finds the token anywhere in the name; `\.?` tolerates the `s01.e01` spelling. */
-private val SEASON_EPISODE = Regex("""s(\d\d)\.?e(\d\d)""")
+ *  Unanchored, so it finds the token anywhere in the name; `\.?` tolerates the `s01.e01` spelling. Two season
+ *  digits and two or three episode digits: the lookahead refuses a fourth rather than reading the first three. */
+private val SEASON_EPISODE = Regex("""s(\d\d)\.?e(\d{2,3})(?!\d)""")
 
 /** The inverse of `rename`'s output pattern. Non-greedy on the show name, so it takes the shortest prefix —
  *  matching what `rename` itself writes. A show name that itself contains `" - S01E01 - "` cannot be
  *  disambiguated and is not worth the complexity of trying. */
-private val CANONICAL_NAME = Regex("""^(.+?) - [Ss](\d\d)[Ee](\d\d) - (.+)$""")
+private val CANONICAL_NAME = Regex("""^(.+?) - [Ss](\d\d)[Ee](\d{2,3}) - (.+)$""")
 
 /** A trailing `[Studio]` suffix on a canonical title. Greedy, so `T [A] [B]` strips from the first bracket. */
 private val TRAILING_SUFFIX = Regex("""\s*\[.+\]$""")
@@ -45,7 +47,7 @@ private val TRAILING_DIGITS = Regex("""\d+$""")
 /** The digit run a name's post-prefix remainder must start with to be labelled. Capped at four digits. */
 private val LEADING_NUMBER = Regex("""^(\d{1,4})""")
 
-/** Season and episode as they were spelled in the file name: two digits each, already zero-padded. */
+/** Season and episode from a file name as canonical keys: the season's two digits, the episode [pad]ded. */
 data class SeasonEpisode(val season: String, val episode: String)
 
 /** A file name in `rename`'s canonical `Show - SxxEyy - Title[suffix]` shape, taken apart. */
@@ -77,7 +79,7 @@ data class EpisodeData(
  *  leftmost token wins when a name somehow holds two. */
 fun parseSeasonEpisode(baseName: String?): SeasonEpisode? {
     val match = SEASON_EPISODE.find(baseName.orEmpty().lowercase()) ?: return null
-    return SeasonEpisode(match.groupValues[1], match.groupValues[2])
+    return SeasonEpisode(match.groupValues[1], pad(match.groupValues[2].toInt()))
 }
 
 /**
@@ -102,7 +104,7 @@ fun parseCanonicalName(baseName: String?): CanonicalName? {
     return CanonicalName(
         showName = groups[1],
         season = groups[2],
-        episode = groups[3],
+        episode = pad(groups[3].toInt()),
         title = groups[4].replace(TRAILING_SUFFIX, ""),
     )
 }
@@ -117,7 +119,7 @@ fun parseCanonicalName(baseName: String?): CanonicalName? {
  * numbering it is applying, because that is a decision, not a detail.
  *
  * Lines are taken verbatim — untrimmed, and a blank line becomes an empty title for its number. Padding is
- * a minimum width, so a hundredth episode keys as `"100"` and no SxxEyy name can ever match it.
+ * a minimum width, so a hundredth episode keys as `"100"`.
  */
 fun indexFromLines(lines: List<String>, offset: Int): Map<String, String> {
     val index = LinkedHashMap<String, String>(lines.size)
@@ -211,8 +213,11 @@ fun batchLabels(baseNames: Collection<String>): Map<String, String> {
     val names = baseNames.toList()
     if (names.isEmpty()) return emptyMap()
 
-    if (names.all { parseSeasonEpisode(it) != null }) {
-        return names.associateWith { parseSeasonEpisode(it)!!.episode }
+    val episodes = names.map { parseSeasonEpisode(it)?.episode?.toInt() }
+    if (episodes.all { it != null }) {
+        // One width for the batch, or formatRanges' lexicographic sort would put 100 before 98.
+        val width = episodeWidth(episodes.filterNotNull())
+        return names.zip(episodes).associate { (name, episode) -> name to pad(episode!!, width) }
     }
 
     var prefix = names[0]
@@ -301,9 +306,13 @@ fun loadEpisodeMetadata(dir: File, offset: Int): EpisodeMetadata {
     return EpisodeMetadata.Absent
 }
 
-/** Two-digit zero padding, in the root locale: an episode number is a key and part of a file name, so it
+/** Zero padding to [width], in the root locale: an episode number is a key and part of a file name, so it
  *  must be the same digits on a machine whose locale would otherwise number in its own script. */
-internal fun pad(number: Int): String = String.format(Locale.ROOT, "%02d", number)
+internal fun pad(number: Int, width: Int = 2): String = String.format(Locale.ROOT, "%0${width}d", number)
+
+/** The width a season's episode numbers are written at: the digits of the largest of [episodes], two at least,
+ *  so one season has one width and its names sort in episode order. */
+fun episodeWidth(episodes: Iterable<Int>): Int = maxOf(2, episodes.maxOrNull()?.toString()?.length ?: 2)
 
 /** A yaml scalar as an episode or season number, reproducing Groovy's `as int`: a number truncates toward
  *  zero, a quoted number parses (a hand-edited `episode: "12"` has always worked), and anything else —

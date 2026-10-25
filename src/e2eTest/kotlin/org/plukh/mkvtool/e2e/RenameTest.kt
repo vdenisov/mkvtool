@@ -109,6 +109,22 @@ class RenameTest : FunSpec({
         File(workDir, "My Show - S01E11 - Episode 1.mkv").exists() shouldBe false
     }
 
+    // E100 was once read as E10; and one season writes one width, so its names sort in episode order.
+    test("a season past ninety-nine reads three digits and writes every episode at three") {
+        val workDir = tempdir()
+        stageInput(workDir, "Show.s01e05.mkv")
+        stageInput(workDir, "Show.s01e10.mkv")
+        stageInput(workDir, "Show.s01e100.mkv")
+        writeEpisodesYaml(workDir, show = "My Show", episodes = (1..100).associateWith { "Episode $it" })
+
+        val run = mkvtool("rename", workDir = workDir)
+
+        withClue(run.output) { run.exitCode shouldBe 0 }
+        File(workDir, "My Show - S01E005 - Episode 5.mkv").exists() shouldBe true
+        File(workDir, "My Show - S01E010 - Episode 10.mkv").exists() shouldBe true
+        File(workDir, "My Show - S01E100 - Episode 100.mkv").exists() shouldBe true
+    }
+
     test("no episode metadata at all exits 2 naming both files") {
         val workDir = tempdir()
 
@@ -198,5 +214,25 @@ class RenameTest : FunSpec({
         }
         File(workDir, "S01E01.mkv").exists() shouldBe true
         File(workDir, "Rus sound/[GroupA]/S01E01.mka").exists() shouldBe true
+    }
+
+    // Nothing says which of the two mains it belongs to, and nothing has to: both take one new base name.
+    test("--external renames a file named after two mains sharing a base name") {
+        val workDir = tempdir()
+        stageInput(workDir, "S01E01.mkv")
+        stageInput(workDir, "S01E01.mp4")
+        stageExternalText(workDir, "S01E01.rus.srt")
+        stageExternalText(workDir, "S01E01.eng.srt")
+        stageExternalText(workDir, "Subs/S01E01.ass")
+        writeEpisodes(workDir, listOf("First Episode"))
+
+        val run = mkvtool("rename", "My Show", "1", "--external", workDir = workDir)
+
+        withClue(run.output) { run.exitCode shouldBe 0 }
+        File(workDir, "My Show - S01E01 - First Episode.mkv").exists() shouldBe true
+        File(workDir, "My Show - S01E01 - First Episode.mp4").exists() shouldBe true
+        File(workDir, "My Show - S01E01 - First Episode.rus.srt").exists() shouldBe true
+        File(workDir, "My Show - S01E01 - First Episode.eng.srt").exists() shouldBe true
+        File(workDir, "Subs/My Show - S01E01 - First Episode.ass").exists() shouldBe true
     }
 })

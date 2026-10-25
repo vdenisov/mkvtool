@@ -5,6 +5,7 @@ import io.kotest.datatest.withData
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import java.io.File
@@ -190,6 +191,52 @@ class DiscoveryTest : FunSpec({
             val matched = result.variants.flatMap { it.entries }.single()
             matched.entry.relPath shouldBe "Late S01E02.srt"
             matched.tier shouldBe MatchTier.EPISODE
+        }
+
+        test("a three-digit episode is its own, so E10 and E100 each keep their companion") {
+            val dir = tempdir()
+            stageAll(dir, "A S01E10.mkv", "A S01E100.mkv", "Other S01E10.srt", "Other S01E100.srt")
+
+            val result = discover(dir, "A S01E10.mkv", "A S01E100.mkv")
+
+            result.unmatched.shouldBeEmpty()
+            result.variants.flatMap { it.entries }.associate { it.entry.relPath to it.main.name } shouldBe mapOf(
+                "Other S01E10.srt" to "A S01E10.mkv",
+                "Other S01E100.srt" to "A S01E100.mkv",
+            )
+        }
+
+        test("a suffix may not continue the number a main's name ends in") {
+            // Ep 10's own main is missing; read as Ep 1 plus "0", or as Ep plus " 10", it would bind to the wrong
+            // episode in silence.
+            val dir = tempdir()
+            stageAll(
+                dir, "Ep.mkv", "Ep 1.mkv", "Ep 2.mkv", "Ep 01.mkv", "Ep 10.srt", "Ep 1a.srt", "Ep 01v2.ass", "Ep 2 2.srt",
+            )
+
+            val result = discover(dir, "Ep.mkv", "Ep 1.mkv", "Ep 2.mkv", "Ep 01.mkv")
+
+            result.unmatched.map { it.relPath } shouldContainExactly listOf("Ep 10.srt")
+            result.variants.flatMap { it.entries }.associate { it.entry.relPath to (it.main.name to it.suffix) } shouldBe
+                mapOf(
+                    "Ep 1a.srt" to ("Ep 1.mkv" to "a"),
+                    "Ep 01v2.ass" to ("Ep 01.mkv" to "v2"),
+                    "Ep 2 2.srt" to ("Ep 2.mkv" to " 2"),
+                )
+        }
+
+        test("a name two main files share is ambiguous, so its companion is tied, never given to one") {
+            val dir = tempdir()
+            stageAll(dir, "X - S01E01.mkv", "X - S01E01.mp4", "X - S01E02.mkv", "Subs/X - S01E01.ass", "Subs/X - S01E02.ass")
+
+            val result = discover(dir, "X - S01E01.mkv", "X - S01E01.mp4", "X - S01E02.mkv")
+
+            val tie = result.tied.single()
+            tie.entry.relPath shouldBe "Subs/X - S01E01.ass"
+            tie.mains.map { it.name } shouldContainExactlyInAnyOrder listOf("X - S01E01.mkv", "X - S01E01.mp4")
+            result.unmatched.shouldBeEmpty()
+            result.variants.flatMap { it.entries }.map { it.entry.relPath } shouldContainExactly
+                listOf("Subs/X - S01E02.ass")
         }
 
         test("a main file with an empty base name adopts nothing") {

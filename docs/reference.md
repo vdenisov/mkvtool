@@ -186,6 +186,13 @@ episode rule cannot read is an extra too.
    are whatever the release used: `[`, `.`, `(`, `{`, `!`, a bare space. The
    *longest* matching main file wins, so `Show - S01E01 - Title 2.srt` attaches to
    `…Title 2.mkv` rather than being read as `…Title.mkv` plus the suffix `" 2"`.
+   A suffix may not continue a number the main file's name ends in: with no
+   `Ep 10.mkv`, an `Ep 10.srt` is not `Ep 1.mkv` plus `0`, nor a shorter
+   `Ep.mkv` plus `" 10"`. Letters may (`Ep 1a`, `Ep 01v2`). A name two main
+   files share (`X.mkv` and `X.mp4`) is ambiguous: a file named after it is
+   listed under *External files named after more than one main file*, with both
+   of them, and paired with neither. `rename --external` still renames it, since
+   both mains take one new base name.
 2. **By episode number** — no name relation, but both sides carry the same
    `SxxEyy` and exactly one main file claims it. This is lower confidence by
    construction: it is reported as `(episode match)` with the file's own name, and
@@ -448,7 +455,8 @@ Every `title`, and every `additionalSources` file path, is a template. See
 the full tables; in short:
 
 - **File scope**, valid in any of those fields: `fileName`, `extension`,
-  `showName`, `seasonNum`, `episodeNum`, `episodeName`, `seasonName`, `showYear`.
+  `showName`, `seasonNum`, `episodeNum`, `seasonN`, `episodeN` (the two numbers
+  unpadded), `episodeName`, `seasonName`, `showYear`.
   Values come from `episodes.yaml` (or `episodes.txt`) in the media directory,
   falling back to a canonical `Show - SxxEyy - Title` file name.
 - **Track scope**, valid only in a track's `title`: `language`, `languageName`
@@ -575,8 +583,9 @@ they match is paired with a main file:
    files that have an episode;
 3. otherwise by name — the main file whose name the file's name starts with,
    the longest one winning (`Show - S01E01 - Title 2.srt` goes with
-   `…Title 2.mkv`, not `…Title.mkv`) — and only when no main name fits, by its
-   `SxxEyy`.
+   `…Title 2.mkv`, not `…Title.mkv`), and never one whose trailing number the
+   file's name continues (`Ep 10.srt` is not `Ep 1.mkv`'s, nor then
+   `Ep.mkv`'s) — and only when no main name fits, by its `SxxEyy`.
 
 A VobSub `.sub` travels with its `.idx`. A source sets `file` or `files`, not
 both.

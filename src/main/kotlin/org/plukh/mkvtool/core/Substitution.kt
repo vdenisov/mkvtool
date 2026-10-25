@@ -27,8 +27,8 @@ import java.util.MissingResourceException
 
 /** Variables describing the episode being muxed. Valid in every templated field. */
 val FILE_VARS = setOf(
-    "fileName", "extension", "showName", "seasonNum",
-    "episodeNum", "episodeName", "seasonName", "showYear",
+    "fileName", "extension", "showName", "seasonNum", "seasonN",
+    "episodeNum", "episodeN", "episodeName", "seasonName", "showYear",
 )
 
 /** Variables describing the track a title belongs to. Valid only in a title. */
@@ -163,6 +163,10 @@ class SubstitutionEngine(
 
     private val cache = HashMap<File, FileVars>()
 
+    /** The largest episode in the metadata and in the bound batch, which `episodeNum` takes its width from. */
+    private val metadataMax: Int? = episodeData?.byEpisode?.keys.orEmpty().mapNotNull { it.toIntOrNull() }.maxOrNull()
+    private val boundMax: Int? = bound?.values?.maxOfOrNull { it.episode.toInt() }
+
     /** This engine over [binding]'s episodes, which a batch with no binding problems always has a season for. */
     fun boundTo(binding: BindingResult): SubstitutionEngine {
         val season = binding.season.orEmpty()
@@ -190,11 +194,18 @@ class SubstitutionEngine(
 
         // `orIfEmpty` throughout, not `?:`: v1's Groovy elvis fell through on an *empty* value too, so an
         // empty show name in the metadata still defers to the one parsed out of the file name.
+        val season = parsed?.season orIfEmpty metadata?.season
+        val episode = parsed?.episode?.toInt()
         val vars = linkedMapOf<String, String?>(
             "fileName" to base,
             "extension" to file.name.substringAfterLast('.', ""),
-            "seasonNum" to (parsed?.season orIfEmpty metadata?.season),
-            "episodeNum" to parsed?.episode,
+            "seasonNum" to season,
+            "seasonN" to season?.toIntOrNull()?.toString(),
+            // Unbound, the engine sees one file at a time, so the width is the metadata's and its own (#107).
+            "episodeNum" to episode?.let {
+                pad(it, episodeWidth(listOfNotNull(it, boundMax, metadataMax.takeIf { metadata != null })))
+            },
+            "episodeN" to episode?.toString(),
             "episodeName" to (fromData orIfEmpty canonical?.title),
             "showName" to (metadata?.show orIfEmpty canonical?.showName),
             "seasonName" to metadata?.seasonName,

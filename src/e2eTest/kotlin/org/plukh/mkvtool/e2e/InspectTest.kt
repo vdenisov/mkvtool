@@ -318,6 +318,40 @@ class InspectTest : FunSpec({
         }
     }
 
+    // With Ep 10.mkv missing, Ep 10.srt once read as Ep 1.mkv plus the suffix "0".
+    test("a companion whose name continues a main's number is unmatched").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "Ep 1.mkv")
+        stageInput(workDir, "Ep 2.mkv")
+        stageExternalText(workDir, "Subs/Ep 1.srt")
+        stageExternalText(workDir, "Subs/Ep 10.srt")
+
+        val run = inspect(workDir, "--identify")
+
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldContain "Unmatched external files (1)"
+            run.output shouldContain "Subs/Ep 10.srt"
+        }
+    }
+
+    // Discovery once gave the file to whichever main sorted first.
+    test("a companion named after two mains sharing a base name names both").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "Show - S01E01.mkv")
+        stageInput(workDir, "Show - S01E01.mp4")
+        stageExternalText(workDir, "Subs/Show - S01E01.ass")
+
+        val run = inspect(workDir, "--identify")
+
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            run.output shouldContain "External files named after more than one main file (1)"
+            run.output shouldContain "Subs/Show - S01E01.ass: Show - S01E01.mkv, Show - S01E01.mp4"
+            run.output shouldNotContain "External files: "
+        }
+    }
+
     // On its own a .sub identifies as a zero-track MPEG stream, so probing it would report nothing useful and cost
     // a subprocess. Neither half is valid, so every probe shows as a failure, and exactly one failure is what
     // proves one half was left alone. That the half read is the .idx is pinned in the unit tier.
