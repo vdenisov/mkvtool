@@ -167,7 +167,7 @@ class SubstitutionTest : FunSpec({
             val vars = engine.fileVarsFor(File("no episode here.mkv"))
 
             vars.missing shouldContainExactly setOf(
-                "seasonNum", "episodeNum", "episodeName", "showName", "seasonName", "showYear",
+                "seasonNum", "seasonN", "episodeNum", "episodeN", "episodeName", "showName", "seasonName", "showYear",
             )
             // Whatever the file name itself can answer is never missing.
             vars.vars["fileName"] shouldBe "no episode here"
@@ -211,6 +211,16 @@ class SubstitutionTest : FunSpec({
 
             engine.fileVarsFor(File("Show - S01E05 - Five.mkv")).vars["episodeNum"] shouldBe "005"
             engine.fileVarsFor(File("Show - S01E100 - Hundred.mkv")).vars["episodeNum"] shouldBe "100"
+        }
+
+        test("seasonN and episodeN are the bare numbers, whatever the width or the spelling") {
+            val engine = SubstitutionEngine(EpisodeData(season = "01", byEpisode = mapOf("05" to "Five", "100" to "Hundred")))
+
+            val vars = engine.fileVarsFor(File("Show - S01E005 - Five.mkv")).vars
+            vars["episodeNum"] shouldBe "005"
+            vars["episodeN"] shouldBe "5"
+            vars["seasonNum"] shouldBe "01"
+            vars["seasonN"] shouldBe "1"
         }
 
         test("metadata for another season lends episodeNum no width") {
@@ -431,8 +441,8 @@ class SubstitutionTest : FunSpec({
             val fatal = report(validation, fatal = true)
             fatal shouldContain "*** Error: config.yaml has 1 substitution problem:"
             fatal shouldContain "  general.title: \${epsiodeName}"
-            fatal shouldContain "      valid here: episodeName, episodeNum, extension, fileName, " +
-                "seasonName, seasonNum, showName, showYear"
+            fatal shouldContain "      valid here: episodeN, episodeName, episodeNum, extension, fileName, " +
+                "seasonN, seasonName, seasonNum, showName, showYear"
 
             val warned = report(validation, fatal = false)
             warned shouldContain "*** Warning: config.yaml has 1 substitution problem:"

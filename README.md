@@ -569,6 +569,7 @@ field:
 | `showName` | `Twin Peaks` | `episodes.yaml`, else the canonical file name |
 | `seasonNum` | `01` | the `SxxEyy` in the file name, else `episodes.yaml`; under [binding](docs/reference.md#binding-files-to-episodes), the run's season |
 | `episodeNum` | `02` | the `SxxEyy` in the file name, or the episode [binding](docs/reference.md#binding-files-to-episodes) gives it; three digits in a season past 99, as far as the metadata or binding shows one |
+| `seasonN`, `episodeN` | `1`, `2` | the same numbers unpadded, for prose such as `Episode ${episodeN}` |
 | `episodeName` | `Traces to Nowhere` | `episodes.yaml` / `episodes.txt`, else the canonical file name |
 | `seasonName` | `Season 1` | `episodes.yaml` |
 | `showYear` | `1990` | `episodes.yaml` |
@@ -601,7 +602,7 @@ track variable used in a file-scope field — exits 2 naming the offending field
 ```
 *** Error: config.yaml has 1 substitution problem:
   mainSource.audioTracks[0].title: ${languagName}
-      valid here: codec, episodeName, episodeNum, extension, fileName, ...
+      valid here: codec, episodeN, episodeName, episodeNum, extension, ...
 ```
 
 A variable that is valid but has *no data for one particular episode* is a

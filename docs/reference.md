@@ -455,7 +455,8 @@ Every `title`, and every `additionalSources` file path, is a template. See
 the full tables; in short:
 
 - **File scope**, valid in any of those fields: `fileName`, `extension`,
-  `showName`, `seasonNum`, `episodeNum`, `episodeName`, `seasonName`, `showYear`.
+  `showName`, `seasonNum`, `episodeNum`, `seasonN`, `episodeN` (the two numbers
+  unpadded), `episodeName`, `seasonName`, `showYear`.
   Values come from `episodes.yaml` (or `episodes.txt`) in the media directory,
   falling back to a canonical `Show - SxxEyy - Title` file name.
 - **Track scope**, valid only in a track's `title`: `language`, `languageName`

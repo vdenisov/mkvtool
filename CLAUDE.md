@@ -485,7 +485,8 @@ Only a *written* number has a width, and it is the **season's**: the digits of t
 metadata or the main files name, so a 100-episode season writes `S01E005` in `rename`'s names and in
 `${episodeNum}`, whatever the release spelled or a mask selected. The season is written as two digits.
 Off the binding path the engine sees one file at a time, so `${episodeNum}` there takes its width from the
-metadata and that file alone.
+metadata and that file alone. `${episodeN}` and `${seasonN}` are the bare numbers, for prose; the padded
+pair keeps its names and meaning because released configs depend on them.
 
 `mux` reads `episodes.txt` as line N = episode N and takes no offset: it is not the command that decides
 numbering. A trimmed file therefore misses, and the stage-two pre-flight reports those files as dropped
