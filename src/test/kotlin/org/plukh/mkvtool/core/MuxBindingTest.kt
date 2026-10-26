@@ -200,7 +200,7 @@ private fun mux(
         config = config,
         mkvmergeExe = "mkvmerge",
         uiLanguage = null,
-        trackOrder = deriveTrackOrder(config),
+        trackOrder = deriveTrackOrder(config.groups.single()),
         substitution = SubstitutionEngine(episodes),
         usedFileVars = usedFileVars,
         check = false,

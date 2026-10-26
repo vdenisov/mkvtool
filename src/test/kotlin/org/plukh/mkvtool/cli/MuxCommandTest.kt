@@ -170,6 +170,21 @@ class MuxCommandTest : FunSpec({
             muxConfigProblem(grouped, "config.yaml") shouldBe "config.yaml declares groups, which mux does not run yet"
         }
 
+        test("the refusal comes before a group's own problems, since fixing those would not make it muxable") {
+            val grouped = Config(
+                general = GeneralConfig(destinationDir = "mkv"),
+                declaredGroups = listOf(
+                    GroupConfig(
+                        name = "bd",
+                        membership = Membership(episodes = listOf(1..6)),
+                        mainSource = MainSourceConfig(audioTracks = listOf(TrackConfig())),
+                    ),
+                ),
+            )
+
+            muxConfigProblem(grouped, "config.yaml") shouldBe "config.yaml declares groups, which mux does not run yet"
+        }
+
         test("binding keys and an outputName are muxed with, not refused") {
             val named = config().copy(general = GeneralConfig(destinationDir = "mkv", outputName = Template("x")))
             val bound = config(sources = listOf(AdditionalSource(files = listOf("Rus sound/*.mka"))))

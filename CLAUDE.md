@@ -815,6 +815,12 @@ drop rather than aborting, because those episodes would have failed in mkvmerge 
 released dub is a normal situation — which is also why a main that a `files:` source paired nothing with is
 a companion drop, not a binding problem.
 
+Everything up to binding is the batch's; from stage two on, the gates and the run are one **pass** over a
+group's selection (`MuxCommandBuilder` reads the group's `mainSource`, `additionalSources` and track order,
+and composes a source's config path from the group's index). Every pass's gates run before the output
+directory is created and before any pass runs, so a stop in a later pass leaves nothing written by an earlier
+one. Today there is one pass, the implicit group's.
+
 Binding's episode is the template engine's only source of `${episodeNum}`, `${seasonNum}` and the rest
 (`SubstitutionEngine.boundTo`); the engine reads no number out of a file name itself. A `files:` source's
 paired file goes on the command line, a VobSub pair as its `.idx`. The collision check runs after the drops

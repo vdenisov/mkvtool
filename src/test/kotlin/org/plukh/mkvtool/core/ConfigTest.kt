@@ -259,7 +259,7 @@ class ConfigTest : FunSpec({
         }
 
         test("video is always track 0 when there is a config at all, because mux hardcodes it") {
-            trackSelectionOf(parseConfig(emptyMap<String, Any>())).videoIds shouldBe setOf(0)
+            trackSelectionOf(parseConfig(emptyMap<String, Any>()).mainSource).videoIds shouldBe setOf(0)
         }
 
         test("the selected ids are the configured ones, per type") {
@@ -271,7 +271,7 @@ class ConfigTest : FunSpec({
                             "subtitleTracks" to listOf(mapOf("id" to 4)),
                         ),
                     ),
-                ),
+                ).mainSource,
             )
 
             selection.audioIds shouldBe setOf(1, 2)
@@ -288,7 +288,7 @@ class ConfigTest : FunSpec({
                             "subtitleTracks" to listOf(mapOf("id" to 4, "title" to "Subs")),
                         ),
                     ),
-                ),
+                ).mainSource,
             )
 
             selection.titleById shouldBe mapOf(1 to "Japanese", 4 to "Subs")
@@ -298,14 +298,14 @@ class ConfigTest : FunSpec({
             trackSelectionOf(
                 parseConfig(
                     mapOf("mainSource" to mapOf("audioTracks" to listOf(mapOf("id" to 1, "title" to null)))),
-                ),
+                ).mainSource,
             ).titleById shouldBe emptyMap()
         }
 
         test("a track with no id selects nothing, rather than a null that matches nothing") {
-            val selection = trackSelectionOf(
-                parseConfig(mapOf("mainSource" to mapOf("audioTracks" to listOf(mapOf("language" to "en"))))),
-            )
+            val config = parseConfig(mapOf("mainSource" to mapOf("audioTracks" to listOf(mapOf("language" to "en")))))
+
+            val selection = trackSelectionOf(config.mainSource)
 
             selection.audioIds.shouldBeEmpty()
             selection.selectedIds shouldBe setOf(0)
