@@ -56,6 +56,38 @@ class DiscoveryTest : FunSpec({
         ) { typeClassOf(it.ext) shouldBe it.expected }
     }
 
+    context("withPartners") {
+        data class Case(val label: String, val paths: List<String>, val expected: List<String>)
+
+        withData(
+            nameFn = { it.label },
+            Case(
+                "an .idx takes its .sub along, whatever the case of its name",
+                listOf("Subs/A.idx", "Subs/a.SUB"),
+                listOf("Subs/A.idx + Subs/a.SUB"),
+            ),
+            Case(
+                "a lone .idx and a lone .sub are items of their own",
+                listOf("Subs/A.idx", "Subs/B.sub"),
+                listOf("Subs/A.idx", "Subs/B.sub"),
+            ),
+            Case(
+                "a .sub in another directory is no partner",
+                listOf("Subs/A.idx", "Other/A.sub"),
+                listOf("Subs/A.idx", "Other/A.sub"),
+            ),
+            Case(
+                "a format that is not paired passes through",
+                listOf("Subs/A.ass", "Subs/A.srt"),
+                listOf("Subs/A.ass", "Subs/A.srt"),
+            ),
+        ) { case ->
+            withPartners(case.paths.map(::entry)) { it }
+                .map { (entry, partner) -> entry.relPath + partner?.let { " + ${it.relPath}" }.orEmpty() } shouldBe
+                case.expected
+        }
+    }
+
     context("walkTree") {
         test("orders children by name, recursing into a subdirectory in its sorted position") {
             // 'a' sorts before 'a.srt', so the subdirectory's contents come first — the walk interleaves
@@ -441,6 +473,15 @@ class DiscoveryTest : FunSpec({
         }
     }
 })
+
+/** A tree entry at [relPath], as [walkTree] would list it. */
+private fun entry(relPath: String): TreeEntry {
+    val name = relPath.substringAfterLast('/')
+    val dir = relPath.substringBeforeLast('/', "")
+    val leaf = dir.substringAfterLast('/').ifEmpty { null }
+    val ext = name.substringAfterLast('.').lowercase()
+    return TreeEntry(File(relPath), relPath, dir, leaf, name.substringBeforeLast('.'), ext)
+}
 
 /** Walk [dir] and match [mainNames] against it, with `mkv` as the only main-type extension. */
 private fun discover(dir: File, vararg mainNames: String): DiscoveryResult =

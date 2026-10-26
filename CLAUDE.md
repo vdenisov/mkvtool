@@ -653,8 +653,11 @@ pass: episodes with identical tracks but different dubs available are different 
 says so. The slot key is `label/typeClass/extension`, and the extension is in the key because one variant
 can hand a single episode two files of the same kind (`.ass` *and* `.srt` for E01, only `.ass` for E02) —
 keyed on the kind alone they collide, the second silently overwrites the first, and two episodes come out
-as one pass. External differences are never blocking (nothing selects an external file by id) but they do
-split groups, which is the point.
+as one pass. A paired format (`PAIRED_EXTENSIONS`: a VobSub `.idx` and its `.sub`) is one track in two files,
+so it is one entry in the check and in `--identify`, described by the half mkvmerge reads and keyed by both
+extensions (the legend still counts files); an episode with only one half is a layout of its own, since
+mkvmerge cannot mux half a pair. External differences are never blocking (nothing selects an external file by
+id) but they do split groups, which is the point.
 
 **A value that can reach a group key is data; everything said *about* that value is presentation.** The
 `?` an external row falls back to for a missing type or codec is composed in `core`, because it enters a
@@ -737,12 +740,12 @@ one source on one main, one file in two sources. Since binding runs on every run
 holding two seasons or metadata naming another season, with no matcher set at all. An episode the
 metadata lacks is not binding's concern; stage-two substitution drops that file, as it always has. A
 source's candidates are what its masks match against the relative path, the mains aside and with no
-extension filter, and a VobSub `.sub` beside its `.idx`, whatever the case of its name, travels with it
-rather than competing. Callers pass every main, before any command-line mask, since with the longest name
-winning a masked-out `X 2.mkv` would hand `X 2.srt` to `X.mkv`, plus the run the masks chose: the season and
-duplicate-episode checks and pairing by number are about the run alone, so a sample beside its episode can be
-excluded rather than moved, while `sequence` still numbers every main. The tree leaves out `destinationDir`,
-as discovery's does.
+extension filter, and the partner of a paired format (a VobSub `.sub` beside its `.idx`), whatever the case
+of its name, travels with it rather than competing. Callers pass every main, before any command-line mask,
+since with the longest name winning a masked-out `X 2.mkv` would hand `X 2.srt` to `X.mkv`, plus the run the
+masks chose: the season and duplicate-episode checks and pairing by number are about the run alone, so a
+sample beside its episode can be excluded rather than moved, while `sequence` still numbers every main. The
+tree leaves out `destinationDir`, as discovery's does.
 
 ### Language guessing
 

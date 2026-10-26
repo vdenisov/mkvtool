@@ -365,9 +365,25 @@ class InspectTest : FunSpec({
 
         withClue(run.output) {
             run.exitCode shouldBe 0
-            run.output shouldContain "VobSub"
+            // One entry for the pair: both extensions in its header, and no made-up row for the half nothing reads.
+            run.output shouldContain "[Group] (.idx, .sub)"
             Regex("could not read this file").findAll(run.output).count() shouldBe 1
             run.output shouldNotContain "Exception"
+        }
+    }
+
+    // One track in two files is one row in the check: keyed by its extensions alone, it used to be two.
+    test("the check shows an idx/sub pair as one row").config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "Show - S01E01 - Title.mkv")
+        stageExternalText(workDir, "Subs/[Group]/Show - S01E01 - Title.idx", "not really an index\n")
+        stageExternalText(workDir, "Subs/[Group]/Show - S01E01 - Title.sub", "not really a stream\n")
+
+        val run = inspect(workDir)
+
+        withClue(run.output) {
+            run.exitCode shouldBe 0
+            Regex("""(?m)^\s+A\s+subs\s+VobSub""").findAll(run.output).count() shouldBe 1
         }
     }
 

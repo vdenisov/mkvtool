@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
@@ -296,7 +297,7 @@ class InspectTest : FunSpec({
             probed shouldContainExactly listOf("Show - S01E01 - Title.mkv")
         }
 
-        test("of an idx/sub pair the .idx is the half read") {
+        test("of an idx/sub pair the .idx is the half read, and the pair is one entry") {
             // A lone .sub identifies as a zero-track MPEG stream, so probing it would say nothing useful.
             val dir = tempdir()
             File(dir, "Show - S01E01 - Title.mkv").writeText("x")
@@ -305,12 +306,31 @@ class InspectTest : FunSpec({
             File(dir, "Subs/Show - S01E01 - Title.sub").writeText("x")
             val probed = mutableListOf<String>()
 
-            inspectDirectory(dir, options(identify = true), SilentRenderer) {
+            val report = inspectDirectory(dir, options(identify = true), SilentRenderer) {
                 probed += it.name
                 probedResult(it)
             }
 
             probed shouldContainExactly listOf("Show - S01E01 - Title.mkv", "Show - S01E01 - Title.idx")
+            val variant = report.files.single().externals.single()
+            variant.files.single().partner shouldBe "Subs/Show - S01E01 - Title.sub"
+            variant.extensions shouldContainExactly listOf("idx", "sub")
+        }
+
+        test("an episode missing half its pair is a layout of its own, and a pair is one external row") {
+            val dir = tempdir()
+            File(dir, "Subs").mkdirs()
+            listOf("01", "02").forEach { File(dir, "Show - S01E$it - Title.mkv").writeText("x") }
+            listOf("01.idx", "01.sub", "02.idx").forEach { File(dir, "Subs/Show - S01E$it").writeText("x") }
+
+            val report = inspectDirectory(dir, options(), SilentRenderer) { probedResult(it) }
+
+            val layouts = report.check!!.layouts
+            layouts.map { it.fileNames } shouldContainExactlyInAnyOrder listOf(
+                listOf("Show - S01E01 - Title.mkv"),
+                listOf("Show - S01E02 - Title.mkv"),
+            )
+            layouts.forEach { it.externalGroups shouldHaveSize 1 }
         }
 
         test("matching runs pre-mask, so a mask does not turn the rest of the season into leftovers") {
@@ -430,6 +450,16 @@ class InspectTest : FunSpec({
 
             externalSlotsFor(listOf(variant)).keys.toList() shouldContainExactly
                 listOf("A/subtitles/ass", "A/subtitles/srt")
+        }
+
+        test("a pair is one slot keyed by both extensions, so a lone half keys apart from it") {
+            val pair = externalFile("idx", "rus", guessed = true).copy(partner = "Rus sound/[GroupA]/01.sub")
+            val lone = externalFile("idx", "rus", guessed = true)
+
+            externalSlotsFor(listOf(VariantExternals(identityA, listOf(pair)))).keys shouldContainExactly
+                setOf("A/subtitles/idx+sub")
+            externalSlotsFor(listOf(VariantExternals(identityA, listOf(lone)))).keys shouldContainExactly
+                setOf("A/subtitles/idx")
         }
 
         test("an unreadable file still occupies its slot, described by its extension") {

@@ -208,6 +208,34 @@ class InspectRendererTest : FunSpec({
             out shouldContain "(episode match: 01.ass)"
         }
 
+        test("a pair matched by episode number names both its files") {
+            val pair = ExternalFile(
+                "Subs/01.idx", "idx", MatchTier.EPISODE, ExternalListing.Unreadable("bad"), partner = "Subs/01.sub",
+            )
+
+            val (out, _) = renderResult(
+                FileIdentificationRenderer,
+                identification(tracks = listOf(pt(0, "video")), externals = listOf(variantOf(pair))),
+            )
+
+            out shouldContain "(episode match: 01.idx + 01.sub)"
+        }
+
+        test("a pair is one entry: both its extensions in the header, the rows of the half mkvmerge reads") {
+            val pair = ExternalFile(
+                "Subs/01.idx", "idx", MatchTier.NAME, ExternalListing.Unreadable("bad"), partner = "Subs/01.sub",
+            )
+
+            val (out, _) = renderResult(
+                FileIdentificationRenderer,
+                identification(tracks = listOf(pt(0, "video")), externals = listOf(variantOf(pair))),
+            )
+
+            out shouldContain "(.idx, .sub)"
+            Regex("could not read this file").findAll(out).count() shouldBe 1
+            out shouldNotContain "VobSub"
+        }
+
         test("a file mkvmerge could not read is stated, not dressed as a healthy track") {
             val (out, _) = renderResult(
                 FileIdentificationRenderer,

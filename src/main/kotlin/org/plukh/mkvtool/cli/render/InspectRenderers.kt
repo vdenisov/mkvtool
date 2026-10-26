@@ -3,6 +3,7 @@ package org.plukh.mkvtool.cli.render
 import org.plukh.mkvtool.core.ConfiguredSource
 import org.plukh.mkvtool.core.ExternalLeftovers
 import org.plukh.mkvtool.core.ExternalLegend
+import org.plukh.mkvtool.core.ExternalFile
 import org.plukh.mkvtool.core.ExternalListing
 import org.plukh.mkvtool.core.ExternalTrack
 import org.plukh.mkvtool.core.FileIdentification
@@ -188,7 +189,7 @@ private fun renderExternals(externals: List<VariantExternals>, s: TextStyle) {
         if (byNumber.isEmpty()) {
             s.out.println(head)
         } else {
-            s.out.println(head + s.gray("  (episode match: ${byNumber.joinToString(", ") { it.fileName }})"))
+            s.out.println(head + s.gray("  (episode match: ${byNumber.joinToString(", ", transform = ::matchedName)})"))
         }
 
         variant.files.forEach { file ->
@@ -202,6 +203,10 @@ private fun renderExternals(externals: List<VariantExternals>, s: TextStyle) {
         }
     }
 }
+
+/** A file matched by episode number, and the partner that travels with it. */
+private fun matchedName(file: ExternalFile): String =
+    file.fileName + file.partner?.let { " + ${it.substringAfterLast('/')}" }.orEmpty()
 
 private fun trackRow(track: ProbedTrack, absentLanguage: String): String = ROW_FORMAT.format(
     track.id,

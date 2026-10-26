@@ -3,6 +3,7 @@ package org.plukh.mkvtool.core
 import java.io.File
 import java.io.IOException
 import java.nio.file.InvalidPathException
+import java.util.Locale
 
 /**
  * External-file discovery: finding the audio and subtitle files that belong to a main media file but do
@@ -73,6 +74,28 @@ enum class CompanionType { AUDIO, MIXED, SUBTITLES }
 /** The kind of track [ext] holds. Only [CompanionType.AUDIO] and [CompanionType.SUBTITLES] are reachable. */
 fun typeClassOf(ext: String): CompanionType =
     if (ext in AUDIO_EXTENSIONS) CompanionType.AUDIO else CompanionType.SUBTITLES
+
+/**
+ * Formats that are one track in two files: the half mkvmerge reads, which is the one probed and put on the
+ * command line, to the partner that has to sit beside it.
+ */
+val PAIRED_EXTENSIONS = mapOf("idx" to "sub")
+
+/**
+ * [items], each primary half of a [PAIRED_EXTENSIONS] format with its partner when that is among them, and the
+ * partners so taken left out. A pair shares a directory and a base name, whatever its case; a lone half is an
+ * item of its own.
+ */
+fun <T> withPartners(items: List<T>, entryOf: (T) -> TreeEntry): List<Pair<T, T?>> {
+    fun key(entry: TreeEntry, ext: String) = Triple(entry.dirRel, entry.base.lowercase(Locale.ROOT), ext)
+    val byKey = items.associateBy { entryOf(it).let { entry -> key(entry, entry.ext) } }
+    val partnerOf = items.associateWith { item ->
+        val entry = entryOf(item)
+        PAIRED_EXTENSIONS[entry.ext]?.let { byKey[key(entry, it)] }
+    }
+    val taken = partnerOf.values.filterNotNull().toSet()
+    return items.filterNot { it in taken }.map { it to partnerOf[it] }
+}
 
 /** Leading punctuation on a raw suffix — `.rus` reads better as `rus`, `[Studio]` as `Studio`. */
 private val LEADING_NON_ALPHANUMERIC = Regex("""^[^\p{L}\p{N}]+""")

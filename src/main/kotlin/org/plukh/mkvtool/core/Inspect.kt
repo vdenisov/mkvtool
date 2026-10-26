@@ -72,18 +72,25 @@ sealed interface SourceListing {
 data class VariantExternals(val variant: VariantIdentity, val files: List<ExternalFile>) {
     /** The distinct extensions, in the order the files are listed rather than sorted — that order is the
      *  release's own layout, and the block header says so. */
-    val extensions: List<String> = files.map { it.extension }.distinct()
+    val extensions: List<String> = files.flatMap { it.extensions }.distinct()
 }
 
-/** One discovered file, and what reading it (or declining to) yielded. */
+/**
+ * One discovered file, and what reading it (or declining to) yielded. [partner] is the path of the other half
+ * when the file is the primary half of a [PAIRED_EXTENSIONS] pair: one track, so one entry, described by this half.
+ */
 data class ExternalFile(
     val relPath: String,
     /** Lower-cased, no dot. Carried rather than re-derived: discovery split the name once already. */
     val extension: String,
     val tier: MatchTier,
     val listing: ExternalListing,
+    val partner: String? = null,
 ) {
     val fileName: String = relPath.substringAfterLast('/')
+
+    /** [extension], and the partner's when there is one. */
+    val extensions: List<String> = listOfNotNull(extension, partner?.let { PAIRED_EXTENSIONS[extension] })
 }
 
 sealed interface ExternalListing {
@@ -428,7 +435,8 @@ fun externalRowsOf(ext: String, languageGuess: String?, probed: ProbeResult?): E
  * shipping both `.ass` and `.srt` for one episode and only `.ass` for the next): keyed on the kind alone
  * they collide, the second silently overwrites the first, and two episodes come out looking like one pass.
  * It also separates a variant that switched format mid-season, which is a real second pass — mkvmerge is
- * being handed a different file.
+ * being handed a different file. A pair is one file here, keyed by both extensions, so an episode missing one
+ * half is a layout of its own: mkvmerge cannot mux half a pair.
  *
  * A file mkvmerge could not read still occupies its slot. The episode has it, and pretending otherwise
  * would move that episode into a different muxing group over a defect reported elsewhere.
@@ -440,8 +448,9 @@ fun externalSlotsFor(externals: List<VariantExternals>): Map<String, ExternalSlo
         for (file in variant.files) {
             val type = typeClassOf(file.extension)
             val row = (file.listing as? ExternalListing.Tracks)?.tracks?.firstOrNull()
-            slots["${variant.variant.label}/${type.label}/${file.extension}"] = ExternalSlot(
-                key = "${variant.variant.label}/${type.label}/${file.extension}",
+            val key = "${variant.variant.label}/${type.label}/${file.extensions.joinToString("+")}"
+            slots[key] = ExternalSlot(
+                key = key,
                 signature = TrackSignature(
                     // The kind comes from the extension, not from the row: an unreadable file has no row
                     // and still belongs to the audio or the subtitle side of its variant.
@@ -500,7 +509,8 @@ private fun externalsFor(
     return hits.groupBy { it.variant.label }.map { (_, group) ->
         VariantExternals(
             variant = VariantIdentity(group.first().variant),
-            files = group.map { hit ->
+            // A pair is one track: its partner is never read, and would only list a made-up second row.
+            files = withPartners(group) { it.entry.entry }.map { (hit, partner) ->
                 ExternalFile(
                     relPath = hit.entry.entry.relPath,
                     extension = hit.entry.entry.ext,
@@ -510,6 +520,7 @@ private fun externalsFor(
                         languageGuess = hit.variant.languageGuess,
                         probed = probedOf(hit.entry.entry.file, hit.entry.entry.ext),
                     ),
+                    partner = partner?.entry?.entry?.relPath,
                 )
             },
         )
