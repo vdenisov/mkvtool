@@ -301,7 +301,9 @@ different dubs available land in different groups, because they are two jobs:
 A variant counts once per *kind and format* of file it contributes to an episode,
 so a group that ships both an `.ass` and an `.srt` for one episode and only an
 `.ass` for the rest splits them into two groups. That is not pedantry: mkvmerge is
-being handed a different set of files, which is a different pass.
+being handed a different set of files, which is a different pass. A VobSub
+`.idx`/`.sub` pair is one track, so it is one row; an episode with only one half of
+it is a group of its own, because mkvmerge cannot mux half a pair.
 
 Every group names its files, the largest included — each group is one config, so
 each is an answer. Membership is printed as **episode ranges** where the names

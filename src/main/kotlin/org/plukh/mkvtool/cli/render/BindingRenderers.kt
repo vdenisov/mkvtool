@@ -116,9 +116,9 @@ private fun mainRuleName(rule: BindingRule): String = when (rule) {
 
 private fun sourceRuleName(rule: BindingRule): String = rule.name.lowercase(Locale.ROOT)
 
-/** A paired file, and the `.sub` that travels with an `.idx`. */
+/** A paired file, and the partner that travels with it. */
 private fun boundName(bound: BoundFile): String =
-    bound.entry.relPath + bound.sub?.let { " + ${it.file.name}" }.orEmpty()
+    bound.entry.relPath + bound.partner?.let { " + ${it.file.name}" }.orEmpty()
 
 private fun names(files: List<File>): String = files.joinToString(", ") { it.name }
 

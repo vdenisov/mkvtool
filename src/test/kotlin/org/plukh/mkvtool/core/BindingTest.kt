@@ -559,4 +559,4 @@ private fun names(files: List<File>) = files.map { it.name }.sorted().joinToStri
 
 private fun spelled(episode: Int) = "E" + pad(episode)
 
-private fun filesOf(bound: BoundFile) = bound.entry.relPath + bound.sub?.let { " +${it.relPath}" }.orEmpty()
+private fun filesOf(bound: BoundFile) = bound.entry.relPath + bound.partner?.let { " +${it.relPath}" }.orEmpty()

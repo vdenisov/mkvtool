@@ -2,7 +2,6 @@ package org.plukh.mkvtool.core
 
 import org.plukh.mkvtool.out.CommandResult
 import java.io.File
-import java.util.Locale
 
 /** Which rule paired a file: a name rule, or the number rule that read its episode. */
 enum class BindingRule { EXACT, SUFFIX, REGEX, SXXEYY, SEQUENCE }
@@ -13,10 +12,10 @@ enum class BindingRule { EXACT, SUFFIX, REGEX, SXXEYY, SEQUENCE }
  */
 data class MainEpisode(val main: File, val read: Int?, val episode: Int?, val season: String? = null)
 
-/** A source file paired with [main] by [rule]. [sub] is the `.sub` half of a VobSub pair whose `.idx` is [entry]. */
-data class BoundFile(val entry: TreeEntry, val main: File, val rule: BindingRule, val sub: TreeEntry? = null) {
-    /** [entry], and [sub] when there is one. */
-    val files: List<TreeEntry> get() = listOfNotNull(entry, sub)
+/** A source file paired with [main] by [rule], and the [partner] that travels with it when it is half of a pair. */
+data class BoundFile(val entry: TreeEntry, val main: File, val rule: BindingRule, val partner: TreeEntry? = null) {
+    /** [entry], and [partner] when there is one. */
+    val files: List<TreeEntry> get() = listOfNotNull(entry, partner)
 }
 
 /** One `files:` source's files paired with main files, by its config [path]. */
@@ -216,16 +215,16 @@ private class Binder(
             emptyMap()
         }
 
-        val bound = candidates.mapNotNull { (entry, sub) ->
+        val bound = candidates.mapNotNull { (entry, partner) ->
             when {
                 sequenced ->
-                    byNumber(path, entry, sub, Read(null, ordinals.getValue(entry)), BindingRule.SEQUENCE, claims)
-                reader.hasRegex -> byNumber(path, entry, sub, reader.regex(entry.base), BindingRule.REGEX, claims)
+                    byNumber(path, entry, partner, Read(null, ordinals.getValue(entry)), BindingRule.SEQUENCE, claims)
+                reader.hasRegex -> byNumber(path, entry, partner, reader.regex(entry.base), BindingRule.REGEX, claims)
                 else -> {
                     // A name match or a tie settles the file; only no name at all reads a number.
                     val named = byName.longestPrefix(entry.base)
-                    if (named.isNotEmpty()) byName(path, entry, sub, named)
-                    else byNumber(path, entry, sub, reader.sxxeyy(entry.base), BindingRule.SXXEYY, claims)
+                    if (named.isNotEmpty()) byName(path, entry, partner, named)
+                    else byNumber(path, entry, partner, reader.sxxeyy(entry.base), BindingRule.SXXEYY, claims)
                 }
             }
         }
@@ -236,21 +235,21 @@ private class Binder(
     }
 
     /** [entry] paired with the one of [named] its name starts with, episode or not; a tie is a problem. */
-    private fun byName(path: String, entry: TreeEntry, sub: TreeEntry?, named: List<MainFile>): BoundFile? {
+    private fun byName(path: String, entry: TreeEntry, partner: TreeEntry?, named: List<MainFile>): BoundFile? {
         val main = named.singleOrNull()
         if (main == null) {
             problems += NameTie(path, entry, named.map { it.file })
             return null
         }
         val rule = if (main.lower == entry.base.lowercase()) BindingRule.EXACT else BindingRule.SUFFIX
-        return BoundFile(entry, main.file, rule, sub)
+        return BoundFile(entry, main.file, rule, partner)
     }
 
     /** [entry] paired with the main that claims [read]'s mapped episode; no number, or no main, is a problem. */
     private fun byNumber(
         path: String,
         entry: TreeEntry,
-        sub: TreeEntry?,
+        partner: TreeEntry?,
         read: Read?,
         rule: BindingRule,
         claims: Map<Int, List<File>>,
@@ -264,7 +263,7 @@ private class Binder(
             return null
         }
         if (main in run) read.season?.let { seasons += it to entry.relPath }
-        return BoundFile(entry, main, rule, sub)
+        return BoundFile(entry, main, rule, partner)
     }
 
     /** [number] through the episode map: the first range holding it, else itself. */
@@ -294,7 +293,7 @@ private class Binder(
     }
 }
 
-/** What [masks] match in [tree], mains aside, each with the `.sub` of its VobSub pair when it is an `.idx`. */
+/** What [masks] match in [tree], mains aside, each with its partner when it is the primary half of a pair. */
 private fun candidatesOf(
     masks: List<String>,
     tree: List<TreeEntry>,
@@ -304,10 +303,6 @@ private fun candidatesOf(
     val matched = tree.filter { entry ->
         entry.file.absolutePath !in mainPaths && regexes.any { it.matches(entry.relPath) }
     }
-    // mkvmerge reads a VobSub pair through its .idx, so the .sub beside it is the same track, not a rival.
-    val pairKey = { entry: TreeEntry -> entry.dirRel to entry.base.lowercase(Locale.ROOT) }
-    val subs = matched.filter { it.ext == "sub" }.associateBy(pairKey)
-    val pairOf = matched.filter { it.ext == "idx" }.associateWith { subs[pairKey(it)] }
-    val paired = pairOf.values.filterNotNull().toSet()
-    return matched.filterNot { it in paired }.map { it to pairOf[it] }
+    // mkvmerge reads a pair through its primary half, so the partner beside it is the same track, not a rival.
+    return withPartners(matched) { it }
 }

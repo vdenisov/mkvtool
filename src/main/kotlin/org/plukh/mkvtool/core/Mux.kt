@@ -412,7 +412,7 @@ class MuxCommandBuilder(
         command += listOf("(", "$base.$extension", ")")
 
         group.additionalSources.forEachIndexed { i, source ->
-            // A VobSub pair goes on as its .idx alone: mkvmerge finds the .sub beside it.
+            // A pair goes on as its primary half alone: mkvmerge finds the partner beside it.
             val path = if (source.files != null) {
                 boundFileFor(i, file)?.entry?.relPath.orEmpty()
             } else {
