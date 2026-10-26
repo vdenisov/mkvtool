@@ -36,11 +36,11 @@ class TrackOrderTest : FunSpec({
                 config(audio = listOf(1), sources = 2),
                 "0:0,0:1,1:0,2:0",
             ),
-        ) { deriveTrackOrder(it.config) shouldBe it.expected }
+        ) { deriveTrackOrder(it.config.groups.single()) shouldBe it.expected }
     }
 
     test("an omitted trackOrder derives, and has nothing to warn about") {
-        val order = resolveTrackOrder(config(audio = listOf(1, 2), subtitles = listOf(4)))
+        val order = resolveTrackOrder(config(audio = listOf(1, 2), subtitles = listOf(4)).groups.single())
 
         order.shouldBeInstanceOf<TrackOrder.Derived>()
         order.order shouldBe "0:0,0:1,0:2,0:4"
@@ -111,4 +111,4 @@ private fun config(
 )
 
 private fun resolve(order: String, audio: List<Int> = emptyList(), subtitles: List<Int> = emptyList()) =
-    resolveTrackOrder(config(audio, subtitles, trackOrder = order)) as TrackOrder.Configured
+    resolveTrackOrder(config(audio, subtitles, trackOrder = order).groups.single()) as TrackOrder.Configured

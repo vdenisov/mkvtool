@@ -336,7 +336,7 @@ fun inspectDirectory(
         buildCheckReport(
             infos = selected.map { infos.getValue(it) },
             externalsOf = { slotsByFile[it.file].orEmpty() },
-            selection = trackSelectionOf(options.config),
+            selection = trackSelectionOf(options.config?.mainSource),
             headerLabel = "Consistency check",
         ).also(renderer::render)
     } else {
@@ -537,8 +537,9 @@ private fun resolveSources(
     substitution: SubstitutionEngine,
     binding: BindingResult,
 ): List<ResolvedSource> {
-    if (config == null) return emptyList()
-    return config.additionalSources.mapIndexedNotNull { i, source ->
+    // A declared group's sources wait until inspect reports per group; the implicit one is the top level.
+    if (config == null || config.declaredGroups != null) return emptyList()
+    return config.groups.single().additionalSources.mapIndexedNotNull { i, source ->
         val masks = source.files
         val template = source.file
         when {

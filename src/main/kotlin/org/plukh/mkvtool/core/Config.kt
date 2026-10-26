@@ -456,12 +456,12 @@ data class TrackSelection(
     }
 }
 
-/** What [config] selects, or [TrackSelection.NONE] when there is no config to select anything. */
-fun trackSelectionOf(config: Config?): TrackSelection {
-    if (config == null) return TrackSelection.NONE
+/** What [mainSource] selects, or [TrackSelection.NONE] when there is no config to select anything. */
+fun trackSelectionOf(mainSource: MainSourceConfig?): TrackSelection {
+    if (mainSource == null) return TrackSelection.NONE
 
-    val audio = config.mainSource.audioTracks
-    val subtitles = config.mainSource.subtitleTracks
+    val audio = mainSource.audioTracks
+    val subtitles = mainSource.subtitleTracks
     return TrackSelection(
         hasConfig = true,
         videoIds = setOf(0),

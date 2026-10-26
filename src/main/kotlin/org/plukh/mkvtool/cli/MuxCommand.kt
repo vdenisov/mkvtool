@@ -146,8 +146,8 @@ class MuxCommand : Callable<Int> {
         reportTemplateProblems(validation, configName, renderer, fatal = true)
         if (validation.problems > 0) return 2
 
-        // Resolved once rather than per file, so its warnings are printed once.
-        val trackOrder = resolveTrackOrder(config)
+        // Once rather than per file, so its warnings print once; the one group is the implicit one, for now.
+        val trackOrder = resolveTrackOrder(config.groups.single())
         renderer.render(trackOrder)
 
         val loaded = episodes as? EpisodeMetadata.Loaded

@@ -191,6 +191,51 @@ class MuxCommandLineTest : FunSpec({
         }
     }
 
+    context("a group's pass") {
+        test("carries the group's tracks, order and sources, paired at the group's own config path") {
+            val file = File("Show - S01E01.mkv")
+            val subs = AdditionalSource(
+                files = listOf("Subs/*.srt"),
+                tracks = listOf(SourceTrackConfig(language = "en")),
+            )
+            val config = Config(
+                general = GeneralConfig(destinationDir = "mkv", mkvmergeExe = EXE),
+                // Neither the top level nor the other group may leak into the second group's pass.
+                mainSource = MainSourceConfig(audioTracks = listOf(track(9, "xx", "Top level"))),
+                declaredGroups = listOf(
+                    GroupConfig(name = "tv", mainSource = MainSourceConfig(audioTracks = listOf(track(1, "ja", "Ja")))),
+                    GroupConfig(
+                        name = "bd",
+                        mainSource = MainSourceConfig(audioTracks = listOf(track(2, "en", "English"))),
+                        additionalSources = listOf(subs),
+                    ),
+                ),
+            )
+            val binding = bindFiles(config, listOf(file), listOf(entry("Subs/Show - S01E01.srt")))
+            val options = MuxOptions(
+                config = config,
+                mkvmergeExe = EXE,
+                uiLanguage = null,
+                trackOrder = ORDER,
+                substitution = SubstitutionEngine().boundTo(binding),
+            )
+            val builder = MuxCommandBuilder(
+                File("."), options, 1, "0:0,0:2,1:0", { error("no probe expected") }, binding,
+            )
+
+            val command = builder.commandFor(file)
+
+            builder.sourcePath(0) shouldBe "groups[1].additionalSources[0]"
+            command.valueFor("--audio-tracks") shouldBe "2"
+            command.dropWhile { it != ")" } shouldContainExactly listOf(
+                ")",
+                "--language", "0:en", "--default-track-flag", "0:no",
+                "(", "Subs/Show - S01E01.srt", ")",
+                "--title", "Show - S01E01", "--track-order", "0:0,0:2,1:0",
+            )
+        }
+    }
+
     context("mkvmerge invocation") {
         test("the ui-language option is omitted when neither spelling was accepted") {
             val command = config(audio = listOf(track(2, "en", "English"))).commandFor(uiLanguage = null)
@@ -332,7 +377,7 @@ private fun Config.commandFor(
         usesCodec = usesCodec,
         substitution = SubstitutionEngine().boundTo(binding),
     )
-    return MuxCommandBuilder(File("."), options, probe, binding).commandFor(file)
+    return MuxCommandBuilder(File("."), options, 0, ORDER, probe, binding).commandFor(file)
 }
 
 /** The head every command shares, for the cases that spell out a whole argument list. */
@@ -355,6 +400,14 @@ private fun List<String>.valueFor(option: String, prefix: String = ""): String {
 }
 
 private fun List<String>.after(token: String): String = this[indexOf(token) + 1]
+
+/** A tree entry at [relPath] under the media directory, as `walkTree` would list it. */
+private fun entry(relPath: String): TreeEntry {
+    val name = relPath.substringAfterLast('/')
+    val dir = relPath.substringBeforeLast('/', "")
+    val base = name.substringBeforeLast('.')
+    return TreeEntry(File(relPath), relPath, dir, dir.ifEmpty { null }, base, extensionOf(name))
+}
 
 private fun List<String>.shouldNotContainPair(option: String, valuePrefix: String) {
     val found = windowed(2).any { (a, b) -> a == option && b.startsWith(valuePrefix) }
