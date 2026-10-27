@@ -48,9 +48,6 @@ data class SharedMain(val path: String, val main: File, val entries: List<TreeEn
 /** One file paired by several sources, at [paths]. */
 data class SharedFile(val entry: TreeEntry, val paths: List<String>) : BindingProblem
 
-/** A main file claimed by several [groups], which would each mux it. */
-data class DoubleClaim(val main: File, val groups: List<GroupRef>) : BindingProblem
-
 /**
  * The batch's one [season], the [rule] its main files were read by, every main file with the episode it read if
  * any, each `files:` source's pairings, and the mains split by the group claiming each. Nothing may act on it
@@ -63,7 +60,7 @@ data class BindingResult(
     val sources: List<SourceBinding>,
     val problems: List<BindingProblem>,
     /** The implicit group's by default, which claims every main. */
-    val partition: GroupPartition = GroupPartition(listOf(mains.map { it.main }), emptyMap(), emptyList()),
+    val partition: GroupPartition = GroupPartition(listOf(mains.map { it.main }), emptyList()),
     /** The declared groups, by index; empty for the implicit group. */
     val groups: List<GroupRef> = emptyList(),
 ) {
@@ -83,7 +80,6 @@ data class BindingResult(
         sources = sources.map { source -> source.copy(bound = source.bound.filter { it.main in files }) },
         partition = GroupPartition(
             members = partition.members.map { members -> members.filter { it in files } },
-            doubleClaimed = partition.doubleClaimed.filterKeys { it in files },
             unclaimed = partition.unclaimed.filter { it in files },
         ),
     )
@@ -104,8 +100,8 @@ data class BindingReport(val binding: BindingResult, val fatal: Boolean) : Comma
  * `X 2.mkv` would let `X 2.srt` pair with `X.mkv` with the suffix " 2". [tree] leaves out `destinationDir`, and
  * [config] has passed [bindingProblems]. The mains are split by group between being read and being paired, since
  * groups claim by episode; a group's source keeps only the pairings with its own members, and a file whose main
- * another group claims, or none does, is simply not that source's. [dir] is the media directory, which group
- * masks resolve against. [episodes] is a season to agree with and what the main files' `sequence` counts against.
+ * another group claims, or none does, is simply not that source's. [dir] is the media directory. [episodes] is a
+ * season to agree with and what the main files' `sequence` counts against.
  * [run] is the mains the masks selected: the season and duplicate-episode checks, and pairing by number, are
  * about those, so a sample the run leaves out cannot clash with its episode; a `sequence` still numbers every main.
  */
@@ -176,14 +172,10 @@ private class Binder(
         val bound = bindMains()
         val read = bound ?: mains.map { MainEpisode(it, null, null) }
         val episodeOf = read.associate { it.main to it.episode }
-        val partition = partitionByGroup(config.groups, mains, dir) { episodeOf[it] }
+        val partition = partitionByGroup(config.groups, mains) { episodeOf[it] }
         val groups = config.groups.indices.mapNotNull { config.groupRef(it) }
-        // The run's alone, as with duplicate episodes: a masked-out file is muxed by no group.
-        partition.doubleClaimed.filterKeys { it in run }.forEach { (main, claimed) ->
-            problems += DoubleClaim(main, claimed.map { groups[it] })
-        }
         if (bound == null) return BindingResult(null, rule, read, emptyList(), problems, partition, groups)
-        // Each main's group; a main claimed by none or by several has none.
+        // Each main's group; a main no group claims has none.
         val groupOf = partition.members.flatMapIndexed { g, members -> members.map { it to g } }.toMap()
 
         // Episode to the mains claiming it; only a main that read one can claim, or clash over, an episode.

@@ -138,13 +138,12 @@ data class AdditionalSource(
 data class SharedTrack(val name: String?, val usesAnother: Boolean = false)
 
 /**
- * Which files a group claims: a file whose episode falls in [episodes], or whose name matches a mask in
- * [files]. [malformedEpisodes] keeps the tokens that are not `N` or `N-M`, as written, for validation.
+ * Which files a group claims: those whose episode falls in [episodes]. [malformedEpisodes] keeps the tokens
+ * that are not `N` or `N-M`, as written, for validation.
  */
 data class Membership(
     val episodes: List<IntRange> = emptyList(),
     val malformedEpisodes: List<String> = emptyList(),
-    val files: List<String> = emptyList(),
 )
 
 /**
@@ -160,6 +159,19 @@ data class GroupConfig(
 )
 
 /**
+ * A `groups` entry as written. A null selection field is one the group does not write, which it takes from the
+ * top level whole; a written one is the group's own, whatever its value. [trackOrder] is `""` when written empty,
+ * which is the group's derived order rather than the top level's.
+ */
+data class DeclaredGroup(
+    val name: String? = null,
+    val membership: Membership = Membership(),
+    val mainSource: MainSourceConfig? = null,
+    val additionalSources: List<AdditionalSource>? = null,
+    val trackOrder: String? = null,
+)
+
+/**
  * The whole config.
  *
  * [trackOrder] is left as the raw `sourceIndex:trackId` CSV: it is validated against the configured
@@ -167,7 +179,8 @@ data class GroupConfig(
  * that are not there.
  *
  * [declaredGroups] is null when the config has no `groups` key. [groups] is what a group-aware reader
- * iterates: the declared groups, or one implicit group made of the top-level fields.
+ * iterates: the declared groups with the top-level fields they do not write, or one implicit group made of the
+ * top-level fields.
  */
 data class Config(
     val general: GeneralConfig = GeneralConfig(),
@@ -175,10 +188,17 @@ data class Config(
     val additionalSources: List<AdditionalSource> = emptyList(),
     val trackOrder: String? = null,
     val sharedTracks: List<SharedTrack> = emptyList(),
-    val declaredGroups: List<GroupConfig>? = null,
+    val declaredGroups: List<DeclaredGroup>? = null,
 ) {
-    val groups: List<GroupConfig> =
-        declaredGroups ?: listOf(GroupConfig(null, null, mainSource, additionalSources, trackOrder))
+    val groups: List<GroupConfig> = declaredGroups?.map { group ->
+        GroupConfig(
+            name = group.name,
+            membership = group.membership,
+            mainSource = group.mainSource ?: mainSource,
+            additionalSources = group.additionalSources ?: additionalSources,
+            trackOrder = if (group.trackOrder == null) trackOrder else group.trackOrder.ifEmpty { null },
+        )
+    } ?: listOf(GroupConfig(null, null, mainSource, additionalSources, trackOrder))
 }
 
 /** Load [file] as a config, or classify why it cannot be one. Auto-detected charset: `config.yaml` is
@@ -214,12 +234,13 @@ fun parseConfig(mapping: Map<*, *>): Config {
         // A `groups:` key holding nothing usable is an empty list, not an absent one: it still declares groups.
         declaredGroups = if (mapping.containsKey("groups")) {
             mapping.mapsAt("groups").map { group ->
-                GroupConfig(
+                // A key the group writes is its own whatever its value: `additionalSources: []` muxes none.
+                DeclaredGroup(
                     name = group.nameAt(),
                     membership = membershipOf(group),
-                    mainSource = mainSourceOf(group.mapAt("mainSource"), shared),
-                    additionalSources = additionalSourcesOf(group, shared),
-                    trackOrder = group.trackOrderAt(),
+                    mainSource = group.ifWritten("mainSource") { mainSourceOf(group.mapAt("mainSource"), shared) },
+                    additionalSources = group.ifWritten("additionalSources") { additionalSourcesOf(group, shared) },
+                    trackOrder = group.ifWritten("trackOrder") { group.trackOrderAt().orEmpty() },
                 )
             }
         } else {
@@ -235,11 +256,13 @@ fun parseConfig(mapping: Map<*, *>): Config {
  * config-problem policy.
  */
 fun additionalSourceIdProblems(config: Config, configName: String): List<String> =
+    // Groups inheriting one top-level source would each report it, under the same path.
     config.groups.flatMapIndexed { g, group ->
         group.additionalSources.flatMapIndexed { i, source ->
             source.tracks.mapIndexedNotNull { j, track ->
                 if (track.idDeclared) {
-                    val path = withRef("${config.groupPrefix(g)}additionalSources[$i].tracks[$j]", track.ref)
+                    val prefix = config.writtenPrefix(g) { it.additionalSources }
+                    val path = withRef("${prefix}additionalSources[$i].tracks[$j]", track.ref)
                     "$configName sets an id on $path, which should be removed: " +
                         "an additional-source track is always track 0"
                 } else {
@@ -247,12 +270,11 @@ fun additionalSourceIdProblems(config: Config, configName: String): List<String>
                 }
             }
         }
-    }
+    }.distinct()
 
 /**
  * One line per problem with `groups` or `sharedTracks` that the config alone can show, each starting with
- * [configName]. Each caller applies its own config-problem policy. A file claimed by two groups through
- * masks needs the file list, so that one is [partitionByGroup]'s to find.
+ * [configName]. Each caller applies its own config-problem policy.
  */
 fun groupProblems(config: Config, configName: String): List<String> {
     val problems = ArrayList<String>()
@@ -270,35 +292,38 @@ fun groupProblems(config: Config, configName: String): List<String> {
         }
     }
 
-    config.groups.forEachIndexed { g, group ->
-        for ((path, ref) in group.trackRefs()) {
+    config.groups.indices.forEach { g ->
+        for ((path, ref) in config.trackRefs(g)) {
             when {
-                ref == "" -> problems += "$configName has an empty use at ${config.groupPrefix(g)}$path"
+                ref == "" -> problems += "$configName has an empty use at $path"
                 ref != null && ref !in sharedNames ->
-                    problems += "$configName uses an unknown shared track '$ref' at ${config.groupPrefix(g)}$path"
+                    problems += "$configName uses an unknown shared track '$ref' at $path"
             }
         }
     }
 
-    val groups = config.declaredGroups ?: return problems
+    val groups = config.declaredGroups ?: return problems.distinct()
     if (groups.isEmpty()) problems += "$configName declares groups but lists none"
-    val topLevel = listOfNotNull(
-        "mainSource".takeIf { config.mainSource != MainSourceConfig() },
-        "additionalSources".takeIf { config.additionalSources.isNotEmpty() },
-        "trackOrder".takeIf { config.trackOrder != null },
+    // A top-level field every group writes for itself is read by none of them.
+    val unread = listOfNotNull(
+        "mainSource".takeIf { config.mainSource != MainSourceConfig() && groups.all { it.mainSource != null } },
+        "additionalSources".takeIf {
+            config.additionalSources.isNotEmpty() && groups.all { it.additionalSources != null }
+        },
+        "trackOrder".takeIf { config.trackOrder != null && groups.all { it.trackOrder != null } },
     )
-    if (topLevel.isNotEmpty()) {
-        problems += "$configName sets ${topLevel.joinToString(", ")} at the top level beside groups, " +
-            "where nothing reads it; each group carries its own"
+    if (groups.isNotEmpty() && unread.isNotEmpty()) {
+        problems += "$configName sets ${unread.joinToString(", ")} at the top level, where nothing reads it; " +
+            "every group sets its own"
     }
 
     val labels = groups.mapIndexed { i, group -> "groups[$i]" + group.name?.let { " ($it)" }.orEmpty() }
     groups.forEachIndexed { i, group ->
-        val membership = group.membership ?: Membership()
+        val membership = group.membership
         membership.malformedEpisodes.forEach {
             problems += "$configName has an episode range in ${labels[i]} that is not one: '$it'"
         }
-        if (membership == Membership()) problems += "$configName has no episodes or files for ${labels[i]}"
+        if (membership == Membership()) problems += "$configName has no episodes for ${labels[i]}"
         if (group.name != null && groups.indexOfFirst { it.name == group.name } < i) {
             problems += "$configName has two groups named '${group.name}'"
         }
@@ -306,8 +331,8 @@ fun groupProblems(config: Config, configName: String): List<String> {
 
     for (i in groups.indices) {
         for (j in i + 1 until groups.size) {
-            val overlaps = groups[i].membership?.episodes.orEmpty()
-                .flatMap { a -> groups[j].membership?.episodes.orEmpty().mapNotNull { b -> overlap(a, b) } }
+            val overlaps = groups[i].membership.episodes
+                .flatMap { a -> groups[j].membership.episodes.mapNotNull { b -> overlap(a, b) } }
                 .sortedBy { it.first }
                 // One group's own ranges may overlap each other, so two intersections can nest.
                 .fold(ArrayList<IntRange>()) { merged, range ->
@@ -326,7 +351,8 @@ fun groupProblems(config: Config, configName: String): List<String> {
         }
     }
 
-    return problems
+    // Groups inheriting one top-level entry would each report it, under the same path.
+    return problems.distinct()
 }
 
 /**
@@ -344,7 +370,7 @@ fun bindingProblems(config: Config, configName: String): List<String> {
 
     config.groups.forEachIndexed { g, group ->
         group.additionalSources.forEachIndexed { i, source ->
-            val path = config.sourcePath(g, i)
+            val path = config.writtenPrefix(g) { it.additionalSources } + groupSourcePath(i)
             val declared = source.matching.declaredKeys()
             when {
                 !source.file.isNullOrEmpty() && source.files != null ->
@@ -363,49 +389,40 @@ fun bindingProblems(config: Config, configName: String): List<String> {
             }
         }
     }
-    return problems
+    return problems.distinct()
 }
 
 /** What [bindingProblems] finds in `general`'s matchers alone, which every main file is read by. */
 fun mainMatcherProblems(config: Config, configName: String): List<String> =
     matcherProblems(config.general.matching, "general", main = true, configName)
 
-/** A file list split by group. Data only: what a double claim or an unclaimed file *means* is the caller's to
- *  say. Every file is in exactly one of the three. */
+/** A file list split by group. Data only: what an unclaimed file *means* is the caller's to say. Every file is
+ *  in exactly one of the two. */
 data class GroupPartition(
-    /** Per group, in group order, the files it alone claims. */
+    /** Per group, in group order, the files it claims. */
     val members: List<List<File>>,
-    /** Each file claimed by more than one group, with the indices of every group claiming it. */
-    val doubleClaimed: Map<File, List<Int>>,
     /** The files no group claims. */
     val unclaimed: List<File>,
 )
 
 /**
- * Split [files] by the group that claims each. A file is claimed when its episode, as [episodeOf] reports
- * it, falls in one of a group's ranges, or when its name matches one of the group's masks, which resolve
- * against [dir] as every file mask does; a null from [episodeOf] leaves only the masks. The implicit group
- * claims everything.
+ * Split [files] by the group that claims each: the one whose ranges hold the file's episode, as [episodeOf]
+ * reports it, so a file with no episode is claimed by no declared group. The implicit group claims everything.
  */
-fun partitionByGroup(
-    groups: List<GroupConfig>,
-    files: List<File>,
-    dir: File,
-    episodeOf: (File) -> Int?,
-): GroupPartition {
-    val masks = groups.map { compileMasks(it.membership?.files.orEmpty(), dir) }
-    val claims = files.associateWith { file ->
+fun partitionByGroup(groups: List<GroupConfig>, files: List<File>, episodeOf: (File) -> Int?): GroupPartition {
+    val groupOf = files.associateWith { file ->
         val episode = episodeOf(file)
-        groups.indices.filter { i ->
-            val membership = groups[i].membership ?: return@filter true
-            (episode != null && membership.episodes.any { episode in it }) || masks[i].any { it(file) }
-        }
+        // Overlapping ranges are a config problem, which inspect reports and carries on past: no group gets that
+        // episode, rather than whichever is listed first.
+        groups.indices.singleOrNull { i ->
+            val membership = groups[i].membership ?: return@singleOrNull true
+            episode != null && membership.episodes.any { episode in it }
+        } ?: -1
     }
 
     return GroupPartition(
-        members = groups.indices.map { i -> files.filter { claims.getValue(it) == listOf(i) } },
-        doubleClaimed = claims.filterValues { it.size > 1 },
-        unclaimed = files.filter { claims.getValue(it).isEmpty() },
+        members = groups.indices.map { i -> files.filter { groupOf.getValue(it) == i } },
+        unclaimed = files.filter { groupOf.getValue(it) == -1 },
     )
 }
 
@@ -418,11 +435,18 @@ fun Config.groupRef(index: Int): GroupRef? = declaredGroups?.let { GroupRef(inde
 /** `group N (name)`: counted from 1, the name only when there is one. Config paths stay in config problems. */
 fun groupLabel(group: GroupRef): String = "group ${group.index + 1}" + group.name?.let { " ($it)" }.orEmpty()
 
-/** The config path group [index]'s entries start with: none for the implicit group, which is the top level. */
-internal fun Config.groupPrefix(index: Int): String = if (declaredGroups == null) "" else "groups[$index]."
+/**
+ * The config path an entry of group [group] is written under: the group's own when it writes the field [written]
+ * picks, the top level's when it inherits it, and the top level's for the implicit group. Config problems name
+ * this, the line to edit; output names a group's source by [sourcePath], as the group runs it.
+ */
+internal fun Config.writtenPrefix(group: Int, written: (DeclaredGroup) -> Any?): String =
+    declaredGroups?.get(group)?.takeIf { written(it) != null }?.let { "groups[$group]." }.orEmpty()
 
-/** The config path of group [group]'s additional source [index]. */
-internal fun Config.sourcePath(group: Int, index: Int): String = groupPrefix(group) + groupSourcePath(index)
+/** Group [group]'s additional source [index] as the group runs it, inherited or not; the implicit group's is
+ *  the top level's. */
+internal fun Config.sourcePath(group: Int, index: Int): String =
+    (if (declaredGroups == null) "" else "groups[$group].") + groupSourcePath(index)
 
 /** The config path of additional source [index] within its group, as a pass that already names the group says it. */
 internal fun groupSourcePath(index: Int): String = "additionalSources[$index]"
@@ -525,14 +549,18 @@ fun GroupConfig.effectiveSelection(): EffectiveSelection = EffectiveSelection(
     trackOrder = (trackOrder ?: deriveTrackOrder(this)).split(',').joinToString(",") { it.trim() },
 )
 
-/** Every track entry of the group with the shared track it names, by config path within the group. */
-private fun GroupConfig.trackRefs(): List<Pair<String, String?>> =
-    listOf("mainSource.videoTrack" to mainSource.videoTrack?.ref) +
-        mainSource.audioTracks.mapIndexed { i, track -> "mainSource.audioTracks[$i]" to track.ref } +
-        mainSource.subtitleTracks.mapIndexed { i, track -> "mainSource.subtitleTracks[$i]" to track.ref } +
-        additionalSources.flatMapIndexed { i, source ->
-            source.tracks.mapIndexed { j, track -> "additionalSources[$i].tracks[$j]" to track.ref }
+/** Every track entry of group [g] with the shared track it names, by the config path it is written under. */
+private fun Config.trackRefs(g: Int): List<Pair<String, String?>> {
+    val group = groups[g]
+    val main = writtenPrefix(g) { it.mainSource } + "mainSource"
+    val sources = writtenPrefix(g) { it.additionalSources } + "additionalSources"
+    return listOf("$main.videoTrack" to group.mainSource.videoTrack?.ref) +
+        group.mainSource.audioTracks.mapIndexed { i, track -> "$main.audioTracks[$i]" to track.ref } +
+        group.mainSource.subtitleTracks.mapIndexed { i, track -> "$main.subtitleTracks[$i]" to track.ref } +
+        group.additionalSources.flatMapIndexed { i, source ->
+            source.tracks.mapIndexed { j, track -> "$sources[$i].tracks[$j]" to track.ref }
         }
+}
 
 private fun overlap(a: IntRange, b: IntRange): IntRange? =
     (maxOf(a.first, b.first)..minOf(a.last, b.last)).takeUnless { it.isEmpty() }
@@ -693,7 +721,6 @@ private fun membershipOf(group: Map<*, *>): Membership {
     return Membership(
         episodes = ranges.mapNotNull { it.second },
         malformedEpisodes = ranges.filter { it.second == null }.map { it.first },
-        files = group.masksAt("files"),
     )
 }
 
@@ -739,6 +766,9 @@ private fun Map<*, *>.useAt(): String? = declaredAt("use")
 
 /** [key]'s value, empty when the key is there with none, null when it is absent. */
 private fun Map<*, *>.declaredAt(key: String): String? = if (containsKey(key)) stringAt(key).orEmpty() else null
+
+/** [read]'s value when [key] is written, whatever its value; null when it is absent. */
+private fun <T> Map<*, *>.ifWritten(key: String, read: () -> T): T? = if (containsKey(key)) read() else null
 
 private fun Map<*, *>?.tracksAt(key: String, shared: Map<String, Map<*, *>>): List<TrackConfig> =
     trackMapsAt(key, shared).map { track ->

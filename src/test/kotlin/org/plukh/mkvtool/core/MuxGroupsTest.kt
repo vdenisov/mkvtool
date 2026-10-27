@@ -7,14 +7,13 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainInOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.types.shouldBeInstanceOf
 import org.plukh.mkvtool.out.Advisory
 import org.plukh.mkvtool.out.Header
 import java.io.File
 
 /**
  * A config declaring groups: one muxing pass per group, each over the files it claims and with its own
- * selection, and what happens to a file no group claims or two groups do.
+ * selection, and what happens to a file no group claims.
  *
  * mkvmerge is injected and the check is off unless a case is about it, so what is pinned is the orchestration.
  */
@@ -25,7 +24,7 @@ class MuxGroupsTest : FunSpec({
 
         val run = mux(dir, twoGroups())
 
-        run.passes.map { it.group } shouldContainExactly listOf(GroupRef(0, "bd"), GroupRef(1, "tv"))
+        run.passes.map { it.group } shouldContainExactly listOf(GroupRef(0, "raw"), GroupRef(1, "dubbed"))
         run.passes.map { it.trackOrder } shouldContainExactly listOf("0:0,0:1", "0:0,0:2")
         run.passes.map { pass -> pass.files.map { it.fileName } } shouldContainExactly listOf(
             listOf("Show - S01E01.mkv", "Show - S01E02.mkv"),
@@ -42,12 +41,12 @@ class MuxGroupsTest : FunSpec({
         mux(season(tempdir(), 4), twoGroups(), renderer = renderer)
 
         renderer.headers() shouldContainExactly listOf(
-            "*** Pass 1 of 2: group 1 (bd), 2 files",
-            "*** Pass 2 of 2: group 2 (tv), 2 files",
-            "*** Pass 1 of 2: group 1 (bd)",
+            "*** Pass 1 of 2: group 1 (raw), 2 files",
+            "*** Pass 2 of 2: group 2 (dubbed), 2 files",
+            "*** Pass 1 of 2: group 1 (raw)",
             "*** Processing Show - S01E01.mkv",
             "*** Processing Show - S01E02.mkv",
-            "*** Pass 2 of 2: group 2 (tv)",
+            "*** Pass 2 of 2: group 2 (dubbed)",
             "*** Processing Show - S01E03.mkv",
             "*** Processing Show - S01E04.mkv",
         )
@@ -71,19 +70,18 @@ class MuxGroupsTest : FunSpec({
         run.aborted.shouldBeNull()
     }
 
-    test("a file two groups claim stops the batch before anything is written; masked out, it does not") {
-        val dir = season(tempdir(), 4)
-        val config = twoGroups(tvMasks = listOf("*E01*"))
-        var ran = false
+    test("a group writing no selection muxes the top level's") {
+        val config = twoGroups().let { config ->
+            config.copy(
+                mainSource = config.groups[0].mainSource,
+                declaredGroups = listOf(config.declaredGroups!![0].copy(mainSource = null), config.declaredGroups[1]),
+            )
+        }
 
-        val run = mux(dir, config, record = { ran = true })
+        val run = mux(season(tempdir(), 4), config)
 
-        run.aborted shouldBe MuxAbort.Unbound(1)
-        run.binding!!.problems.single().shouldBeInstanceOf<DoubleClaim>()
-        ran shouldBe false
-        File(dir, "mkv").exists() shouldBe false
-
-        mux(dir, config, fileMasks = listOf("*E02*")).aborted.shouldBeNull()
+        run.passes[0].files.first().command!! shouldContainInOrder listOf("--audio-tracks", "1")
+        run.passes[1].files.first().command!! shouldContainInOrder listOf("--audio-tracks", "2")
     }
 
     test("a group with no file in the run gets no pass") {
@@ -91,39 +89,37 @@ class MuxGroupsTest : FunSpec({
 
         val run = mux(season(tempdir(), 4), twoGroups(), renderer = renderer, fileMasks = listOf("*E03*"))
 
-        run.passes.map { it.group } shouldContainExactly listOf(GroupRef(1, "tv"))
-        renderer.headers().first() shouldBe "*** Pass 1 of 1: group 2 (tv), 1 file"
+        run.passes.map { it.group } shouldContainExactly listOf(GroupRef(1, "dubbed"))
+        renderer.headers().first() shouldBe "*** Pass 1 of 1: group 2 (dubbed), 1 file"
     }
 
     test("two groups writing one output stop the batch before the later pass probes anything") {
-        val dir = tempdir()
-        listOf("a.mkv", "a.mp4").forEach { File(dir, it).writeText("x") }
+        val dir = season(tempdir(), 2)
         val config = Config(
-            general = GENERAL,
+            general = GENERAL.copy(outputName = Template("same")),
             declaredGroups = listOf(
-                GroupConfig(name = "mkv", membership = Membership(files = listOf("a.mkv"))),
-                GroupConfig(name = "mp4", membership = Membership(files = listOf("a.mp4"))),
+                DeclaredGroup(name = "raw", membership = Membership(episodes = listOf(1..1))),
+                DeclaredGroup(name = "dubbed", membership = Membership(episodes = listOf(2..2))),
             ),
         )
         val probed = mutableListOf<String>()
 
         val run = mux(dir, config, check = true, probe = { probed += it.name; ProbeResult.Failed(it, "fake") })
 
-        run.aborted shouldBe MuxAbort.OutputCollisions(mapOf("mkv/a.mkv" to listOf("a.mkv", "a.mp4")))
-        probed shouldContainExactly listOf("a.mkv")
+        run.aborted shouldBe
+            MuxAbort.OutputCollisions(mapOf("mkv/same.mkv" to listOf("Show - S01E01.mkv", "Show - S01E02.mkv")))
+        probed shouldContainExactly listOf("Show - S01E01.mkv")
         File(dir, "mkv").exists() shouldBe false
     }
 
     test("stage two checks the variables a pass's own templates use, not another group's") {
         val dir = season(tempdir(), 4)
-        val bd = twoGroups().groups[0].let { group ->
-            group.copy(
-                mainSource = group.mainSource.copy(
-                    audioTracks = listOf(TrackConfig(id = 1, language = "ja", title = Template("\${episodeName}"))),
-                ),
-            )
-        }
-        val config = twoGroups().let { it.copy(declaredGroups = listOf(bd, it.groups[1])) }
+        val raw = twoGroups().declaredGroups!![0].copy(
+            mainSource = MainSourceConfig(
+                audioTracks = listOf(TrackConfig(id = 1, language = "ja", title = Template("\${episodeName}"))),
+            ),
+        )
+        val config = twoGroups().let { it.copy(declaredGroups = listOf(raw, it.declaredGroups!![1])) }
         val episodes = EpisodeData(season = "01", byEpisode = mapOf("01" to "One"))
 
         val run = mux(dir, config, episodes = episodes)
@@ -136,14 +132,12 @@ class MuxGroupsTest : FunSpec({
 
     test("only a group whose own templates ask for a codec probes its files for one") {
         val dir = season(tempdir(), 4)
-        val bd = twoGroups().groups[0].let { group ->
-            group.copy(
-                mainSource = group.mainSource.copy(
-                    audioTracks = listOf(TrackConfig(id = 1, language = "ja", title = Template("\${codec}"))),
-                ),
-            )
-        }
-        val config = twoGroups().let { it.copy(declaredGroups = listOf(bd, it.groups[1])) }
+        val raw = twoGroups().declaredGroups!![0].copy(
+            mainSource = MainSourceConfig(
+                audioTracks = listOf(TrackConfig(id = 1, language = "ja", title = Template("\${codec}"))),
+            ),
+        )
+        val config = twoGroups().let { it.copy(declaredGroups = listOf(raw, it.declaredGroups!![1])) }
         val probed = mutableListOf<String>()
 
         mux(dir, config, probe = { probed += it.name; ProbeResult.Failed(it, "fake") })
@@ -166,7 +160,7 @@ class MuxGroupsTest : FunSpec({
         val dir = season(tempdir(), 2)
         val renderer = RecordingRenderer()
 
-        val run = mux(dir, twoGroups(bdEpisodes = 5..6), renderer = renderer)
+        val run = mux(dir, twoGroups(rawEpisodes = 5..6), renderer = renderer)
 
         run.passes.shouldBeEmpty()
         run.files.shouldBeEmpty()
@@ -178,18 +172,18 @@ class MuxGroupsTest : FunSpec({
 
 private val GENERAL = GeneralConfig(destinationDir = "mkv", allowedExtensions = setOf("mkv", "mp4"))
 
-/** `bd` claims [bdEpisodes] and copies audio 1; `tv` claims 3-4 plus [tvMasks] and copies audio 2. */
-private fun twoGroups(bdEpisodes: IntRange = 1..2, tvMasks: List<String> = emptyList()) = Config(
+/** `raw` claims [rawEpisodes] and copies audio 1; `dubbed` claims 3-4 and copies audio 2. */
+private fun twoGroups(rawEpisodes: IntRange = 1..2) = Config(
     general = GENERAL,
     declaredGroups = listOf(
-        GroupConfig(
-            name = "bd",
-            membership = Membership(episodes = listOf(bdEpisodes)),
+        DeclaredGroup(
+            name = "raw",
+            membership = Membership(episodes = listOf(rawEpisodes)),
             mainSource = MainSourceConfig(audioTracks = listOf(TrackConfig(id = 1, language = "ja"))),
         ),
-        GroupConfig(
-            name = "tv",
-            membership = Membership(episodes = listOf(3..4), files = tvMasks),
+        DeclaredGroup(
+            name = "dubbed",
+            membership = Membership(episodes = listOf(3..4)),
             mainSource = MainSourceConfig(audioTracks = listOf(TrackConfig(id = 2, language = "en"))),
         ),
     ),

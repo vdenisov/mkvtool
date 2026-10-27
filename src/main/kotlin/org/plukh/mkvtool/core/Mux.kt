@@ -242,7 +242,7 @@ fun muxConfigProblem(config: Config, configName: String): String? {
     bindingProblems(config, configName).firstOrNull()?.let { return it }
 
     config.groups.forEachIndexed { g, group ->
-        val prefix = config.groupPrefix(g)
+        val prefix = config.writtenPrefix(g) { it.mainSource }
         for ((key, tracks) in listOf(
             "audioTracks" to group.mainSource.audioTracks,
             "subtitleTracks" to group.mainSource.subtitleTracks,
@@ -261,7 +261,8 @@ fun muxConfigProblem(config: Config, configName: String): String? {
             // between its parentheses would be a worse answer than saying so.
             // A source with files: names none on purpose; binding pairs one with each main.
             if (source.file.isNullOrEmpty() && source.files == null) {
-                return "$configName has no file for ${config.sourcePath(g, i)}"
+                return "$configName has no file for ${config.writtenPrefix(g) { it.additionalSources }}" +
+                    groupSourcePath(i)
             }
         }
     }
@@ -508,7 +509,7 @@ class MuxCommandBuilder(
  * and a file no group claims is in none. Every pass's gates run before the output directory is created and
  * before any pass runs, so a fully blocked batch leaves no litter behind.
  *
- * A binding problem (a file two groups claim included), an output collision and `--strict` stop the run, by
+ * A binding problem, an output collision and `--strict` stop the run, by
  * returning [MuxRun.aborted] rather than by throwing. Otherwise nothing here aborts: a file that is not media is
  * named and passed over, a file mkvmerge rejects is reported, the batch carries on, and the caller exits 0.
  *

@@ -345,7 +345,10 @@ fun inspectDirectory(
         buildCheckReport(
             infos = selected.map { infos.getValue(it) },
             externalsOf = { slotsByFile[it.file].orEmpty() },
-            selection = trackSelectionOf(options.config?.mainSource),
+            // A grouped config's top level is only what some groups inherit; findings wait for per-group checks.
+            selection = trackSelectionOf(
+                options.config?.let { if (it.declaredGroups == null) it.mainSource else MainSourceConfig() },
+            ),
             headerLabel = "Consistency check",
         ).also(renderer::render)
     } else {

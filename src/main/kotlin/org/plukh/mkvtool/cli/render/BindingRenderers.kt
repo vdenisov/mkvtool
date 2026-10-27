@@ -5,7 +5,6 @@ import org.plukh.mkvtool.core.BindingReport
 import org.plukh.mkvtool.core.BindingResult
 import org.plukh.mkvtool.core.BindingRule
 import org.plukh.mkvtool.core.BoundFile
-import org.plukh.mkvtool.core.DoubleClaim
 import org.plukh.mkvtool.core.DuplicateEpisode
 import org.plukh.mkvtool.core.GroupRef
 import org.plukh.mkvtool.core.NameTie
@@ -128,10 +127,6 @@ private fun bindingProblemLines(problem: BindingProblem, groups: List<GroupRef>)
         is SharedFile -> listOf(
             "${problem.entry.relPath} is matched by more than one source: " +
                 problem.paths.joinToString(", ") { label(it) },
-        )
-        is DoubleClaim -> listOf(
-            "${problem.main.name} is claimed by more than one group: " +
-                problem.groups.joinToString(", ") { groupLabel(it) },
         )
     }
 }

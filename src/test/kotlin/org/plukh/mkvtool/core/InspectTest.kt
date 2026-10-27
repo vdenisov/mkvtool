@@ -333,6 +333,24 @@ class InspectTest : FunSpec({
             layouts.forEach { it.externalGroups shouldHaveSize 1 }
         }
 
+        test("a grouped config's top level is not the selection its findings are classified against") {
+            val dir = tempdir()
+            listOf("01", "02").forEach { File(dir, "Show - S01E$it - Title.mkv").writeText("x") }
+            val topLevel = MainSourceConfig(audioTracks = listOf(TrackConfig(id = 1)))
+            val plain = Config(mainSource = topLevel)
+            val grouped = plain.copy(declaredGroups = listOf(DeclaredGroup(membership = Membership(listOf(1..2)))))
+            // Audio 1's language differs between the two files, and audio 2 is not copied: blocking when selected.
+            fun probe(file: File) = probedResult(
+                file,
+                track(0, "video"),
+                track(1, "audio", language = if ("E01" in file.name) "eng" else "jpn"),
+                track(2, "audio", language = "rus"),
+            )
+
+            inspectDirectory(dir, options(config = plain), SilentRenderer, ::probe).check!!.blockingCount shouldBe 1
+            inspectDirectory(dir, options(config = grouped), SilentRenderer, ::probe).check!!.blockingCount shouldBe 0
+        }
+
         test("matching runs pre-mask, so a mask does not turn the rest of the season into leftovers") {
             val dir = tempdir()
             listOf("01", "02").forEach { ep ->
@@ -621,7 +639,7 @@ class InspectTest : FunSpec({
                 general = byRegex.general.copy(outputName = Template("")),
                 additionalSources = subs,
             )
-            val grouped = byRegex.copy(declaredGroups = listOf(GroupConfig(name = "all")), additionalSources = subs)
+            val grouped = byRegex.copy(declaredGroups = listOf(DeclaredGroup(name = "all")), additionalSources = subs)
 
             for (config in listOf(emptyName, grouped)) {
                 val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }

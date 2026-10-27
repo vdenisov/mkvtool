@@ -200,16 +200,16 @@ class MuxCommandLineTest : FunSpec({
             )
             val config = Config(
                 general = GeneralConfig(destinationDir = "mkv", mkvmergeExe = EXE),
-                // Neither the top level nor the other group may leak into the second group's pass.
+                // Neither a top level both groups override nor the other group may leak into the second group's pass.
                 mainSource = MainSourceConfig(audioTracks = listOf(track(9, "xx", "Top level"))),
                 declaredGroups = listOf(
-                    GroupConfig(
-                        name = "tv",
+                    DeclaredGroup(
+                        name = "raw",
                         membership = Membership(episodes = listOf(2..2)),
                         mainSource = MainSourceConfig(audioTracks = listOf(track(1, "ja", "Ja"))),
                     ),
-                    GroupConfig(
-                        name = "bd",
+                    DeclaredGroup(
+                        name = "dubbed",
                         membership = Membership(episodes = listOf(1..1)),
                         mainSource = MainSourceConfig(audioTracks = listOf(track(2, "en", "English"))),
                         additionalSources = listOf(subs),

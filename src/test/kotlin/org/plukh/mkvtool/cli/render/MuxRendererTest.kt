@@ -70,13 +70,13 @@ class MuxRendererTest : FunSpec({
         }
 
         test("a declared group's order names the group, by number and by name when it has one") {
-            val (out, _) = renderResult(TrackOrderDerivedRenderer, TrackOrder.Derived("0:0,0:1", GroupRef(0, "bd"))).lf()
+            val (out, _) = renderResult(TrackOrderDerivedRenderer, TrackOrder.Derived("0:0,0:1", GroupRef(0, "raw"))).lf()
             val (_, err) = renderResult(
                 TrackOrderConfiguredRenderer,
                 configured(unknown = listOf("0:999")).copy(group = GroupRef(1, null)),
             )
 
-            out shouldBe "*** trackOrder not configured for group 1 (bd); using derived order: 0:0,0:1\n\n"
+            out shouldBe "*** trackOrder not configured for group 1 (raw); using derived order: 0:0,0:1\n\n"
             err shouldContain "*** Warning: trackOrder of group 2 references track IDs not configured: 0:999"
         }
     }

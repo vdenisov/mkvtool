@@ -454,8 +454,8 @@ and setup errors exit 2 before touching anything: an unusable `--encoding`, a mi
 mkvmerge, a `general.mkvmergeExe` that cannot be run, an unusable config. `fetch-episodes` exits 2 on API-key
 problems and 3 on network or API failures. `mux` keeps continue-on-error and **always exits 0** — a
 partially successful batch mux is a normal outcome — except under `--strict`, which exits 2 when a
-discrepancy affects a selected track, and on a binding problem (a file two groups claim included) or two
-files resolving to one output, in one pass or across two, which exit 2 before anything is written.
+discrepancy affects a selected track, and on a binding problem or two files resolving to one output, in one
+pass or across two, which exit 2 before anything is written.
 `inspect` writes nothing and **exits 0 whatever it finds**; besides having no mkvmerge to run, `--strict` is its only non-zero path, a `--config` path that does not exist very
 much included (it warns and carries on, because a stale config must never stand
 between the user and the track table, least of all when reading that table is how they would fix it).
@@ -547,15 +547,34 @@ Omitting `audioTracks` or `subtitleTracks` (or setting them to `[]`) copies no t
 | `additionalSources[]` | Extra files to mux in; the track id is always 0, and a config setting one is refused |
 | `trackOrder` | Optional `"sourceIndex:trackId"` CSV; see above |
 
-**Groups and shared tracks.** `groups` is a list of muxing passes, each with an optional `name`, a
-membership (`episodes` ranges, `files` masks, or both) and its own `mainSource`, `additionalSources` and
-`trackOrder`; `general` stays top-level. A config without `groups` is one implicit group made of its top
-level, which is what `Config.groups` returns, so a v1 config needs nothing new. `sharedTracks` is a list of
-named track entries; a track entry with `use: <name>` is that definition with the entry's own keys laid over
-it, on the raw mapping at parse time, so an override keeps the absent-versus-declared distinction
-(`default: false` beats `true`, an empty `title:` clears one). A file claimed by two groups is a binding
-problem, one claimed by none a skip; `partitionByGroup` answers that over a file list with the episode lookup
-injected, and binding is where it runs (see Binding below). `effectiveSelection` is a group's selection in
+**What a group is.** A group is the set of episodes one mkvmerge command shape can mux: the same command line
+for each, file names aside. A season that needs two shapes cannot be muxed from one config without them, and
+that is their only reason to exist. Typical cases, not exhaustive:
+
+- a dub joins at E11: one more external file from there on;
+- the dub studio changes at E13: the same files, different track titles;
+- the release reorders or adds main tracks mid-season: different track ids;
+- half the season came from another release: its tracks, or its companions' naming, differ.
+
+Never a group: a second copy of an episode (BD and TV). One episode has one main file and one output, whatever
+the groups.
+
+**Groups and shared tracks.** `groups` is a list of muxing passes, each with an optional `name`, the
+`episodes` ranges it claims, and a `mainSource`, `additionalSources` and `trackOrder`; `general` stays
+top-level. There is no membership by file mask: a mask gives a file no episode, so it could only claim what a
+range claims as well, and it let one episode reach two groups. Two groups' ranges overlapping is a config
+problem, so no episode can be claimed twice; one claimed by none, an episode-less main included, is a skip.
+A group takes each of the three selection fields it does not write from the top level, **whole** — lists and
+keys are never merged — and a key it writes is its own whatever the value, so `additionalSources: []` muxes
+no companions and an empty `trackOrder:` is the group's derived order. `DeclaredGroup` is the group as
+written, a null field one it does not write; `Config.groups` is what every reader iterates, the declared
+groups resolved against the top level, or one implicit group made of the top level, so a v1 config needs
+nothing new. A top-level field every group overrides is a config problem, since nothing reads it.
+`sharedTracks` is a list of named track entries; a track entry with `use: <name>` is that definition with the
+entry's own keys laid over it, on the raw mapping at parse time, so an override keeps the absent-versus-declared
+distinction (`default: false` beats `true`, an empty `title:` clears one). `partitionByGroup` splits a file
+list by group with the episode lookup injected, and binding is where it runs (see Binding below).
+`effectiveSelection` is a group's selection in
 the form two groups are compared in — `use:` names dropped, the track order resolved — so equal means the
 same output. `auto: <hash>` is reserved for a future config generator to mark the entries it wrote; every
 reader ignores it like any unknown key. `mux` runs one pass per group (see `mux` below); `inspect` says it
@@ -564,7 +583,8 @@ does not report per group and carries on, uncounted, and `--identify` does not l
 Output names a declared group `group N (name)` — counted from 1 in config order, the name only when there is
 one — through `groupLabel`, and a group's source `group N (name): additionalSources[i]` through
 `sourceLabel`. Config problems keep the config path (`groups[0].mainSource…`), since they point at a line to
-edit; the implicit group is never named, which is what keeps a v1 config's output unchanged.
+edit: an inherited field's problem names the top-level path, once, however many groups inherit it
+(`writtenPrefix`). The implicit group is never named, which is what keeps a v1 config's output unchanged.
 
 **Matchers, the episode map and `outputName`.** They say how
 each file gets its episode and what the output is called, which is what lets a config face raw release
@@ -740,7 +760,7 @@ un-numbered files with no metadata has no season and no problem.
 
 **Nothing is soft**: every failure is a typed `BindingProblem`, and any one of them fails the batch — two
 mains on one episode, a `sequence` count mismatch, a file that pairs with no main, a name tie, two files of
-one source on one main, one file in two sources, a main two groups claim. Since binding runs on every run,
+one source on one main, one file in two sources. Since binding runs on every run,
 that includes a directory holding two seasons or metadata naming another season, with no matcher set at all. An episode the
 metadata lacks is not binding's concern; stage-two substitution drops that file, as it always has. A
 source's candidates are what its masks match against the relative path, the mains aside and with no
@@ -757,12 +777,11 @@ main up among every main, as above, so a file named after another group's `X 2.m
 group's `X.mkv`, and then keeps only the pairings with its own members: a file whose main another group
 claims, or none does, is simply not that source's, which is what lets two groups share one mask. A file no
 main can be found for is still unpaired, and a tie still a tie. A group's source may not pin `sequence`,
-since numbering 1..N cannot know which of the group's episodes the first file is. A main two groups claim is
-a `DoubleClaim` problem only within the run, like a duplicate episode, since a masked-out file is muxed by no
-group. A main no group claims is no problem: `BindingReport` lists it, from the partition narrowed to the
-run, as skipped — on stdout like the drops — unless the batch is refused, which skips nothing (and a refused
-`sequence` leaves every main unread, so every range-claimed one would be listed). `inspect` binds a grouped
-config without its groups for now, so it shows neither a double claim nor an unclaimed main.
+since numbering 1..N cannot know which of the group's episodes the first file is. A main no group claims is
+no problem: `BindingReport` lists it, from the partition narrowed to the run, as skipped — on stdout like the
+drops — unless the batch is refused, which skips nothing (and a refused `sequence` leaves every main unread,
+so every main would be listed). `inspect` binds a grouped config without its groups for now, so it shows no
+unclaimed main.
 
 ### Language guessing
 

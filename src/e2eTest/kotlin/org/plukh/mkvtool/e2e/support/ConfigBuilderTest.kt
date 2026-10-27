@@ -135,12 +135,12 @@ class ConfigBuilderTest : FunSpec({
         load(cfg(mkvmergeExe = fakeExe, generalTitle = "\${showName}")).general.title?.text shouldBe "\${showName}"
     }
 
-    test("groupedCfg writes general, then the groups as given, with no top-level selection beside them") {
+    test("groupedCfg writes general, then the body as given, with no top-level selection of its own") {
         val config = load(
             groupedCfg(
                 """
                 groups:
-                  - name: "bd"
+                  - name: "raw"
                     episodes: "1-2"
                 """,
                 mkvmergeExe = fakeExe,
@@ -148,8 +148,8 @@ class ConfigBuilderTest : FunSpec({
         )
 
         config.general.mkvmergeExe shouldBe fakeExe
-        config.groups.map { it.name } shouldBe listOf("bd")
-        // A top-level mainSource beside groups is a config problem, so the builder must not write one.
+        config.groups.map { it.name } shouldBe listOf("raw")
+        // A group writing no selection takes the top level's, so only the body may set one.
         config.mainSource shouldBe MainSourceConfig()
     }
 

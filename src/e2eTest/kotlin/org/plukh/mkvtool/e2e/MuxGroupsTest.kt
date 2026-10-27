@@ -7,18 +7,21 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.plukh.mkvtool.e2e.support.Run
+import org.plukh.mkvtool.e2e.support.TrackType
+import org.plukh.mkvtool.e2e.support.extractTrack
 import org.plukh.mkvtool.e2e.support.groupedCfg
 import org.plukh.mkvtool.e2e.support.mkvtool
 import org.plukh.mkvtool.e2e.support.needsMkvmerge
 import org.plukh.mkvtool.e2e.support.outputNames
 import org.plukh.mkvtool.e2e.support.probe
 import org.plukh.mkvtool.e2e.support.stageInput
+import org.plukh.mkvtool.e2e.support.testMkv
 import org.plukh.mkvtool.e2e.support.writeConfig
 import java.io.File
 
 /**
  * `mux` over a config declaring groups: one pass per group, each muxing its own episodes with its own
- * selection, and what happens to an episode no group claims or two groups do.
+ * selection or the top level's, and what happens to an episode no group claims.
  */
 class MuxGroupsTest : FunSpec({
 
@@ -31,11 +34,11 @@ class MuxGroupsTest : FunSpec({
 
         withClue(run.output) {
             run.exitCode shouldBe 0
-            run.output shouldContain "*** trackOrder not configured for group 1 (bd); using derived order: 0:0,0:1\n"
-            run.output shouldContain "*** Pass 1 of 2: group 1 (bd), 2 files\n"
-            run.output shouldContain "*** Pass 2 of 2: group 2 (tv), 2 files\n"
-            run.output shouldContain "*** Pass 1 of 2: group 1 (bd)\n"
-            run.output shouldContain "*** Pass 2 of 2: group 2 (tv)\n"
+            run.output shouldContain "*** trackOrder not configured for group 1 (raw); using derived order: 0:0,0:1\n"
+            run.output shouldContain "*** Pass 1 of 2: group 1 (raw), 2 files\n"
+            run.output shouldContain "*** Pass 2 of 2: group 2 (dubbed), 2 files\n"
+            run.output shouldContain "*** Pass 1 of 2: group 1 (raw)\n"
+            run.output shouldContain "*** Pass 2 of 2: group 2 (dubbed)\n"
             commandOf(run, "Show - S01E01.mkv") shouldContain "--audio-tracks 1 "
             commandOf(run, "Show - S01E03.mkv") shouldContain "--audio-tracks 2 "
             File(workDir, "mkv").exists() shouldBe false
@@ -51,7 +54,7 @@ class MuxGroupsTest : FunSpec({
         withClue(run.output) {
             run.exitCode shouldBe 0
             outputNames(workDir) shouldBe (1..4).map { "Show - S01E0$it.mkv" }
-            // The bd group's audio is a shared track, so the use: reached the command line through the parser.
+            // The raw group's audio is a shared track, so the use: reached the command line through the parser.
             audioOf(File(workDir, "mkv/Show - S01E01.mkv")) shouldBe listOf("jpn" to "Japanese")
             audioOf(File(workDir, "mkv/Show - S01E03.mkv")) shouldBe listOf("eng" to "English")
         }
@@ -72,28 +75,27 @@ class MuxGroupsTest : FunSpec({
         }
     }
 
-    test("an episode two groups claim stops the batch before anything is written")
+    test("a dub joining mid-season: a group writing only its episodes muxes the top level's selection")
         .config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = season(tempdir(), 4)
-        // tv also claims E01 by a mask, which bd claims by its range.
-        val doubleClaim = TWO_GROUPS.replace("episodes: \"3-4\"", "episodes: \"3-4\"\n        files: \"*E01*\"")
-        writeConfig(workDir, groupedCfg(doubleClaim))
+        // The dub exists for the dubbed group's episodes only; the raw group must not miss it.
+        (3..4).forEach { extractTrack(testMkv, File(workDir, "Show - S01E0$it[Studio].mka"), TrackType.AUDIO, 2) }
+        writeConfig(workDir, groupedCfg(DUB_JOINS))
 
         val run = mux(workDir)
 
         withClue(run.output) {
-            run.exitCode shouldBe 2
-            run.output shouldContain
-                "Show - S01E01.mkv is claimed by more than one group: group 1 (bd), group 2 (tv)"
-            run.output shouldContain "*** Nothing was muxed. Fix the file names or the config."
-            File(workDir, "mkv").exists() shouldBe false
+            run.exitCode shouldBe 0
+            outputNames(workDir) shouldBe (1..4).map { "Show - S01E0$it.mkv" }
+            audioOf(File(workDir, "mkv/Show - S01E01.mkv")) shouldBe listOf("jpn" to "Japanese")
+            audioOf(File(workDir, "mkv/Show - S01E03.mkv")) shouldBe listOf("jpn" to "Japanese", "rus" to "Studio Dub")
         }
     }
 })
 
 /**
- * Two groups over test.mkv's tracks: `bd` (episodes 1-2) copies the Japanese audio, through a shared track, and
- * `tv` (episodes 3-4) the English.
+ * Two groups over test.mkv's tracks: `raw` (episodes 1-2) copies the Japanese audio, through a shared track, and
+ * `dubbed` (episodes 3-4) the English.
  */
 private val TWO_GROUPS = """
     sharedTracks:
@@ -103,14 +105,14 @@ private val TWO_GROUPS = """
         title: "Japanese"
         default: true
     groups:
-      - name: "bd"
+      - name: "raw"
         episodes: "1-2"
         mainSource:
           videoTrack:
             language: "ja"
           audioTracks:
             - use: "jpn"
-      - name: "tv"
+      - name: "dubbed"
         episodes: "3-4"
         mainSource:
           videoTrack:
@@ -120,6 +122,31 @@ private val TWO_GROUPS = """
               language: "en"
               title: "English"
               default: true
+"""
+
+/**
+ * The common case for groups: one selection at the top level, which `raw` (episodes 1-2) takes whole, and a
+ * Studio dub from episode 3 on, which `dubbed` adds by writing its own additionalSources.
+ */
+private val DUB_JOINS = """
+    mainSource:
+      videoTrack:
+        language: "ja"
+      audioTracks:
+        - id: 1
+          language: "ja"
+          title: "Japanese"
+          default: true
+    groups:
+      - name: "raw"
+        episodes: "1-2"
+      - name: "dubbed"
+        episodes: "3-4"
+        additionalSources:
+          - file: "${'$'}{fileName}[Studio].mka"
+            tracks:
+              - language: "ru"
+                title: "Studio Dub"
 """
 
 /** [workDir] holding [count] episodes named by `SxxEyy`. */
