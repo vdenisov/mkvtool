@@ -10,8 +10,8 @@ import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 import org.plukh.mkvtool.core.AdditionalSource
 import org.plukh.mkvtool.core.Config
+import org.plukh.mkvtool.core.DeclaredGroup
 import org.plukh.mkvtool.core.GeneralConfig
-import org.plukh.mkvtool.core.GroupConfig
 import org.plukh.mkvtool.core.MainSourceConfig
 import org.plukh.mkvtool.core.MatcherConfig
 import org.plukh.mkvtool.core.Membership
@@ -165,8 +165,8 @@ class MuxCommandTest : FunSpec({
             val grouped = Config(
                 general = GeneralConfig(destinationDir = "mkv"),
                 declaredGroups = listOf(
-                    GroupConfig(name = "bd", membership = Membership(episodes = listOf(1..6))),
-                    GroupConfig(name = "tv", membership = Membership(episodes = listOf(7..12))),
+                    DeclaredGroup(name = "raw", membership = Membership(episodes = listOf(1..6))),
+                    DeclaredGroup(name = "dubbed", membership = Membership(episodes = listOf(7..12))),
                 ),
             )
 
@@ -177,8 +177,8 @@ class MuxCommandTest : FunSpec({
             val grouped = Config(
                 general = GeneralConfig(destinationDir = "mkv"),
                 declaredGroups = listOf(
-                    GroupConfig(
-                        name = "bd",
+                    DeclaredGroup(
+                        name = "raw",
                         membership = Membership(episodes = listOf(1..6)),
                         mainSource = MainSourceConfig(audioTracks = listOf(TrackConfig())),
                     ),
@@ -187,6 +187,16 @@ class MuxCommandTest : FunSpec({
 
             muxConfigProblem(grouped, "config.yaml") shouldBe
                 "config.yaml has no id for groups[0].mainSource.audioTracks[0]"
+        }
+
+        test("an inherited problem is refused under the top-level path it is written at") {
+            val grouped = Config(
+                general = GeneralConfig(destinationDir = "mkv"),
+                mainSource = MainSourceConfig(audioTracks = listOf(TrackConfig())),
+                declaredGroups = listOf(DeclaredGroup(name = "raw", membership = Membership(episodes = listOf(1..6)))),
+            )
+
+            muxConfigProblem(grouped, "config.yaml") shouldBe "config.yaml has no id for mainSource.audioTracks[0]"
         }
 
         test("binding keys and an outputName are muxed with, not refused") {

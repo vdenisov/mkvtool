@@ -458,8 +458,8 @@ class BindingTest : FunSpec({
         test("each source is named by its config path, and a file: source binds nothing") {
             val config = Config(
                 declaredGroups = listOf(
-                    GroupConfig(additionalSources = listOf(files("a/*"))),
-                    GroupConfig(additionalSources = listOf(AdditionalSource(file = "x.mka"), files("b/*"))),
+                    DeclaredGroup(additionalSources = listOf(files("a/*"))),
+                    DeclaredGroup(additionalSources = listOf(AdditionalSource(file = "x.mka"), files("b/*"))),
                 ),
             )
 
@@ -514,7 +514,7 @@ class BindingTest : FunSpec({
             val mains: List<String>,
             val files: List<String>,
             /** Null for a config without groups. */
-            val groups: List<GroupConfig>?,
+            val groups: List<DeclaredGroup>?,
             val expected: List<String>,
             val general: MatcherConfig = MatcherConfig(),
             val episodes: EpisodeData? = null,
@@ -577,35 +577,32 @@ class BindingTest : FunSpec({
                 ),
             ),
             Case(
-                "a main claimed by a range and a mask is in neither group, and so is its file",
-                mains = e.take(3).map { "$it.mkv" },
-                files = e.take(3).map { "Rus/$it.mka" },
-                groups = listOf(
-                    group(1..2, sources = listOf(rus)),
-                    group(3..3, masks = listOf("*E02*"), sources = listOf(rus)),
-                ),
+                "a main that reads no episode is no declared group's",
+                mains = listOf("${e[0]}.mkv", "NCOP.mkv"),
+                files = emptyList(),
+                groups = listOf(group(1..1)),
                 expected = listOf(
                     "season 01",
                     "main ${e[0]}.mkv E01 SXXEYY",
-                    "main ${e[1]}.mkv E02 SXXEYY",
-                    "main ${e[2]}.mkv E03 SXXEYY",
-                    "groups[0].additionalSources[0]: Rus/${e[0]}.mka -> ${e[0]}.mkv EXACT",
-                    "groups[1].additionalSources[0]: Rus/${e[2]}.mka -> ${e[2]}.mkv EXACT",
+                    "main NCOP.mkv -",
                     "group 0: ${e[0]}.mkv",
-                    "group 1: ${e[2]}.mkv",
-                    "double-claimed ${e[1]}.mkv by 0, 1",
-                    "problem: ${e[1]}.mkv claimed by groups 0, 1",
+                    "unclaimed NCOP.mkv",
                 ),
             ),
             Case(
                 "a file named after another group's main does not fall to a shorter name in this one",
-                mains = listOf("X.mkv", "X 2.mkv"),
-                files = listOf("X 2.srt"),
-                groups = listOf(
-                    group(masks = listOf("X.mkv"), sources = listOf(files("*.srt"))),
-                    group(masks = listOf("X 2.mkv")),
+                mains = listOf("A 1.mkv", "A 1 x 2.mkv"),
+                files = listOf("A 1 x 2.srt"),
+                groups = listOf(group(1..1, sources = listOf(files("*.srt"))), group(2..2)),
+                general = MatcherConfig(episodeRegex = """ (\d+)$"""),
+                episodes = EpisodeData(season = "01"),
+                expected = listOf(
+                    "season 01",
+                    "main A 1.mkv E01 REGEX",
+                    "main A 1 x 2.mkv E02 REGEX",
+                    "group 0: A 1.mkv",
+                    "group 1: A 1 x 2.mkv",
                 ),
-                expected = listOf("main X.mkv -", "main X 2.mkv -", "group 0: X.mkv", "group 1: X 2.mkv"),
             ),
             Case(
                 "a number reaching another group's main is that group's; one reaching no main is unpaired",
@@ -660,30 +657,23 @@ class BindingTest : FunSpec({
 
         test("narrowing to a run narrows the partition") {
             val mains = e.take(3).map { File(ROOT, "$it.mkv") }
-            val config = Config(declaredGroups = listOf(group(1..2), group(masks = listOf("*E02*"))))
+            val config = Config(declaredGroups = listOf(group(1..1), group(2..2)))
 
-            val narrowed = bindFiles(ROOT, config, mains, mains.map { entry(it.name) }).narrowedTo(setOf(mains[1]))
+            val narrowed = bindFiles(ROOT, config, mains, mains.map { entry(it.name) })
+                .narrowedTo(setOf(mains[1], mains[2]))
 
             narrowed.partition shouldBe GroupPartition(
-                members = listOf(emptyList(), emptyList()),
-                doubleClaimed = mapOf(mains[1] to listOf(0, 1)),
-                unclaimed = emptyList(),
+                members = listOf(emptyList(), listOf(mains[1])),
+                unclaimed = listOf(mains[2]),
             )
         }
 
-        test("a double claim is a problem only within the run, and names the groups") {
-            val mains = e.take(3).map { File(ROOT, "$it.mkv") }
-            val bd = GroupConfig(name = "bd", membership = Membership(episodes = listOf(1..2)))
-            val config = Config(declaredGroups = listOf(bd, group(masks = listOf("*E02*"))))
-            val tree = mains.map { entry(it.name) }
+        test("a grouped config names its groups by index, and by name where they have one") {
+            val raw = DeclaredGroup(name = "raw", membership = Membership(episodes = listOf(1..2)))
+            val config = Config(declaredGroups = listOf(raw, group(3..3)))
 
-            val whole = bindFiles(ROOT, config, mains, tree)
-            val masked = bindFiles(ROOT, config, mains, tree, run = listOf(mains[0]))
-
-            whole.groups shouldBe listOf(GroupRef(0, "bd"), GroupRef(1, null))
-            whole.problems shouldBe listOf(DoubleClaim(mains[1], whole.groups))
-            // Masked out, it is muxed by no group, so nothing is claimed twice.
-            masked.problems.shouldBeEmpty()
+            bindFiles(ROOT, config, emptyList(), emptyList()).groups shouldBe
+                listOf(GroupRef(0, "raw"), GroupRef(1, null))
         }
 
         test("a config without groups has no group to name") {
@@ -697,11 +687,8 @@ private val ROOT = File("media")
 private fun files(vararg masks: String, pin: String? = null, regex: String? = null) =
     AdditionalSource(files = masks.toList(), matching = MatcherConfig(matcher = pin, episodeRegex = regex))
 
-private fun group(
-    vararg episodes: IntRange,
-    masks: List<String> = emptyList(),
-    sources: List<AdditionalSource> = emptyList(),
-) = GroupConfig(membership = Membership(episodes = episodes.toList(), files = masks), additionalSources = sources)
+private fun group(vararg episodes: IntRange, sources: List<AdditionalSource> = emptyList()) =
+    DeclaredGroup(membership = Membership(episodes = episodes.toList()), additionalSources = sources)
 
 private fun episodeMap(vararg entries: Pair<String, String>) =
     EpisodeMap(entries.map { EpisodeMapEntry(it.first, it.second) })
@@ -732,13 +719,10 @@ private fun digest(result: BindingResult): List<String> =
         } +
         result.problems.map { "problem: ${problemLine(it)}" }
 
-/** [digest], plus a line per group's members, per double-claimed main and per unclaimed one. */
+/** [digest], plus a line per group's members and per unclaimed main. */
 private fun groupDigest(result: BindingResult): List<String> =
     digest(result) +
         result.partition.members.mapIndexed { g, members -> "group $g: ${names(members)}" } +
-        result.partition.doubleClaimed.map { (main, groups) ->
-            "double-claimed ${main.name} by ${groups.joinToString()}"
-        } +
         result.partition.unclaimed.map { "unclaimed ${it.name}" }
 
 private fun problemLine(problem: BindingProblem): String = when (problem) {
@@ -754,7 +738,6 @@ private fun problemLine(problem: BindingProblem): String = when (problem) {
     is NameTie -> "${problem.path}: ${problem.entry.relPath} named after ${names(problem.mains)}"
     is SharedMain -> "${problem.path}: ${problem.main.name} shared by ${problem.entries.joinToString { it.relPath }}"
     is SharedFile -> "${problem.entry.relPath} in ${problem.paths.joinToString()}"
-    is DoubleClaim -> "${problem.main.name} claimed by groups ${problem.groups.joinToString { "${it.index}" }}"
 }
 
 private fun names(files: List<File>) = files.map { it.name }.sorted().joinToString()

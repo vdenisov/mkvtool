@@ -5,8 +5,8 @@
 # loaded automatically, because silently applying someone else's track selections to your files
 # produces confidently wrong output.
 #
-# As written, the config is one muxing pass over every episode. A season whose episodes do not all
-# have the same tracks needs a pass per group of them — see `groups` at the end of this file.
+# As written, the config is one muxing pass over every episode. A season that cannot be muxed by one
+# mkvmerge command line needs a pass per group of episodes — see `groups` at the end of this file.
 # `mkvtool inspect` prints those groups, and `mkvtool inspect --identify` prints the track IDs the
 # selections below refer to. Run both before editing this.
 #
@@ -169,14 +169,22 @@ mainSource:
 # behind after editing the lists above would otherwise have no visible effect at all.
 # trackOrder: "0:0,0:2,0:1,0:4"
 
-# Groups: several muxing passes in one config, for a season whose episodes do not all carry the same
-# tracks. Each group claims main files by episode range or by file mask, and has its own mainSource,
-# additionalSources and trackOrder in place of the top-level ones above, which must then go; general
-# stays where it is. A file no group claims is skipped with a warning; one two groups claim stops the
-# batch. `mux` runs one pass per group, in this order, and names each "group N (name)".
+# Groups: a group is the set of episodes one mkvmerge command line can mux, with only the file names
+# changing. A season that needs two such command lines needs two groups — a dub joining at episode 11,
+# a dub studio changing at 13, the release reordering its tracks mid-season, half the season from
+# another release — and that is their only reason to exist. A group is never a second copy of an
+# episode (BD and TV): one episode has one main file and one output.
 #
-# sharedTracks are track entries named once and used by name: an entry with `use:` is that
-# definition with the entry's own keys laid over it, so an override is just the key that differs.
+# Each group claims an episode range, and takes mainSource, additionalSources and trackOrder from the
+# top level above unless it writes its own. A field it writes replaces the top level's whole, never
+# merged, and an empty one is still its own: `additionalSources: []` muxes no external file. A group
+# writing its own tracks usually wants its own trackOrder too, or an empty one for the derived order.
+# general stays where it is. A file no group claims is skipped with a warning; two groups' ranges overlapping
+# is an error. `mux` runs one pass per group, in this order, and names each "group N (name)".
+#
+# sharedTracks are track entries named once and used by name, for a track several groups write for
+# themselves: an entry with `use:` is that definition with the entry's own keys laid over it, so an
+# override is just the key that differs.
 # sharedTracks:
 #   - name: "jpn"
 #     id: 1
@@ -184,20 +192,21 @@ mainSource:
 #     title: "${languageNative} ${codec}"
 #
 # groups:
-#   - name: "bd"
-#     episodes: [1-6, 9]
-#     mainSource:
-#       videoTrack:
-#         language: "ja"
-#       audioTracks:
-#         - use: "jpn"
-#           default: true
+#   - name: "raw"
+#     episodes: [1-10]
 #
-#   - name: "tv"
-#     # Masks claim files no episode is read from, or that ranges cannot single out.
-#     files: ["*[TV]*"]
+#   - name: "dubbed"
+#     episodes: [11-24]
+#     # Its own mainSource, so the dub, not the Japanese track, is the default here.
 #     mainSource:
 #       videoTrack:
 #         language: "ja"
 #       audioTracks:
 #         - use: "jpn"
+#           default: false
+#     additionalSources:
+#       - file: "${fileName}[Studio].mka"
+#         tracks:
+#           - language: "ru"
+#             title: "Studio Dub"
+#             default: true

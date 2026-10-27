@@ -230,6 +230,21 @@ class ConfigTest : FunSpec({
                 "season2.yaml sets an id on additionalSources[0].tracks[0]"
         }
 
+        test("a top-level source two groups inherit is named once, at its top-level path") {
+            val config = Config(
+                additionalSources = listOf(
+                    AdditionalSource(file = "a.mka", tracks = listOf(SourceTrackConfig(idDeclared = true))),
+                ),
+                declaredGroups = listOf(
+                    DeclaredGroup(membership = Membership(listOf(1..1))),
+                    DeclaredGroup(membership = Membership(listOf(2..2))),
+                ),
+            )
+
+            additionalSourceIdProblems(config, "config.yaml").single() shouldStartWith
+                "config.yaml sets an id on additionalSources[0].tracks[0]"
+        }
+
         test("a config with no ids on its additional sources has no problem") {
             additionalSourceIdProblems(
                 Config(additionalSources = listOf(AdditionalSource(file = "a.mka", tracks = listOf(SourceTrackConfig())))),
@@ -338,31 +353,102 @@ class ConfigTest : FunSpec({
             val config = yaml(
                 """
                 groups:
-                  - name: bd
+                  - name: raw
                     episodes: [1-10]
                     mainSource:
                       audioTracks:
                         - id: 1
                     trackOrder: "0:0,0:1"
-                  - files: ["*OVA*"]
+                  - episodes: [11-12]
                     additionalSources:
                       - file: b.mka
                 """,
             )
 
-            config.groups shouldBe config.declaredGroups
+            config.declaredGroups shouldBe listOf(
+                DeclaredGroup(
+                    name = "raw",
+                    membership = Membership(episodes = listOf(1..10)),
+                    mainSource = MainSourceConfig(audioTracks = listOf(TrackConfig(id = 1))),
+                    trackOrder = "0:0,0:1",
+                ),
+                DeclaredGroup(
+                    membership = Membership(episodes = listOf(11..12)),
+                    additionalSources = listOf(AdditionalSource(file = "b.mka")),
+                ),
+            )
             config.groups shouldBe listOf(
                 GroupConfig(
-                    name = "bd",
+                    name = "raw",
                     membership = Membership(episodes = listOf(1..10)),
                     mainSource = MainSourceConfig(audioTracks = listOf(TrackConfig(id = 1))),
                     trackOrder = "0:0,0:1",
                 ),
                 GroupConfig(
-                    membership = Membership(files = listOf("*OVA*")),
+                    membership = Membership(episodes = listOf(11..12)),
                     additionalSources = listOf(AdditionalSource(file = "b.mka")),
                 ),
             )
+        }
+
+        context("a group takes each selection field it does not write from the top level, whole") {
+            data class InheritCase(
+                val label: String,
+                val body: String,
+                val mainSource: MainSourceConfig,
+                val additionalSources: List<AdditionalSource>,
+                val trackOrder: String?,
+            )
+
+            val topMain = MainSourceConfig(audioTracks = listOf(TrackConfig(id = 1)))
+            val topSources = listOf(AdditionalSource(file = "a.mka"))
+            val topOrder = "0:0,0:1,1:0"
+            withData(
+                nameFn = { it.label },
+                InheritCase("a group writing none takes all three", "", topMain, topSources, topOrder),
+                InheritCase(
+                    "its own mainSource",
+                    "mainSource:\n  audioTracks:\n    - id: 2\n",
+                    MainSourceConfig(audioTracks = listOf(TrackConfig(id = 2))),
+                    topSources,
+                    topOrder,
+                ),
+                InheritCase(
+                    "its own additionalSources, replacing the list rather than adding to it",
+                    "additionalSources:\n  - file: b.mka\n",
+                    topMain,
+                    listOf(AdditionalSource(file = "b.mka")),
+                    topOrder,
+                ),
+                InheritCase(
+                    "additionalSources: [] muxes none",
+                    "additionalSources: []\n",
+                    topMain,
+                    emptyList(),
+                    topOrder,
+                ),
+                InheritCase("its own trackOrder", "trackOrder: \"0:0,0:1\"\n", topMain, topSources, "0:0,0:1"),
+                InheritCase("an empty trackOrder is its derived one", "trackOrder:\n", topMain, topSources, null),
+                InheritCase(
+                    "a mainSource with no value is its own, empty",
+                    "mainSource:\n",
+                    MainSourceConfig(),
+                    topSources,
+                    topOrder,
+                ),
+            ) { (_, body, mainSource, additionalSources, trackOrder) ->
+                val config = yaml(
+                    "mainSource:\n  audioTracks:\n    - id: 1\nadditionalSources:\n  - file: a.mka\n" +
+                        "trackOrder: \"$topOrder\"\ngroups:\n  - episodes: 1\n" + body.prependIndent("    "),
+                )
+
+                config.groups.single() shouldBe GroupConfig(
+                    membership = Membership(episodes = listOf(1..1)),
+                    mainSource = mainSource,
+                    additionalSources = additionalSources,
+                    trackOrder = trackOrder,
+                )
+            }
         }
 
         test("a groups key holding nothing still declares groups") {
@@ -392,10 +478,6 @@ class ConfigTest : FunSpec({
                 membership.episodes shouldBe ranges
                 membership.malformedEpisodes shouldBe malformed
             }
-        }
-
-        test("a scalar files is one mask") {
-            yaml("groups:\n  - files: \"*OVA*\"\n").groups.single().membership!!.files shouldBe listOf("*OVA*")
         }
     }
 
@@ -518,7 +600,7 @@ class ConfigTest : FunSpec({
                     auto: a1b2
                     id: 1
                 groups:
-                  - name: bd
+                  - name: raw
                     auto: a1b2
                     episodes: [1-2]
                     mainSource:
@@ -546,7 +628,7 @@ class ConfigTest : FunSpec({
     context("groupProblems") {
         data class ProblemCase(val label: String, val yaml: String, val problems: List<String>)
 
-        val grouped = "groups:\n  - name: bd\n    episodes: [1-6]\n  - name: tv\n    episodes: [7-12]\n"
+        val grouped = "groups:\n  - name: raw\n    episodes: [1-6]\n  - name: dubbed\n    episodes: [7-12]\n"
         withData(
             nameFn = { it.label },
             ProblemCase("a config without groups", "mainSource: {audioTracks: [{id: 1}]}\n", emptyList()),
@@ -557,17 +639,28 @@ class ConfigTest : FunSpec({
                 listOf("config.yaml declares groups but lists none"),
             ),
             ProblemCase(
-                "a top level beside groups",
+                "a top level some group inherits",
                 grouped + "mainSource: {audioTracks: [{id: 1}]}\ntrackOrder: \"0:0\"\n",
+                emptyList(),
+            ),
+            ProblemCase(
+                "a top level every group writes for itself",
+                "mainSource: {audioTracks: [{id: 1}]}\ntrackOrder: \"0:0\"\nadditionalSources: [{file: a.mka}]\n" +
+                    "groups:\n  - episodes: 1\n    mainSource: {}\n    trackOrder: \"0:0\"\n" +
+                    "  - episodes: 2\n    mainSource: {}\n",
                 listOf(
-                    "config.yaml sets mainSource, trackOrder at the top level beside groups, where nothing " +
-                        "reads it; each group carries its own",
+                    "config.yaml sets mainSource at the top level, where nothing reads it; every group sets its own",
                 ),
             ),
             ProblemCase(
                 "a group claiming nothing",
-                "groups:\n  - name: bd\n",
-                listOf("config.yaml has no episodes or files for groups[0] (bd)"),
+                "groups:\n  - name: raw\n",
+                listOf("config.yaml has no episodes for groups[0] (raw)"),
+            ),
+            ProblemCase(
+                "a group claiming by file mask claims nothing",
+                "groups:\n  - name: raw\n    files: [\"*E01*\"]\n",
+                listOf("config.yaml has no episodes for groups[0] (raw)"),
             ),
             ProblemCase(
                 "a malformed episode token",
@@ -576,23 +669,18 @@ class ConfigTest : FunSpec({
             ),
             ProblemCase(
                 "two groups with one name",
-                "groups:\n  - name: bd\n    episodes: 1\n  - name: bd\n    episodes: 2\n",
-                listOf("config.yaml has two groups named 'bd'"),
+                "groups:\n  - name: raw\n    episodes: 1\n  - name: raw\n    episodes: 2\n",
+                listOf("config.yaml has two groups named 'raw'"),
             ),
             ProblemCase(
                 "overlapping ranges, named",
-                "groups:\n  - name: bd\n    episodes: [1-6, 9]\n  - name: tv\n    episodes: [5-9]\n",
-                listOf("config.yaml claims episodes 5-6, 9 in both groups[0] (bd) and groups[1] (tv)"),
+                "groups:\n  - name: raw\n    episodes: [1-6, 9]\n  - name: dubbed\n    episodes: [5-9]\n",
+                listOf("config.yaml claims episodes 5-6, 9 in both groups[0] (raw) and groups[1] (dubbed)"),
             ),
             ProblemCase(
                 "overlaps that nest or touch, merged",
-                "groups:\n  - name: bd\n    episodes: [4-5, 4-6, 7]\n  - name: tv\n    episodes: [1-10]\n",
-                listOf("config.yaml claims episodes 4-7 in both groups[0] (bd) and groups[1] (tv)"),
-            ),
-            ProblemCase(
-                "only blank file masks claim nothing",
-                "groups:\n  - name: bd\n    files: [\"\", \" \"]\n",
-                listOf("config.yaml has no episodes or files for groups[0] (bd)"),
+                "groups:\n  - name: raw\n    episodes: [4-5, 4-6, 7]\n  - name: dubbed\n    episodes: [1-10]\n",
+                listOf("config.yaml claims episodes 4-7 in both groups[0] (raw) and groups[1] (dubbed)"),
             ),
             ProblemCase(
                 "an empty shared-track name is no name",
@@ -638,6 +726,11 @@ class ConfigTest : FunSpec({
                     "          - use: rus\n",
                 listOf("config.yaml uses an unknown shared track 'rus' at groups[0].additionalSources[0].tracks[0]"),
             ),
+            ProblemCase(
+                "an unknown use two groups inherit, once at the top-level path",
+                "mainSource:\n  audioTracks:\n    - use: jpn\ngroups:\n  - episodes: 1\n  - episodes: 2\n",
+                listOf("config.yaml uses an unknown shared track 'jpn' at mainSource.audioTracks[0]"),
+            ),
         ) { (_, text, problems) ->
             groupProblems(yaml(text), "config.yaml") shouldBe problems
         }
@@ -652,40 +745,24 @@ class ConfigTest : FunSpec({
         fun files(vararg names: String) = names.map { File(dir, it) }
         val episodes = mapOf("E01.mkv" to 1, "E02.mkv" to 2, "E03.mkv" to 3, "OVA.mkv" to null)
         val episodeOf = { file: File -> episodes[file.name] }
-        fun group(name: String, vararg ranges: IntRange, masks: List<String> = emptyList()) =
-            GroupConfig(name = name, membership = Membership(episodes = ranges.toList(), files = masks))
+        fun group(name: String, vararg ranges: IntRange) =
+            GroupConfig(name = name, membership = Membership(episodes = ranges.toList()))
 
-        test("a two-group season splits by range, and a mask claims what has no episode") {
+        test("a two-group season splits by range") {
             val partition = partitionByGroup(
-                listOf(group("bd", 1..2), group("tv", 3..3, masks = listOf("OVA*"))),
-                files("E01.mkv", "E02.mkv", "E03.mkv", "OVA.mkv"),
-                dir,
-                episodeOf,
-            )
-
-            partition.members shouldBe listOf(files("E01.mkv", "E02.mkv"), files("E03.mkv", "OVA.mkv"))
-            partition.doubleClaimed shouldBe emptyMap()
-            partition.unclaimed.shouldBeEmpty()
-        }
-
-        test("a file claimed by two groups is in neither, by range or by mask alike") {
-            val partition = partitionByGroup(
-                listOf(group("bd", 1..2), group("tv", 2..3, masks = listOf("E01*"))),
+                listOf(group("raw", 1..2), group("dubbed", 3..3)),
                 files("E01.mkv", "E02.mkv", "E03.mkv"),
-                dir,
                 episodeOf,
             )
 
-            partition.members shouldBe listOf(emptyList(), files("E03.mkv"))
-            partition.doubleClaimed shouldBe
-                mapOf(File(dir, "E01.mkv") to listOf(0, 1), File(dir, "E02.mkv") to listOf(0, 1))
+            partition.members shouldBe listOf(files("E01.mkv", "E02.mkv"), files("E03.mkv"))
+            partition.unclaimed.shouldBeEmpty()
         }
 
         test("a file no group claims is unclaimed, and one with no episode cannot match a range") {
             val partition = partitionByGroup(
-                listOf(group("bd", 1..2)),
+                listOf(group("raw", 1..2)),
                 files("E01.mkv", "E03.mkv", "OVA.mkv"),
-                dir,
                 episodeOf,
             )
 
@@ -693,10 +770,21 @@ class ConfigTest : FunSpec({
             partition.unclaimed shouldBe files("E03.mkv", "OVA.mkv")
         }
 
+        test("an episode overlapping ranges claim is in no group, rather than in the first") {
+            val partition = partitionByGroup(
+                listOf(group("raw", 1..2), group("dubbed", 2..3)),
+                files("E01.mkv", "E02.mkv", "E03.mkv"),
+                episodeOf,
+            )
+
+            partition.members shouldBe listOf(files("E01.mkv"), files("E03.mkv"))
+            partition.unclaimed shouldBe files("E02.mkv")
+        }
+
         test("the implicit group claims every file") {
             val all = files("E01.mkv", "OVA.mkv")
 
-            partitionByGroup(yaml("mainSource: {}\n").groups, all, dir, episodeOf).members shouldBe listOf(all)
+            partitionByGroup(yaml("mainSource: {}\n").groups, all, episodeOf).members shouldBe listOf(all)
         }
     }
 

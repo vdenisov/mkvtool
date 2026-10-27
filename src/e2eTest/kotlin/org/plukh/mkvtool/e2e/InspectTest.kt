@@ -485,7 +485,7 @@ class InspectTest : FunSpec({
         val workDir = tempdir()
         stageInput(workDir, "a.mkv")
         File(workDir, "config.yaml").writeText(
-            "groups:\n  - name: \"bd\"\n    episodes: [1-6]\n  - name: \"tv\"\n    episodes: [7-12]\n",
+            "groups:\n  - name: \"raw\"\n    episodes: [1-6]\n  - name: \"dubbed\"\n    episodes: [7-12]\n",
             StandardCharsets.UTF_8,
         )
 

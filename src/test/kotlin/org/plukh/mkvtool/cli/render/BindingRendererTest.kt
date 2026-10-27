@@ -8,7 +8,6 @@ import org.plukh.mkvtool.core.BindingReport
 import org.plukh.mkvtool.core.BindingResult
 import org.plukh.mkvtool.core.BindingRule
 import org.plukh.mkvtool.core.BoundFile
-import org.plukh.mkvtool.core.DoubleClaim
 import org.plukh.mkvtool.core.DuplicateEpisode
 import org.plukh.mkvtool.core.GroupPartition
 import org.plukh.mkvtool.core.GroupRef
@@ -145,8 +144,6 @@ class BindingRendererTest : FunSpec({
                 "additionalSources[0]: more than one file pairs with A.mkv: a.srt, b.srt",
             SharedFile(entry("Subs/x.srt"), listOf("additionalSources[0]", "additionalSources[1]")) to
                 "Subs/x.srt is matched by more than one source: additionalSources[0], additionalSources[1]",
-            DoubleClaim(File("E05.mkv"), listOf(GroupRef(0, "bd"), GroupRef(1, null))) to
-                "E05.mkv is claimed by more than one group: group 1 (bd), group 2",
         ) { (problem, lines) ->
             val (out, err) = render(binding(problems = listOf(problem)))
 
@@ -163,7 +160,7 @@ class BindingRendererTest : FunSpec({
     }
 
     context("groups") {
-        val groups = listOf(GroupRef(0, "bd"), GroupRef(1, null))
+        val groups = listOf(GroupRef(0, "raw"), GroupRef(1, null))
 
         test("a group's source is named by its group, in the table and in a problem") {
             val main = File("Show - S01E01.mkv")
@@ -186,7 +183,7 @@ class BindingRendererTest : FunSpec({
                     "       group 2: additionalSources[0]  a.srt  (exact)\n" +
                     "\n" to
                     "*** Error: the files cannot be bound to episodes (1 problem):\n" +
-                    "      group 1 (bd): additionalSources[0]: b.srt pairs with no main file\n"
+                    "      group 1 (raw): additionalSources[0]: b.srt pairs with no main file\n"
             )
         }
 
@@ -194,7 +191,7 @@ class BindingRendererTest : FunSpec({
             val claimed = File("Show - S01E01.mkv")
             val unclaimed = listOf(File("Show - S01E05.mkv"), File("Show - S01E06.mkv"))
             val binding = binding(groups = groups)
-                .copy(partition = GroupPartition(listOf(listOf(claimed), emptyList()), emptyMap(), unclaimed))
+                .copy(partition = GroupPartition(listOf(listOf(claimed), emptyList()), unclaimed))
 
             render(binding) shouldBe (
                 "*** 2 files will be skipped: not claimed by any group\n" +
@@ -207,7 +204,7 @@ class BindingRendererTest : FunSpec({
         test("a refused batch skips nothing, so it lists no unclaimed file; a carried-on one still does") {
             val unclaimed = listOf(File("Show - S01E05.mkv"))
             val binding = binding(groups = groups, problems = listOf(SeasonUnknown))
-                .copy(partition = GroupPartition(listOf(emptyList(), emptyList()), emptyMap(), unclaimed))
+                .copy(partition = GroupPartition(listOf(emptyList(), emptyList()), unclaimed))
 
             render(binding).first shouldBe ""
             render(binding, fatal = false).first shouldBe

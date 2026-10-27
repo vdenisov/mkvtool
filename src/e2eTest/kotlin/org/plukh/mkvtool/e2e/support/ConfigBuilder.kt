@@ -106,9 +106,9 @@ fun cfg(
 }
 
 /**
- * Render a `config.yaml` declaring groups: the `general` block [cfg] writes, then [body] as written — the
- * `sharedTracks` and `groups` sections, in the YAML a reader would write, so the real parser reads exactly that.
- * [body] is trimmed of its common indent.
+ * Render a `config.yaml` declaring groups: the `general` block [cfg] writes, then [body] as written — any
+ * top-level selection the groups take, `sharedTracks` and `groups`, in the YAML a reader would write, so the real
+ * parser reads exactly that. [body] is trimmed of its common indent.
  */
 fun groupedCfg(
     body: String,

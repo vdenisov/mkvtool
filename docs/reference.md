@@ -633,67 +633,89 @@ exactly what `mux` would refuse the batch for.
 
 ### Groups
 
-A season whose episodes do not all carry the same tracks — a BD batch and a TV
-batch, a dub that starts mid-season — needs more than one selection. `groups`
-keeps them in one config: each group claims some of the main files and has its
-own `mainSource`, `additionalSources` and `trackOrder`, and `mux` runs one pass
-per group. A config without `groups` is one group made of its top level, so a
-simple season needs none of this.
+A group is the set of episodes one mkvmerge command line can mux, with only the
+file names changing from one episode to the next. A season that needs two such
+command lines needs two groups; that is the only reason they exist. Typical
+cases, not an exhaustive list:
+
+- a dub joins at episode 11: one more external file from there on;
+- the dub studio changes at episode 13: the same files, different track titles;
+- the release reorders or adds tracks mid-season: different track IDs;
+- half the season came from another release: its tracks, or its companions'
+  naming, differ.
+
+A group is never a second copy of an episode, such as a BD and a TV version:
+one episode has one main file and one output, whatever the groups.
+
+A config without `groups` is one group made of its top level, so a simple season
+needs none of this. With `groups`, each group claims a range of episodes and
+takes `mainSource`, `additionalSources` and `trackOrder` from the top level
+unless it writes its own:
 
 ```yaml
 general:
   destinationDir: "mkv"                # general stays at the top level
+  allowedExtensions: ["mkv"]           # so the .mka dubs are not main files themselves
+mainSource:                            # what every group takes unless it writes its own
+  videoTrack:
+    language: "ja"
+  audioTracks:
+    - id: 1
+      language: "ja"
+      title: "${languageNative} ${codec}"
+      default: true
+groups:
+  - name: "raw"                        # optional; output calls it "group 1 (raw)"
+    episodes: [1-10]                   # episode ranges, as binding reads them
+  - name: "dubbed"
+    episodes: [11-24]
+    additionalSources:                 # this group's own, in place of the top level's
+      - file: "${fileName}[Studio].mka"
+        tracks:
+          - language: "ru"
+            title: "Studio Dub"
+```
+
+**A group takes a field it does not write whole**, never merged: a group that
+writes `additionalSources` has exactly the sources it lists. A key a group writes
+is its own whatever its value, so `additionalSources: []` muxes no external file
+(a dub that stops mid-season) and an empty `trackOrder:` is the order derived
+from the group's own tracks. A group that writes its own tracks usually wants its
+own `trackOrder` too, or an empty one: an inherited order names the top level's
+tracks, and `mux` warns about every entry that no longer matches. A top-level
+field every group writes for itself is an error, since nothing would read it.
+
+**A group claims a main file** when the file's episode falls in one of its
+`episodes` ranges (`7`, `1-6`, or a list of them). The episode is the one binding
+decided, after `episodeMap`, which is why the matcher keys live in `general`
+rather than in a group — not the episode ranges the check report prints, which
+are for display and need no `SxxEyy`. A release without one needs an
+`episodeRegex`. Two groups' ranges overlapping is a config error.
+
+**`sharedTracks`** are named track entries, for a track several groups write
+for themselves. A track entry with `use: <name>` is that definition with the
+entry's own keys laid over it, so an override is just the key you want
+different: `default: false` beats the definition's `true`, and an empty `title:`
+clears its title. A shared track cannot `use` another.
+
+```yaml
 sharedTracks:
-  - name: "jpn"                        # a track entry groups refer to by name
+  - name: "jpn"
     id: 1
     language: "ja"
-    title: "${languageNative} ${codec}"
 groups:
-  - name: "bd"                         # optional; output calls it "group 1 (bd)"
-    episodes: [1-6, 9]                 # episode ranges, as binding reads them
+  - episodes: [1-12]
     mainSource:
-      videoTrack:
-        language: "ja"
       audioTracks:
         - use: "jpn"
           default: true                # the entry's own keys win over jpn's
-  - name: "tv"
-    files: ["*[TV]*"]                  # masks, for names no episode is read from
-    mainSource:
-      videoTrack:
-        language: "ja"
-      audioTracks:
-        - use: "jpn"
-        - id: 2
-          language: "ru"
-          title: "Dub"
-    additionalSources:
-      - files: ["Rus subs/*.ass"]
-        tracks:
-          - language: "ru"
-            title: "Subs"
 ```
 
-**A group claims a main file** when the file's episode falls in one of its
-`episodes` ranges (`7`, `1-6`, or a list of them) or its name matches one of
-its `files` masks; a group needs at least one of the two. The episode is the
-one binding decided, after `episodeMap`, which is why the matcher keys live in
-`general` rather than in a group — not the episode ranges the check report
-prints, which are for display and need no `SxxEyy`. A release without one needs
-an `episodeRegex`, or masks. Two groups' ranges overlapping is a config
-error.
-
-**`sharedTracks`** are named track entries. A track entry with `use: <name>`
-is that definition with the entry's own keys laid over it, so an override is
-just the key you want different: `default: false` beats the definition's `true`,
-and an empty `title:` clears its title. A shared track cannot `use` another.
-With groups, `mainSource`, `additionalSources` and `trackOrder` belong to the
-groups; setting them at the top level as well is an error. A group's source can
-pair its files by name or by an `episodeRegex`, but not by `sequence`.
+A group's source can pair its files by name or by an `episodeRegex`, but not by
+`sequence`.
 
 **A file no group claims is skipped** with a warning, and the rest of the
-season is muxed. **A file two groups claim stops the batch** with exit 2 before
-anything is written, as a binding problem.
+season is muxed — a main whose name gives no episode (`NCOP.mkv`) included.
 
 **One pass per group, in config order.** Each pass has its own drops and its
 own pre-flight check against the group's selection, and every pass is checked
@@ -702,12 +724,12 @@ first. Two passes resolving to one output stop the batch as two files of one
 pass would. Output names a group by number, and by name when it has one:
 
 ```
-*** Pass 1 of 2: group 1 (bd), 6 files
-*** Pre-flight check: 6 files
+*** Pass 1 of 2: group 1 (raw), 10 files
+*** Pre-flight check: 10 files
 ...
-*** Pass 2 of 2: group 2 (tv), 7 files
+*** Pass 2 of 2: group 2 (dubbed), 14 files
 ...
-*** Pass 1 of 2: group 1 (bd)
+*** Pass 1 of 2: group 1 (raw)
 *** Processing Show - S01E01.mkv
 ```
 

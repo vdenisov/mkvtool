@@ -265,7 +265,8 @@ fun collectTemplateFields(config: Config?, onlyGroup: Int? = null): List<Templat
 
     config.groups.forEachIndexed { g, group ->
         if (onlyGroup != null && g != onlyGroup) return@forEachIndexed
-        val prefix = config.groupPrefix(g)
+        val prefix = config.writtenPrefix(g) { it.mainSource }
+        val sources = config.writtenPrefix(g) { it.additionalSources }
         group.mainSource.videoTrack?.let { video ->
             video.title?.let {
                 val path = withRef("${prefix}mainSource.videoTrack.title", video.ref)
@@ -287,18 +288,19 @@ fun collectTemplateFields(config: Config?, onlyGroup: Int? = null): List<Templat
         group.additionalSources.forEachIndexed { i, source ->
             // Truthiness here, unlike the titles above: a source with no file is nothing to resolve.
             if (!source.file.isNullOrEmpty()) {
-                fields += TemplateField("${prefix}additionalSources[$i].file", source.file, FILE_VARS)
+                fields += TemplateField("${sources}additionalSources[$i].file", source.file, FILE_VARS)
             }
             source.tracks.forEachIndexed { j, track ->
                 track.title?.let {
-                    val path = withRef("${prefix}additionalSources[$i].tracks[$j].title", track.ref)
+                    val path = withRef("${sources}additionalSources[$i].tracks[$j].title", track.ref)
                     fields += TemplateField(path, it.text, all, track.language)
                 }
             }
         }
     }
 
-    return fields
+    // Groups inheriting one top-level entry each list it, under the same path.
+    return fields.distinct()
 }
 
 /** A token in a template that is not a variable, or not one legal in that field. */

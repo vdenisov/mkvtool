@@ -56,6 +56,18 @@ class TrackOrderTest : FunSpec({
             order.missing.shouldBeEmpty()
         }
 
+        test("an inherited order is checked against the inheriting group's own tracks") {
+            val grouped = config(audio = listOf(1), sources = 1, trackOrder = "0:0,0:1,1:0").copy(
+                declaredGroups = listOf(
+                    DeclaredGroup(membership = Membership(episodes = listOf(1..1))),
+                    DeclaredGroup(membership = Membership(episodes = listOf(2..2)), additionalSources = emptyList()),
+                ),
+            )
+
+            (resolveTrackOrder(grouped.groups[0]) as TrackOrder.Configured).unknown.shouldBeEmpty()
+            (resolveTrackOrder(grouped.groups[1]) as TrackOrder.Configured).unknown shouldContainExactly listOf("1:0")
+        }
+
         test("an id nothing configures is unknown — mkvmerge would ignore it in silence") {
             resolve("0:0,0:2,0:999", audio = listOf(2)).unknown shouldContainExactly listOf("0:999")
         }

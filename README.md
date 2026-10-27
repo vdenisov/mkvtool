@@ -541,7 +541,7 @@ A season whose episodes do not all carry the same tracks keeps one selection
 per group of episodes in the same config, and `mux` runs a pass for each — see
 [Groups](docs/reference.md#groups). A group claims episodes by the number
 binding reads (`SxxEyy`, or an `episodeRegex`), not by the ranges `inspect`
-prints, which are for display; a file mask claims what no number can.
+prints, which are for display.
 
 ## Substitution variables
 
