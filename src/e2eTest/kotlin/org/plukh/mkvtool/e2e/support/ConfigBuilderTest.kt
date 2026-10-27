@@ -7,6 +7,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.plukh.mkvtool.core.Config
+import org.plukh.mkvtool.core.MainSourceConfig
 import org.plukh.mkvtool.core.MappingLoad
 import org.plukh.mkvtool.core.loadConfig
 import java.io.File
@@ -132,6 +133,24 @@ class ConfigBuilderTest : FunSpec({
     test("the general title is omitted unless asked for, so the file-name default stays under test") {
         cfg(mkvmergeExe = fakeExe) shouldNotContain "title:"
         load(cfg(mkvmergeExe = fakeExe, generalTitle = "\${showName}")).general.title?.text shouldBe "\${showName}"
+    }
+
+    test("groupedCfg writes general, then the groups as given, with no top-level selection beside them") {
+        val config = load(
+            groupedCfg(
+                """
+                groups:
+                  - name: "bd"
+                    episodes: "1-2"
+                """,
+                mkvmergeExe = fakeExe,
+            ),
+        )
+
+        config.general.mkvmergeExe shouldBe fakeExe
+        config.groups.map { it.name } shouldBe listOf("bd")
+        // A top-level mainSource beside groups is a config problem, so the builder must not write one.
+        config.mainSource shouldBe MainSourceConfig()
     }
 
     // The two presets a whole batch of cases shares. Thin, but a preset naming the wrong track id is a

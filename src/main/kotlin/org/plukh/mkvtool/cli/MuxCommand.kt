@@ -7,6 +7,7 @@ import org.plukh.mkvtool.core.MkvToolNotFoundException
 import org.plukh.mkvtool.core.MuxOptions
 import org.plukh.mkvtool.core.SubstitutionEngine
 import org.plukh.mkvtool.core.collectTemplateFields
+import org.plukh.mkvtool.core.groupRef
 import org.plukh.mkvtool.core.loadConfig
 import org.plukh.mkvtool.core.loadEpisodeMetadata
 import org.plukh.mkvtool.core.muxConfigProblem
@@ -140,15 +141,14 @@ class MuxCommand : Callable<Int> {
 
         // Stage one: a name that is not a variable, or not one legal in this field, is a config error —
         // fatal, before anything is probed or muxed, in every mode. A typo'd ${epsiodeName} would
-        // otherwise be stamped verbatim into the track names of an entire season. What comes back is which
-        // variables the config actually uses, so everything derived from them stays gated.
+        // otherwise be stamped verbatim into the track names of an entire season. Each pass works out for itself
+        // what its group's templates use.
         val validation = validateTemplates(collectTemplateFields(config))
         reportTemplateProblems(validation, configName, renderer, fatal = true)
         if (validation.problems > 0) return 2
 
-        // Once rather than per file, so its warnings print once; the one group is the implicit one, for now.
-        val trackOrder = resolveTrackOrder(config.groups.single())
-        renderer.render(trackOrder)
+        // Once per group rather than per file, so its warnings print once; the passes resolve the same order.
+        config.groups.indices.forEach { renderer.render(resolveTrackOrder(config.groups[it], config.groupRef(it))) }
 
         val loaded = episodes as? EpisodeMetadata.Loaded
         val run = muxDirectory(
@@ -157,10 +157,7 @@ class MuxCommand : Callable<Int> {
                 config = config,
                 mkvmergeExe = mkvmergeExe,
                 uiLanguage = uiLanguage,
-                trackOrder = trackOrder.order,
                 substitution = SubstitutionEngine(loaded?.data),
-                usesCodec = validation.usesCodec,
-                usedFileVars = validation.usedFileVars,
                 episodeSource = loaded?.name,
                 dryRun = dryRun,
                 check = !noCheck,

@@ -409,11 +409,32 @@ fun partitionByGroup(
     )
 }
 
+/** A declared group as output names it: its [index] in the config, and its [name] when it has one. */
+data class GroupRef(val index: Int, val name: String?)
+
+/** Group [index] of a config declaring groups, or null for the implicit group, which output never names. */
+fun Config.groupRef(index: Int): GroupRef? = declaredGroups?.let { GroupRef(index, it[index].name) }
+
+/** `group N (name)`: counted from 1, the name only when there is one. Config paths stay in config problems. */
+fun groupLabel(group: GroupRef): String = "group ${group.index + 1}" + group.name?.let { " ($it)" }.orEmpty()
+
 /** The config path group [index]'s entries start with: none for the implicit group, which is the top level. */
 internal fun Config.groupPrefix(index: Int): String = if (declaredGroups == null) "" else "groups[$index]."
 
 /** The config path of group [group]'s additional source [index]. */
-internal fun Config.sourcePath(group: Int, index: Int): String = "${groupPrefix(group)}additionalSources[$index]"
+internal fun Config.sourcePath(group: Int, index: Int): String = groupPrefix(group) + groupSourcePath(index)
+
+/** The config path of additional source [index] within its group, as a pass that already names the group says it. */
+internal fun groupSourcePath(index: Int): String = "additionalSources[$index]"
+
+private val GROUP_PREFIX = Regex("""^groups\[(\d+)]\.""")
+
+/** A [sourcePath] as output names it: its `groups[i].` prefix read back as the label of the group in [groups]. */
+fun sourceLabel(path: String, groups: List<GroupRef>): String {
+    val match = GROUP_PREFIX.find(path) ?: return path
+    val group = groups.getOrNull(match.groupValues[1].toInt()) ?: return path
+    return "${groupLabel(group)}: ${path.substring(match.range.last + 1)}"
+}
 
 /** [path], naming the shared track its entry is built on when there is one. */
 internal fun withRef(path: String, ref: String?): String = if (ref.isNullOrEmpty()) path else "$path (use: $ref)"

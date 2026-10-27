@@ -5,9 +5,10 @@
 # loaded automatically, because silently applying someone else's track selections to your files
 # produces confidently wrong output.
 #
-# One config describes one muxing pass. A season whose episodes do not all have the same tracks
-# needs one config per group — `mkvtool inspect` prints those groups, and `mkvtool inspect
-# --identify` prints the track IDs the selections below refer to. Run both before editing this.
+# As written, the config is one muxing pass over every episode. A season whose episodes do not all
+# have the same tracks needs a pass per group of them — see `groups` at the end of this file.
+# `mkvtool inspect` prints those groups, and `mkvtool inspect --identify` prints the track IDs the
+# selections below refer to. Run both before editing this.
 #
 # Every key the loader reads appears below. The ones with a useful default are set; the rest are
 # commented out, with the behaviour you get by leaving them that way. **Track IDs are placeholders**
@@ -56,8 +57,8 @@ general:
   #
   # episodeRegex is *the* rule when set: group 1 of its first match in the base name is the number.
   # seasonRegex reads the season the same way, and with it both must match; without it the season
-  # comes from episodes.yaml. A main file the rule cannot read (a creditless opening, say) is skipped
-  # with a warning.
+  # comes from episodes.yaml. A main file the rule cannot read (a creditless opening, say) is still
+  # muxed, under its own name; only a title or outputName that needs its episode drops it.
   # episodeRegex: " - (\\d+) "
   # seasonRegex: "S(\\d+)"
   #
@@ -167,3 +168,36 @@ mainSource:
 # than refused — mkvmerge silently ignores an entry matching no muxed track, so a stale id left
 # behind after editing the lists above would otherwise have no visible effect at all.
 # trackOrder: "0:0,0:2,0:1,0:4"
+
+# Groups: several muxing passes in one config, for a season whose episodes do not all carry the same
+# tracks. Each group claims main files by episode range or by file mask, and has its own mainSource,
+# additionalSources and trackOrder in place of the top-level ones above, which must then go; general
+# stays where it is. A file no group claims is skipped with a warning; one two groups claim stops the
+# batch. `mux` runs one pass per group, in this order, and names each "group N (name)".
+#
+# sharedTracks are track entries named once and used by name: an entry with `use:` is that
+# definition with the entry's own keys laid over it, so an override is just the key that differs.
+# sharedTracks:
+#   - name: "jpn"
+#     id: 1
+#     language: "ja"
+#     title: "${languageNative} ${codec}"
+#
+# groups:
+#   - name: "bd"
+#     episodes: [1-6, 9]
+#     mainSource:
+#       videoTrack:
+#         language: "ja"
+#       audioTracks:
+#         - use: "jpn"
+#           default: true
+#
+#   - name: "tv"
+#     # Masks claim files no episode is read from, or that ranges cannot single out.
+#     files: ["*[TV]*"]
+#     mainSource:
+#       videoTrack:
+#         language: "ja"
+#       audioTracks:
+#         - use: "jpn"

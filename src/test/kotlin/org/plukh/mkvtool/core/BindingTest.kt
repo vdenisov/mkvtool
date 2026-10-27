@@ -2,6 +2,7 @@ package org.plukh.mkvtool.core
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withData
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
@@ -545,6 +546,21 @@ class BindingTest : FunSpec({
                 ),
             ),
             Case(
+                "a stray file under a mask two groups share is one problem, not one per group",
+                mains = e.take(2).map { "$it.mkv" },
+                files = listOf("Rus/${e[0]}.mka", "Rus/Show S01E09.mka"),
+                groups = listOf(group(1..1, sources = listOf(rus)), group(2..2, sources = listOf(rus))),
+                expected = listOf(
+                    "season 01",
+                    "main ${e[0]}.mkv E01 SXXEYY",
+                    "main ${e[1]}.mkv E02 SXXEYY",
+                    "groups[0].additionalSources[0]: Rus/${e[0]}.mka -> ${e[0]}.mkv EXACT",
+                    "problem: groups[0].additionalSources[0]: Rus/Show S01E09.mka unpaired",
+                    "group 0: ${e[0]}.mkv",
+                    "group 1: ${e[1]}.mkv",
+                ),
+            ),
+            Case(
                 "an unclaimed main is no group's, and its file is no source's, without a problem",
                 mains = e.take(3).map { "$it.mkv" },
                 files = e.take(3).map { "Rus/$it.mka" },
@@ -578,6 +594,7 @@ class BindingTest : FunSpec({
                     "group 0: ${e[0]}.mkv",
                     "group 1: ${e[2]}.mkv",
                     "double-claimed ${e[1]}.mkv by 0, 1",
+                    "problem: ${e[1]}.mkv claimed by groups 0, 1",
                 ),
             ),
             Case(
@@ -653,6 +670,25 @@ class BindingTest : FunSpec({
                 unclaimed = emptyList(),
             )
         }
+
+        test("a double claim is a problem only within the run, and names the groups") {
+            val mains = e.take(3).map { File(ROOT, "$it.mkv") }
+            val bd = GroupConfig(name = "bd", membership = Membership(episodes = listOf(1..2)))
+            val config = Config(declaredGroups = listOf(bd, group(masks = listOf("*E02*"))))
+            val tree = mains.map { entry(it.name) }
+
+            val whole = bindFiles(ROOT, config, mains, tree)
+            val masked = bindFiles(ROOT, config, mains, tree, run = listOf(mains[0]))
+
+            whole.groups shouldBe listOf(GroupRef(0, "bd"), GroupRef(1, null))
+            whole.problems shouldBe listOf(DoubleClaim(mains[1], whole.groups))
+            // Masked out, it is muxed by no group, so nothing is claimed twice.
+            masked.problems.shouldBeEmpty()
+        }
+
+        test("a config without groups has no group to name") {
+            bindFiles(ROOT, Config(), listOf(File(ROOT, "${e[0]}.mkv")), emptyList()).groups.shouldBeEmpty()
+        }
     }
 })
 
@@ -718,6 +754,7 @@ private fun problemLine(problem: BindingProblem): String = when (problem) {
     is NameTie -> "${problem.path}: ${problem.entry.relPath} named after ${names(problem.mains)}"
     is SharedMain -> "${problem.path}: ${problem.main.name} shared by ${problem.entries.joinToString { it.relPath }}"
     is SharedFile -> "${problem.entry.relPath} in ${problem.paths.joinToString()}"
+    is DoubleClaim -> "${problem.main.name} claimed by groups ${problem.groups.joinToString { "${it.index}" }}"
 }
 
 private fun names(files: List<File>) = files.map { it.name }.sorted().joinToString()

@@ -30,7 +30,7 @@ class MuxBindingTest : FunSpec({
         )
         val episodes = EpisodeData(season = "01", byEpisode = mapOf("01" to "One: Start", "02" to "Two?"))
 
-        val run = mux(dir, config, episodes, usedFileVars = setOf("seasonNum", "episodeNum", "episodeName"))
+        val run = mux(dir, config, episodes)
 
         run.files.map { it.outputPath } shouldContainExactly
             listOf("mkv/Show - S01E01 - One Start.mkv", "mkv/Show - S01E02 - Two.mkv")
@@ -61,9 +61,7 @@ class MuxBindingTest : FunSpec({
         plain.files.map { it.fileName } shouldContainExactly listOf("NCOP.mkv", "Show E01.mkv")
         plain.substitutionDrops shouldBe null
 
-        val named = mux(
-            dir, config(matching = byRegex, outputName = "E\${episodeNum}"), season, usedFileVars = setOf("episodeNum"),
-        )
+        val named = mux(dir, config(matching = byRegex, outputName = "E\${episodeNum}"), season)
         named.files.map { it.fileName } shouldContainExactly listOf("Show E01.mkv")
         named.substitutionDrops!!.fileNames shouldContainExactly listOf("NCOP.mkv")
     }
@@ -190,7 +188,6 @@ private fun mux(
     dir: File,
     config: Config,
     episodes: EpisodeData? = null,
-    usedFileVars: Set<String> = emptySet(),
     renderer: RecordingRenderer = RecordingRenderer(),
     record: (List<String>) -> Unit = {},
     fileMasks: List<String> = emptyList(),
@@ -200,9 +197,7 @@ private fun mux(
         config = config,
         mkvmergeExe = "mkvmerge",
         uiLanguage = null,
-        trackOrder = deriveTrackOrder(config.groups.single()),
         substitution = SubstitutionEngine(episodes),
-        usedFileVars = usedFileVars,
         check = false,
         fileMasks = fileMasks,
     ),
@@ -210,3 +205,7 @@ private fun mux(
     probe = { error("no probe expected: the check is off and no template asks for a codec") },
     runCommand = { command, _ -> record(command); 0 },
 )
+
+/** The one pass's reports: every config here has a single group. */
+private val MuxRun.substitutionDrops: SubstitutionDrops? get() = passes.single().substitutionDrops
+private val MuxRun.companionDrops: CompanionDrops? get() = passes.single().companionDrops

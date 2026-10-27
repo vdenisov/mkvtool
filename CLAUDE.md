@@ -454,9 +454,9 @@ and setup errors exit 2 before touching anything: an unusable `--encoding`, a mi
 mkvmerge, a `general.mkvmergeExe` that cannot be run, an unusable config. `fetch-episodes` exits 2 on API-key
 problems and 3 on network or API failures. `mux` keeps continue-on-error and **always exits 0** — a
 partially successful batch mux is a normal outcome — except under `--strict`, which exits 2 when a
-discrepancy affects a selected track, and on a binding problem or two files resolving to one output, which
-exit 2 before anything is written. `inspect` writes nothing and **exits 0 whatever it finds**; besides
-having no mkvmerge to run, `--strict` is its only non-zero path, a `--config` path that does not exist very
+discrepancy affects a selected track, and on a binding problem (a file two groups claim included) or two
+files resolving to one output, in one pass or across two, which exit 2 before anything is written.
+`inspect` writes nothing and **exits 0 whatever it finds**; besides having no mkvmerge to run, `--strict` is its only non-zero path, a `--config` path that does not exist very
 much included (it warns and carries on, because a stale config must never stand
 between the user and the track table, least of all when reading that table is how they would fix it).
 
@@ -547,22 +547,24 @@ Omitting `audioTracks` or `subtitleTracks` (or setting them to `[]`) copies no t
 | `additionalSources[]` | Extra files to mux in; the track id is always 0, and a config setting one is refused |
 | `trackOrder` | Optional `"sourceIndex:trackId"` CSV; see above |
 
-**Groups and shared tracks are parsed and validated, and not run yet.** `groups` is a list of muxing
-passes, each with a `name`, a membership (`episodes` ranges, `files` masks, or both) and its own
-`mainSource`, `additionalSources` and `trackOrder`; `general` stays top-level. A config without `groups`
-is one implicit group made of its top level, which is what `Config.groups` returns, so a v1 config needs
-nothing new. `sharedTracks` is a list of named track entries; a track entry with `use: <name>` is that
-definition with the entry's own keys laid over it, on the raw mapping at parse time, so an override keeps
-the absent-versus-declared distinction (`default: false` beats `true`, an empty `title:` clears one). A
-file claimed by two groups is an error, one claimed by none a skip; `partitionByGroup` answers that over a
-file list with the episode lookup injected, and binding is where it runs (see Binding below).
-`effectiveSelection` is a group's selection in the form two groups are compared in — `use:` names dropped,
-the track order resolved — so equal means the same output. `auto: <hash>` is reserved for a future config
-generator to mark the entries it wrote; every reader ignores it like any unknown key. Until `mux` runs one
-pass per group it refuses a grouped config with exit 2, since muxing the empty top level would copy video
-alone; `inspect` says it does not report per group and carries on, uncounted, and `--identify` does not
-list the groups' sources. The new keys stay out of `docs/` until then, and `ConfigDocsParityTest` holds
-them in a pending set.
+**Groups and shared tracks.** `groups` is a list of muxing passes, each with an optional `name`, a
+membership (`episodes` ranges, `files` masks, or both) and its own `mainSource`, `additionalSources` and
+`trackOrder`; `general` stays top-level. A config without `groups` is one implicit group made of its top
+level, which is what `Config.groups` returns, so a v1 config needs nothing new. `sharedTracks` is a list of
+named track entries; a track entry with `use: <name>` is that definition with the entry's own keys laid over
+it, on the raw mapping at parse time, so an override keeps the absent-versus-declared distinction
+(`default: false` beats `true`, an empty `title:` clears one). A file claimed by two groups is a binding
+problem, one claimed by none a skip; `partitionByGroup` answers that over a file list with the episode lookup
+injected, and binding is where it runs (see Binding below). `effectiveSelection` is a group's selection in
+the form two groups are compared in — `use:` names dropped, the track order resolved — so equal means the
+same output. `auto: <hash>` is reserved for a future config generator to mark the entries it wrote; every
+reader ignores it like any unknown key. `mux` runs one pass per group (see `mux` below); `inspect` says it
+does not report per group and carries on, uncounted, and `--identify` does not list the groups' sources.
+
+Output names a declared group `group N (name)` — counted from 1 in config order, the name only when there is
+one — through `groupLabel`, and a group's source `group N (name): additionalSources[i]` through
+`sourceLabel`. Config problems keep the config path (`groups[0].mainSource…`), since they point at a line to
+edit; the implicit group is never named, which is what keeps a v1 config's output unchanged.
 
 **Matchers, the episode map and `outputName`.** They say how
 each file gets its episode and what the output is called, which is what lets a config face raw release
@@ -738,8 +740,8 @@ un-numbered files with no metadata has no season and no problem.
 
 **Nothing is soft**: every failure is a typed `BindingProblem`, and any one of them fails the batch — two
 mains on one episode, a `sequence` count mismatch, a file that pairs with no main, a name tie, two files of
-one source on one main, one file in two sources. Since binding runs on every run, that includes a directory
-holding two seasons or metadata naming another season, with no matcher set at all. An episode the
+one source on one main, one file in two sources, a main two groups claim. Since binding runs on every run,
+that includes a directory holding two seasons or metadata naming another season, with no matcher set at all. An episode the
 metadata lacks is not binding's concern; stage-two substitution drops that file, as it always has. A
 source's candidates are what its masks match against the relative path, the mains aside and with no
 extension filter, and the partner of a paired format (a VobSub `.sub` beside its `.idx`), whatever the case
@@ -755,7 +757,12 @@ main up among every main, as above, so a file named after another group's `X 2.m
 group's `X.mkv`, and then keeps only the pairings with its own members: a file whose main another group
 claims, or none does, is simply not that source's, which is what lets two groups share one mask. A file no
 main can be found for is still unpaired, and a tie still a tie. A group's source may not pin `sequence`,
-since numbering 1..N cannot know which of the group's episodes the first file is.
+since numbering 1..N cannot know which of the group's episodes the first file is. A main two groups claim is
+a `DoubleClaim` problem only within the run, like a duplicate episode, since a masked-out file is muxed by no
+group. A main no group claims is no problem: `BindingReport` lists it, from the partition narrowed to the
+run, as skipped — on stdout like the drops — unless the batch is refused, which skips nothing (and a refused
+`sequence` leaves every main unread, so every range-claimed one would be listed). `inspect` binds a grouped
+config without its groups for now, so it shows neither a double claim nor an unclaimed main.
 
 ### Language guessing
 
@@ -832,13 +839,26 @@ Everything up to binding is the batch's; from stage two on, the gates and the ru
 group's selection (`MuxCommandBuilder` reads the group's `mainSource`, `additionalSources` and track order,
 and composes a source's config path from the group's index). Every pass's gates run before the output
 directory is created and before any pass runs, so a stop in a later pass leaves nothing written by an earlier
-one. Today there is one pass, the implicit group's.
+one. There is one pass per group with members in the masked run, in config order; a group with none gets no
+pass. A pass's track order and the file-scope variables stage two checks are its own group's (with
+`general`'s templates), derived from the config rather than passed in, so one group's `${episodeName}` cannot
+drop another group's episode. `MuxRun` reports per pass (`MuxPassRun`).
+
+The implicit group's pass walks every matched file, non-media riding along to be named in place, and prints no
+label — which is what keeps a v1 config's output byte-identical. A declared group's pass walks its members,
+and is labelled `*** Pass N of M: group K (name), F files` before its gates and `*** Pass N of M: group K
+(name)` before its run, since the two phases are apart in the output; non-media belong to no group and are
+named once, before the first pass runs (`MuxRun.nonMedia`). `mux` resolves and renders each group's track
+order up front, as it always rendered the one.
 
 Binding's episode is the template engine's only source of `${episodeNum}`, `${seasonNum}` and the rest
 (`SubstitutionEngine.boundTo`); the engine reads no number out of a file name itself. A `files:` source's
 paired file goes on the command line, a VobSub pair as its `.idx`. The collision check runs after the drops
 (a dropped episode writes nothing) and before anything is probed: with no `outputName` it catches two mains
-sharing a base name, `a.mkv` and `a.mp4`, which would otherwise overwrite one another in silence. Paths
+sharing a base name, `a.mkv` and `a.mp4`, which would otherwise overwrite one another in silence. It is
+batch-wide: each pass checks its files against its own and every earlier pass's outputs, so a later pass's
+clash still stops the batch before that pass probes anything. A companion drop names a `files:` source by its
+path within the group, the pass's label naming the group. Paths
 compare ignoring case on every platform, unlike masks: Windows and macOS file systems ignore it by default,
 and an output muxed on Linux may well be copied to one.
 

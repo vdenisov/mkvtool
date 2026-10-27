@@ -250,9 +250,10 @@ data class TemplateField(
  * the command line all agree on exactly which fields are templates.
  *
  * The paths it reports are the config file's own — `mainSource.audioTracks[1].title` — because that is
- * what a diagnostic has to name if the reader is to find the offending line.
+ * what a diagnostic has to name if the reader is to find the offending line. With [onlyGroup] set, the fields are
+ * `general`'s and that group's alone: what one muxing pass resolves.
  */
-fun collectTemplateFields(config: Config?): List<TemplateField> {
+fun collectTemplateFields(config: Config?, onlyGroup: Int? = null): List<TemplateField> {
     if (config == null) return emptyList()
     val fields = ArrayList<TemplateField>()
     val all = FILE_VARS + TRACK_VARS
@@ -263,6 +264,7 @@ fun collectTemplateFields(config: Config?): List<TemplateField> {
     config.general.outputName?.let { fields += TemplateField("general.outputName", it.text, FILE_VARS) }
 
     config.groups.forEachIndexed { g, group ->
+        if (onlyGroup != null && g != onlyGroup) return@forEachIndexed
         val prefix = config.groupPrefix(g)
         group.mainSource.videoTrack?.let { video ->
             video.title?.let {

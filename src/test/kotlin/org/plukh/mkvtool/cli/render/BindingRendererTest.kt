@@ -8,7 +8,10 @@ import org.plukh.mkvtool.core.BindingReport
 import org.plukh.mkvtool.core.BindingResult
 import org.plukh.mkvtool.core.BindingRule
 import org.plukh.mkvtool.core.BoundFile
+import org.plukh.mkvtool.core.DoubleClaim
 import org.plukh.mkvtool.core.DuplicateEpisode
+import org.plukh.mkvtool.core.GroupPartition
+import org.plukh.mkvtool.core.GroupRef
 import org.plukh.mkvtool.core.MainEpisode
 import org.plukh.mkvtool.core.NameTie
 import org.plukh.mkvtool.core.SeasonConflict
@@ -142,6 +145,8 @@ class BindingRendererTest : FunSpec({
                 "additionalSources[0]: more than one file pairs with A.mkv: a.srt, b.srt",
             SharedFile(entry("Subs/x.srt"), listOf("additionalSources[0]", "additionalSources[1]")) to
                 "Subs/x.srt is matched by more than one source: additionalSources[0], additionalSources[1]",
+            DoubleClaim(File("E05.mkv"), listOf(GroupRef(0, "bd"), GroupRef(1, null))) to
+                "E05.mkv is claimed by more than one group: group 1 (bd), group 2",
         ) { (problem, lines) ->
             val (out, err) = render(binding(problems = listOf(problem)))
 
@@ -156,6 +161,59 @@ class BindingRendererTest : FunSpec({
         err shouldBe "*** Warning: the files cannot be bound to episodes (1 problem):\n" +
             "      no season: no file name and no episode metadata names one\n"
     }
+
+    context("groups") {
+        val groups = listOf(GroupRef(0, "bd"), GroupRef(1, null))
+
+        test("a group's source is named by its group, in the table and in a problem") {
+            val main = File("Show - S01E01.mkv")
+            val binding = binding(
+                mains = listOf(MainEpisode(main, 1, 1)),
+                sources = listOf(
+                    SourceBinding(
+                        "groups[1].additionalSources[0]",
+                        listOf(BoundFile(entry("a.srt"), main, BindingRule.EXACT)),
+                    ),
+                ),
+                problems = listOf(UnpairedFile("groups[0].additionalSources[0]", entry("b.srt"))),
+                groups = groups,
+            )
+
+            render(binding, table = true) shouldBe (
+                "*** Binding: 1 main file, season 01, by SxxEyy\n" +
+                    "  EP   MAIN\n" +
+                    "  01   Show - S01E01.mkv\n" +
+                    "       group 2: additionalSources[0]  a.srt  (exact)\n" +
+                    "\n" to
+                    "*** Error: the files cannot be bound to episodes (1 problem):\n" +
+                    "      group 1 (bd): additionalSources[0]: b.srt pairs with no main file\n"
+            )
+        }
+
+        test("files no group claims are listed as skipped, on stdout, and are no problem") {
+            val claimed = File("Show - S01E01.mkv")
+            val unclaimed = listOf(File("Show - S01E05.mkv"), File("Show - S01E06.mkv"))
+            val binding = binding(groups = groups)
+                .copy(partition = GroupPartition(listOf(listOf(claimed), emptyList()), emptyMap(), unclaimed))
+
+            render(binding) shouldBe (
+                "*** 2 files will be skipped: not claimed by any group\n" +
+                    "      Show - S01E05.mkv\n" +
+                    "      Show - S01E06.mkv\n" +
+                    "\n" to ""
+            )
+        }
+
+        test("a refused batch skips nothing, so it lists no unclaimed file; a carried-on one still does") {
+            val unclaimed = listOf(File("Show - S01E05.mkv"))
+            val binding = binding(groups = groups, problems = listOf(SeasonUnknown))
+                .copy(partition = GroupPartition(listOf(emptyList(), emptyList()), emptyMap(), unclaimed))
+
+            render(binding).first shouldBe ""
+            render(binding, fatal = false).first shouldBe
+                "*** 1 file will be skipped: not claimed by any group\n      Show - S01E05.mkv\n\n"
+        }
+    }
 })
 
 private fun binding(
@@ -163,7 +221,8 @@ private fun binding(
     sources: List<SourceBinding> = emptyList(),
     problems: List<BindingProblem> = emptyList(),
     rule: BindingRule = BindingRule.SXXEYY,
-) = BindingResult("01", rule, mains, sources, problems)
+    groups: List<GroupRef> = emptyList(),
+) = BindingResult("01", rule, mains, sources, problems, groups = groups)
 
 private fun render(binding: BindingResult, table: Boolean = false, fatal: Boolean = true): Pair<String, String> {
     val (out, err) = renderResult(BindingReportRenderer(table), BindingReport(binding, fatal))

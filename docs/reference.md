@@ -631,6 +631,90 @@ binding keys, it binds by `general`'s keys if those are sound, and pairs no
 `files` source. Under `inspect --strict`, a binding problem fails the run, since it is
 exactly what `mux` would refuse the batch for.
 
+### Groups
+
+A season whose episodes do not all carry the same tracks — a BD batch and a TV
+batch, a dub that starts mid-season — needs more than one selection. `groups`
+keeps them in one config: each group claims some of the main files and has its
+own `mainSource`, `additionalSources` and `trackOrder`, and `mux` runs one pass
+per group. A config without `groups` is one group made of its top level, so a
+simple season needs none of this.
+
+```yaml
+general:
+  destinationDir: "mkv"                # general stays at the top level
+sharedTracks:
+  - name: "jpn"                        # a track entry groups refer to by name
+    id: 1
+    language: "ja"
+    title: "${languageNative} ${codec}"
+groups:
+  - name: "bd"                         # optional; output calls it "group 1 (bd)"
+    episodes: [1-6, 9]                 # episode ranges, as binding reads them
+    mainSource:
+      videoTrack:
+        language: "ja"
+      audioTracks:
+        - use: "jpn"
+          default: true                # the entry's own keys win over jpn's
+  - name: "tv"
+    files: ["*[TV]*"]                  # masks, for names no episode is read from
+    mainSource:
+      videoTrack:
+        language: "ja"
+      audioTracks:
+        - use: "jpn"
+        - id: 2
+          language: "ru"
+          title: "Dub"
+    additionalSources:
+      - files: ["Rus subs/*.ass"]
+        tracks:
+          - language: "ru"
+            title: "Subs"
+```
+
+**A group claims a main file** when the file's episode falls in one of its
+`episodes` ranges (`7`, `1-6`, or a list of them) or its name matches one of
+its `files` masks; a group needs at least one of the two. The episode is the
+one binding decided, after `episodeMap`, which is why the matcher keys live in
+`general` rather than in a group — not the episode ranges the check report
+prints, which are for display and need no `SxxEyy`. A release without one needs
+an `episodeRegex`, or masks. Two groups' ranges overlapping is a config
+error.
+
+**`sharedTracks`** are named track entries. A track entry with `use: <name>`
+is that definition with the entry's own keys laid over it, so an override is
+just the key you want different: `default: false` beats the definition's `true`,
+and an empty `title:` clears its title. A shared track cannot `use` another.
+With groups, `mainSource`, `additionalSources` and `trackOrder` belong to the
+groups; setting them at the top level as well is an error. A group's source can
+pair its files by name or by an `episodeRegex`, but not by `sequence`.
+
+**A file no group claims is skipped** with a warning, and the rest of the
+season is muxed. **A file two groups claim stops the batch** with exit 2 before
+anything is written, as a binding problem.
+
+**One pass per group, in config order.** Each pass has its own drops and its
+own pre-flight check against the group's selection, and every pass is checked
+before any is muxed, so a stop in the second pass leaves nothing written by the
+first. Two passes resolving to one output stop the batch as two files of one
+pass would. Output names a group by number, and by name when it has one:
+
+```
+*** Pass 1 of 2: group 1 (bd), 6 files
+*** Pre-flight check: 6 files
+...
+*** Pass 2 of 2: group 2 (tv), 7 files
+...
+*** Pass 1 of 2: group 1 (bd)
+*** Processing Show - S01E01.mkv
+```
+
+`inspect` does not report per group yet: over a grouped config it says so,
+does not classify findings against the groups' selections, and `--identify`
+does not list the groups' sources.
+
 ### Example configurations
 
 #### Basic configuration with English audio and subtitles
@@ -710,7 +794,7 @@ trackOrder: "0:0,0:1,1:0"
 
 1. The first track in the main source is the video track (track ID 0). `mux`
    hardcodes `0:` for video everywhere, so a release that orders its tracks
-   differently needs its own config — and its own batch. `inspect` reports
+   differently needs a group of its own ([Groups](#groups)). `inspect` reports
    exactly that as a layout outlier, which is what the layout grouping in the
    check report is for.
 2. Each additional source contains exactly one track (audio or subtitle, never video).
