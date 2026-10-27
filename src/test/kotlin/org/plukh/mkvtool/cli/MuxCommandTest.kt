@@ -161,16 +161,19 @@ class MuxCommandTest : FunSpec({
                 "config.yaml uses an unknown shared track 'jpn' at mainSource.audioTracks[0]"
         }
 
-        test("a grouped config is refused until mux runs one pass per group") {
+        test("a grouped config is muxed with") {
             val grouped = Config(
                 general = GeneralConfig(destinationDir = "mkv"),
-                declaredGroups = listOf(GroupConfig(name = "bd", membership = Membership(episodes = listOf(1..6)))),
+                declaredGroups = listOf(
+                    GroupConfig(name = "bd", membership = Membership(episodes = listOf(1..6))),
+                    GroupConfig(name = "tv", membership = Membership(episodes = listOf(7..12))),
+                ),
             )
 
-            muxConfigProblem(grouped, "config.yaml") shouldBe "config.yaml declares groups, which mux does not run yet"
+            muxConfigProblem(grouped, "config.yaml") shouldBe null
         }
 
-        test("the refusal comes before a group's own problems, since fixing those would not make it muxable") {
+        test("a group's own problem is refused under the group's config path") {
             val grouped = Config(
                 general = GeneralConfig(destinationDir = "mkv"),
                 declaredGroups = listOf(
@@ -182,7 +185,8 @@ class MuxCommandTest : FunSpec({
                 ),
             )
 
-            muxConfigProblem(grouped, "config.yaml") shouldBe "config.yaml declares groups, which mux does not run yet"
+            muxConfigProblem(grouped, "config.yaml") shouldBe
+                "config.yaml has no id for groups[0].mainSource.audioTracks[0]"
         }
 
         test("binding keys and an outputName are muxed with, not refused") {

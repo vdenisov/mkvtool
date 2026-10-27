@@ -364,6 +364,12 @@ class SubstitutionTest : FunSpec({
                 "groups[1].additionalSources[0].file",
                 "groups[1].additionalSources[0].tracks[0].title",
             )
+            // One pass resolves general's templates and its own group's, never another group's.
+            collectTemplateFields(parseConfig(config), onlyGroup = 1).map { it.path } shouldContainExactly listOf(
+                "general.title",
+                "groups[1].additionalSources[0].file",
+                "groups[1].additionalSources[0].tracks[0].title",
+            )
         }
     }
 

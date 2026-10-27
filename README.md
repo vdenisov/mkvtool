@@ -361,9 +361,9 @@ arrived with:
 *** Layout 2 (4 files - episodes 01-04): video, audio, subs + A C E F
 ```
 
-Two groups, two configs, and each says which episodes it covers — worked out from
-the file names even when they carry no `SxxEyy`, as anime releases usually do not. `Track structure and external files are consistent
-across 23 files` means one config does the whole season.
+Two layouts, two muxing passes, and each says which episodes it covers — worked out
+from the file names even when they carry no `SxxEyy`, as anime releases usually do not. `Track structure and external files are consistent
+across 23 files` means one pass does the whole season.
 
 Discovery never feeds muxing: `mux` is driven by `additionalSources` and nothing
 else. This is what you read in order to write those entries. Full rules —
@@ -536,6 +536,12 @@ the output track order is derived from the config unless you set `trackOrder`
 explicitly. Every field — including `additionalSources` for merging external
 dubs and subtitles with per-episode `${fileName}` resolution — is covered in
 the [configuration reference](docs/reference.md#configuration).
+
+A season whose episodes do not all carry the same tracks keeps one selection
+per group of episodes in the same config, and `mux` runs a pass for each — see
+[Groups](docs/reference.md#groups). A group claims episodes by the number
+binding reads (`SxxEyy`, or an `episodeRegex`), not by the ranges `inspect`
+prints, which are for display; a file mask claims what no number can.
 
 ## Substitution variables
 

@@ -5,6 +5,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.plukh.mkvtool.core.CompanionDrops
 import org.plukh.mkvtool.core.FileMux
+import org.plukh.mkvtool.core.GroupRef
 import org.plukh.mkvtool.core.MissingCompanion
 import org.plukh.mkvtool.core.MuxAbort
 import org.plukh.mkvtool.core.MuxOutcome
@@ -66,6 +67,17 @@ class MuxRendererTest : FunSpec({
             )
 
             err.lines().filter { it.startsWith("*** Warning:") }.size shouldBe 3
+        }
+
+        test("a declared group's order names the group, by number and by name when it has one") {
+            val (out, _) = renderResult(TrackOrderDerivedRenderer, TrackOrder.Derived("0:0,0:1", GroupRef(0, "bd"))).lf()
+            val (_, err) = renderResult(
+                TrackOrderConfiguredRenderer,
+                configured(unknown = listOf("0:999")).copy(group = GroupRef(1, null)),
+            )
+
+            out shouldBe "*** trackOrder not configured for group 1 (bd); using derived order: 0:0,0:1\n\n"
+            err shouldContain "*** Warning: trackOrder of group 2 references track IDs not configured: 0:999"
         }
     }
 

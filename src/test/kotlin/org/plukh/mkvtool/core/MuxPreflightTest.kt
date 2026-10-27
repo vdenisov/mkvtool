@@ -29,7 +29,7 @@ class MuxPreflightTest : FunSpec({
                 File(dir, it).writeText("x")
             }
 
-            val run = mux(dir, RecordingRenderer(), usedFileVars = setOf("episodeNum", "episodeName"))
+            val run = mux(dir, RecordingRenderer(), title = "\${episodeNum} \${episodeName}")
 
             val drops = run.substitutionDrops!!
             drops.fileNames shouldContainExactly listOf("NoEpisodeNumberHere.mkv")
@@ -45,7 +45,7 @@ class MuxPreflightTest : FunSpec({
             File(dir, "NoEpisodeNumberHere.mkv").writeText("x")
 
             // The file resolves no episode number, but nothing asked for one.
-            val run = mux(dir, RecordingRenderer(), usedFileVars = setOf("fileName"))
+            val run = mux(dir, RecordingRenderer(), title = "\${fileName}")
 
             run.substitutionDrops.shouldBeNull()
             run.files.map { it.fileName } shouldContainExactly listOf("NoEpisodeNumberHere.mkv")
@@ -59,7 +59,7 @@ class MuxPreflightTest : FunSpec({
 
             val run = mux(
                 dir, RecordingRenderer(),
-                usedFileVars = setOf("episodeNum"), strict = true,
+                title = "\${episodeNum}", strict = true,
                 probe = { error("strict must abort before the check probes anything") },
             )
 
@@ -74,7 +74,7 @@ class MuxPreflightTest : FunSpec({
             File(dir, "NoEpisodeNumberHere.mkv").writeText("x")
             val renderer = RecordingRenderer()
 
-            val run = mux(dir, renderer, usedFileVars = setOf("episodeNum"))
+            val run = mux(dir, renderer, title = "\${episodeNum}")
 
             run.files.shouldBeEmpty()
             renderer.events.filterIsInstance<Advisory>().map { it.text } shouldContainExactly
@@ -167,7 +167,6 @@ class MuxPreflightTest : FunSpec({
 
             mux(
                 dir, RecordingRenderer(),
-                usesCodec = true,
                 audioTitle = Template("\${codec}"),
                 probe = { probes++; probedOk(it) },
             )
@@ -227,7 +226,7 @@ class MuxPreflightTest : FunSpec({
 
         val run = mux(
             dir, RecordingRenderer(),
-            usedFileVars = setOf("episodeNum"),
+            title = "\${episodeNum}",
             sources = listOf("\${fileName}[Studio].mka"),
             probe = { probed += it.name; probedOk(it) },
         )
@@ -266,11 +265,10 @@ private fun probedOk(file: File, audioName: String = "Audio A", spareName: Strin
 private fun mux(
     dir: File,
     renderer: RecordingRenderer,
-    usedFileVars: Set<String> = emptySet(),
+    title: String? = null,
     sources: List<String> = emptyList(),
     strict: Boolean = false,
     check: Boolean = true,
-    usesCodec: Boolean = false,
     audioTitle: Template = Template("Japanese"),
     probe: (File) -> ProbeResult = { probedOk(it) },
 ): MuxRun = muxDirectory(
@@ -281,7 +279,7 @@ private fun mux(
                 destinationDir = "mkv",
                 allowedExtensions = setOf("mkv"),
                 mkvmergeExe = "mkvmerge",
-                title = Template("\${episodeName}"),
+                title = title?.let(::Template),
             ),
             mainSource = MainSourceConfig(
                 videoTrack = VideoTrackConfig(language = "ja"),
@@ -291,9 +289,6 @@ private fun mux(
         ),
         mkvmergeExe = "mkvmerge",
         uiLanguage = "en",
-        trackOrder = "0:0,0:1",
-        usesCodec = usesCodec,
-        usedFileVars = usedFileVars,
         episodeSource = null,
         check = check,
         strict = strict,
@@ -302,3 +297,8 @@ private fun mux(
     probe = probe,
     runCommand = { _, _ -> 0 },
 )
+
+/** The one pass's reports: the config here has a single group. */
+private val MuxRun.substitutionDrops: SubstitutionDrops? get() = passes.single().substitutionDrops
+private val MuxRun.companionDrops: CompanionDrops? get() = passes.single().companionDrops
+private val MuxRun.check: CheckReport? get() = passes.single().check

@@ -48,6 +48,9 @@ data class SharedMain(val path: String, val main: File, val entries: List<TreeEn
 /** One file paired by several sources, at [paths]. */
 data class SharedFile(val entry: TreeEntry, val paths: List<String>) : BindingProblem
 
+/** A main file claimed by several [groups], which would each mux it. */
+data class DoubleClaim(val main: File, val groups: List<GroupRef>) : BindingProblem
+
 /**
  * The batch's one [season], the [rule] its main files were read by, every main file with the episode it read if
  * any, each `files:` source's pairings, and the mains split by the group claiming each. Nothing may act on it
@@ -61,6 +64,8 @@ data class BindingResult(
     val problems: List<BindingProblem>,
     /** The implicit group's by default, which claims every main. */
     val partition: GroupPartition = GroupPartition(listOf(mains.map { it.main }), emptyMap(), emptyList()),
+    /** The declared groups, by index; empty for the implicit group. */
+    val groups: List<GroupRef> = emptyList(),
 ) {
     /** The mains that read an episode. */
     val episodes: List<MainEpisode> get() = mains.filter { it.episode != null }
@@ -150,6 +155,9 @@ private class Binder(
 ) {
     private val problems = ArrayList<BindingProblem>()
 
+    /** Files already reported as pairing with no main, or a tie: groups sharing a mask each meet the same one. */
+    private val unpaired = HashSet<TreeEntry>()
+
     /** Every season a paired file read, with the name it was read from. */
     private val seasons = ArrayList<Pair<String, String>>()
     private val ranges = config.general.matching.episodeMap?.entries.orEmpty().mapNotNull { entry ->
@@ -169,7 +177,12 @@ private class Binder(
         val read = bound ?: mains.map { MainEpisode(it, null, null) }
         val episodeOf = read.associate { it.main to it.episode }
         val partition = partitionByGroup(config.groups, mains, dir) { episodeOf[it] }
-        if (bound == null) return BindingResult(null, rule, read, emptyList(), problems, partition)
+        val groups = config.groups.indices.mapNotNull { config.groupRef(it) }
+        // The run's alone, as with duplicate episodes: a masked-out file is muxed by no group.
+        partition.doubleClaimed.filterKeys { it in run }.forEach { (main, claimed) ->
+            problems += DoubleClaim(main, claimed.map { groups[it] })
+        }
+        if (bound == null) return BindingResult(null, rule, read, emptyList(), problems, partition, groups)
         // Each main's group; a main claimed by none or by several has none.
         val groupOf = partition.members.flatMapIndexed { g, members -> members.map { it to g } }.toMap()
 
@@ -192,7 +205,7 @@ private class Binder(
         }
         sharedFiles(sources)
         val season = seasonOf(bound.any { it.episode != null && it.main in run })
-        return BindingResult(season, rule, bound, sources, problems, partition)
+        return BindingResult(season, rule, bound, sources, problems, partition, groups)
     }
 
     /** Every main with the episode the run's rule read, or null when the mains' `sequence` was refused. */
@@ -267,7 +280,7 @@ private class Binder(
     ): BoundFile? {
         val main = named.singleOrNull()
         if (main == null) {
-            problems += NameTie(path, entry, named.map { it.file })
+            if (unpaired.add(entry)) problems += NameTie(path, entry, named.map { it.file })
             return null
         }
         if (!inGroup(main.file)) return null
@@ -291,7 +304,7 @@ private class Binder(
         // A clash among the run's mains has failed the batch already, and one outside the run is not its concern.
         if (main == null && claimed.size > 1) return null
         if (read == null || main == null) {
-            problems += UnpairedFile(path, entry)
+            if (unpaired.add(entry)) problems += UnpairedFile(path, entry)
             return null
         }
         if (!inGroup(main)) return null

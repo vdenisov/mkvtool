@@ -221,7 +221,6 @@ class MuxCommandLineTest : FunSpec({
                 config = config,
                 mkvmergeExe = EXE,
                 uiLanguage = null,
-                trackOrder = ORDER,
                 substitution = SubstitutionEngine().boundTo(binding),
             )
             val builder = MuxCommandBuilder(
@@ -378,11 +377,9 @@ private fun Config.commandFor(
         config = this,
         mkvmergeExe = EXE,
         uiLanguage = uiLanguage,
-        trackOrder = ORDER,
-        usesCodec = usesCodec,
         substitution = SubstitutionEngine().boundTo(binding),
     )
-    return MuxCommandBuilder(File("."), options, 0, ORDER, probe, binding).commandFor(file)
+    return MuxCommandBuilder(File("."), options, 0, ORDER, probe, binding, usesCodec).commandFor(file)
 }
 
 /** The head every command shares, for the cases that spell out a whole argument list. */

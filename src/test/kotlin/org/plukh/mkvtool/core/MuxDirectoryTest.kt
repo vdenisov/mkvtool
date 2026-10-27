@@ -188,7 +188,6 @@ private fun mux(
         ),
         mkvmergeExe = "mkvmerge",
         uiLanguage = "en",
-        trackOrder = "0:0,0:1",
         dryRun = dryRun,
         check = false,
         fileMasks = fileMasks,

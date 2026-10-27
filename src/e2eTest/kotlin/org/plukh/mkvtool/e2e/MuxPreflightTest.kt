@@ -232,22 +232,6 @@ class MuxPreflightTest : FunSpec({
         }
     }
 
-    // Muxing the empty top level of a grouped config would copy video alone, so it is refused until mux runs groups.
-    test("a grouped config is refused before anything is written") {
-        val workDir = tempdir()
-        stageInput(workDir, "a.mkv")
-        writeConfig(workDir, "general:\n  destinationDir: mkv\ngroups:\n  - name: bd\n    episodes: [1-6]\n")
-
-        val run = mux(workDir)
-
-        withClue(run.output) {
-            run.exitCode shouldBe 2
-            run.output shouldContain
-                "*** Error: config.yaml declares groups, which mux does not run yet; there is nothing to mux with."
-        }
-        File(workDir, "mkv").exists() shouldBe false
-    }
-
     // Named as passed: a bare "config.yaml" would send the reader to the local file, which was never read.
     test("a refusal under --config names the file that was read, as it was given") {
         val workDir = tempdir()

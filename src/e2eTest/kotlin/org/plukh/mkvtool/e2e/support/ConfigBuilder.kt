@@ -1,5 +1,7 @@
 package org.plukh.mkvtool.e2e.support
 
+import org.plukh.mkvtool.e2e.support.mkvmergeExe as detectedMkvmerge
+
 /**
  * Building the `config.yaml` a `mux` case runs against.
  *
@@ -51,9 +53,7 @@ data class AdditionalSourceSpec(
 fun cfg(
     destinationDir: String = "mkv",
     extensions: List<String> = listOf("mkv", "avi", "mp4"),
-    mkvmergeExe: String = requireNotNull(org.plukh.mkvtool.e2e.support.mkvmergeExe) {
-        "mkvmerge is required to build a config — this case should have been gated on needsMkvmerge"
-    },
+    mkvmergeExe: String = requiredMkvmerge(),
     generalTitle: String? = null,
     videoLang: String = "en",
     videoTitle: String? = null,
@@ -64,13 +64,7 @@ fun cfg(
     additionalSources: List<AdditionalSourceSpec> = emptyList(),
     generalExtra: List<String> = emptyList(),
 ): String = buildString {
-    append("general:\n")
-    append("  destinationDir: \"$destinationDir\"\n")
-    append("  allowedExtensions: [${extensions.joinToString(", ") { "\"$it\"" }}]\n")
-    append("  mkvmergeExe: \"${mkvmergeExe.yamlEscaped()}\"\n")
-    // Omitted unless asked for, so the default — the file name — stays what every other case exercises.
-    generalTitle?.let { append("  title: \"$it\"\n") }
-    generalExtra.forEach { append("  $it\n") }
+    append(generalBlock(destinationDir, extensions, mkvmergeExe, generalTitle, generalExtra))
 
     append("mainSource:\n")
     append("  videoTrack:\n")
@@ -112,6 +106,18 @@ fun cfg(
 }
 
 /**
+ * Render a `config.yaml` declaring groups: the `general` block [cfg] writes, then [body] as written — the
+ * `sharedTracks` and `groups` sections, in the YAML a reader would write, so the real parser reads exactly that.
+ * [body] is trimmed of its common indent.
+ */
+fun groupedCfg(
+    body: String,
+    mkvmergeExe: String = requiredMkvmerge(),
+    generalExtra: List<String> = emptyList(),
+): String =
+    generalBlock("mkv", listOf("mkv", "avi", "mp4"), mkvmergeExe, null, generalExtra) + body.trimIndent() + "\n"
+
+/**
  * The config the consistency-check cases run against: audio 1 and 2, subtitle 6.
  *
  * Those three ids are exactly the ones the check cases perturb with `fullCopy(names = ...)`, and a
@@ -119,9 +125,7 @@ fun cfg(
  * derivation stays exercised.
  */
 fun checkCfg(
-    mkvmergeExe: String = requireNotNull(org.plukh.mkvtool.e2e.support.mkvmergeExe) {
-        "mkvmerge is required to build a config — this case should have been gated on needsMkvmerge"
-    },
+    mkvmergeExe: String = requiredMkvmerge(),
 ): String = cfg(
     mkvmergeExe = mkvmergeExe,
     audioTracks = listOf(
@@ -141,9 +145,7 @@ fun checkCfg(
  * tool to resolve it, and Kotlin's string interpolation would otherwise swallow it.
  */
 fun companionCfg(
-    mkvmergeExe: String = requireNotNull(org.plukh.mkvtool.e2e.support.mkvmergeExe) {
-        "mkvmerge is required to build a config — this case should have been gated on needsMkvmerge"
-    },
+    mkvmergeExe: String = requiredMkvmerge(),
 ): String = cfg(
     mkvmergeExe = mkvmergeExe,
     audioTracks = listOf(TrackSpec(id = 1, language = "ja", title = "Japanese", default = true)),
@@ -162,9 +164,7 @@ fun companionCfg(
  * by its own regex. The season comes from `episodes.yaml`, which each case writes.
  */
 fun rawReleaseCfg(
-    mkvmergeExe: String = requireNotNull(org.plukh.mkvtool.e2e.support.mkvmergeExe) {
-        "mkvmerge is required to build a config — this case should have been gated on needsMkvmerge"
-    },
+    mkvmergeExe: String = requiredMkvmerge(),
 ): String = cfg(
     mkvmergeExe = mkvmergeExe,
     audioTracks = listOf(TrackSpec(id = 1, language = "ja", title = "Japanese", default = true)),
@@ -177,6 +177,22 @@ fun rawReleaseCfg(
         ),
     ),
 )
+
+private fun generalBlock(
+    destinationDir: String,
+    extensions: List<String>,
+    mkvmergeExe: String,
+    title: String?,
+    extra: List<String>,
+): String = buildString {
+    append("general:\n")
+    append("  destinationDir: \"$destinationDir\"\n")
+    append("  allowedExtensions: [${extensions.joinToString(", ") { "\"$it\"" }}]\n")
+    append("  mkvmergeExe: \"${mkvmergeExe.yamlEscaped()}\"\n")
+    // Omitted unless asked for, so the default — the file name — stays what every other case exercises.
+    title?.let { append("  title: \"$it\"\n") }
+    extra.forEach { append("  $it\n") }
+}
 
 /** An empty list is written as `[]` rather than omitted — see the distinction in the file comment. */
 private fun trackList(key: String, tracks: List<TrackSpec>, indent: String): String {
@@ -199,3 +215,8 @@ private fun trackList(key: String, tracks: List<TrackSpec>, indent: String): Str
  * form feed in it.
  */
 private fun String.yamlEscaped(): String = replace("\\", "\\\\")
+
+/** The detected mkvmerge, which a builder's `mkvmergeExe` parameter would otherwise shadow. */
+private fun requiredMkvmerge(): String = requireNotNull(detectedMkvmerge) {
+    "mkvmerge is required to build a config — this case should have been gated on needsMkvmerge"
+}
