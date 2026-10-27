@@ -50,7 +50,8 @@ data class SharedFile(val entry: TreeEntry, val paths: List<String>) : BindingPr
 
 /**
  * The batch's one [season], the [rule] its main files were read by, every main file with the episode it read if
- * any, and each `files:` source's pairings. Nothing may act on it while [problems] is not empty.
+ * any, each `files:` source's pairings, and the mains split by the group claiming each. Nothing may act on it
+ * while [problems] is not empty.
  */
 data class BindingResult(
     val season: String?,
@@ -58,6 +59,8 @@ data class BindingResult(
     val mains: List<MainEpisode>,
     val sources: List<SourceBinding>,
     val problems: List<BindingProblem>,
+    /** The implicit group's by default, which claims every main. */
+    val partition: GroupPartition = GroupPartition(listOf(mains.map { it.main }), emptyMap(), emptyList()),
 ) {
     /** The mains that read an episode. */
     val episodes: List<MainEpisode> get() = mains.filter { it.episode != null }
@@ -73,6 +76,11 @@ data class BindingResult(
     fun narrowedTo(files: Set<File>): BindingResult = copy(
         mains = mains.filter { it.main in files },
         sources = sources.map { source -> source.copy(bound = source.bound.filter { it.main in files }) },
+        partition = GroupPartition(
+            members = partition.members.map { members -> members.filter { it in files } },
+            doubleClaimed = partition.doubleClaimed.filterKeys { it in files },
+            unclaimed = partition.unclaimed.filter { it in files },
+        ),
     )
 }
 
@@ -89,18 +97,21 @@ data class BindingReport(val binding: BindingResult, val fatal: Boolean) : Comma
  *
  * [mains] is the full list, before any command-line mask: with the longest name winning, a masked-out
  * `X 2.mkv` would let `X 2.srt` pair with `X.mkv` with the suffix " 2". [tree] leaves out `destinationDir`, and
- * [config] has passed [bindingProblems]. Every source binds against every main, whatever its group.
- * [episodes] is a season to agree with and what the main files' `sequence` counts against. [run] is the mains
- * the masks selected: the season and duplicate-episode checks, and pairing by number, are about those, so a
- * sample the run leaves out cannot clash with its episode; a `sequence` still numbers every main.
+ * [config] has passed [bindingProblems]. The mains are split by group between being read and being paired, since
+ * groups claim by episode; a group's source keeps only the pairings with its own members, and a file whose main
+ * another group claims, or none does, is simply not that source's. [dir] is the media directory, which group
+ * masks resolve against. [episodes] is a season to agree with and what the main files' `sequence` counts against.
+ * [run] is the mains the masks selected: the season and duplicate-episode checks, and pairing by number, are
+ * about those, so a sample the run leaves out cannot clash with its episode; a `sequence` still numbers every main.
  */
 fun bindFiles(
+    dir: File,
     config: Config,
     mains: List<File>,
     tree: List<TreeEntry>,
     episodes: EpisodeData? = null,
     run: Collection<File> = mains,
-): BindingResult = Binder(config, mains, run.toSet(), episodes).bind(tree)
+): BindingResult = Binder(dir, config, mains, run.toSet(), episodes).bind(tree)
 
 private const val SEQUENCE = "sequence"
 
@@ -131,6 +142,7 @@ private class NumberReader(matching: MatcherConfig) {
 }
 
 private class Binder(
+    private val dir: File,
     private val config: Config,
     private val mains: List<File>,
     private val run: Set<File>,
@@ -154,7 +166,13 @@ private class Binder(
     fun bind(tree: List<TreeEntry>): BindingResult {
         // A refused `sequence` is one problem that says it all: every main stays unread, and nothing pairs.
         val bound = bindMains()
-            ?: return BindingResult(null, rule, mains.map { MainEpisode(it, null, null) }, emptyList(), problems)
+        val read = bound ?: mains.map { MainEpisode(it, null, null) }
+        val episodeOf = read.associate { it.main to it.episode }
+        val partition = partitionByGroup(config.groups, mains, dir) { episodeOf[it] }
+        if (bound == null) return BindingResult(null, rule, read, emptyList(), problems, partition)
+        // Each main's group; a main claimed by none or by several has none.
+        val groupOf = partition.members.flatMapIndexed { g, members -> members.map { it to g } }.toMap()
+
         // Episode to the mains claiming it; only a main that read one can claim, or clash over, an episode.
         val claims = bound.mapNotNull { main -> main.episode?.let { it to main.main } }
             .groupBy({ it.first }, { it.second })
@@ -168,13 +186,13 @@ private class Binder(
             group.additionalSources.mapIndexedNotNull { i, source ->
                 source.files?.let { masks ->
                     val candidates = candidatesOf(masks, tree, mainPaths)
-                    bindSource(config.sourcePath(g, i), source.matching, candidates, claims)
+                    bindSource({ groupOf[it] == g }, config.sourcePath(g, i), source.matching, candidates, claims)
                 }
             }
         }
         sharedFiles(sources)
         val season = seasonOf(bound.any { it.episode != null && it.main in run })
-        return BindingResult(season, rule, bound, sources, problems)
+        return BindingResult(season, rule, bound, sources, problems, partition)
     }
 
     /** Every main with the episode the run's rule read, or null when the mains' `sequence` was refused. */
@@ -196,7 +214,9 @@ private class Binder(
         }
     }
 
+    /** [inGroup] says whether a main is one of the source's group's members. */
     private fun bindSource(
+        inGroup: (File) -> Boolean,
         path: String,
         matching: MatcherConfig,
         candidates: List<Pair<TreeEntry, TreeEntry?>>,
@@ -217,14 +237,16 @@ private class Binder(
 
         val bound = candidates.mapNotNull { (entry, partner) ->
             when {
-                sequenced ->
-                    byNumber(path, entry, partner, Read(null, ordinals.getValue(entry)), BindingRule.SEQUENCE, claims)
-                reader.hasRegex -> byNumber(path, entry, partner, reader.regex(entry.base), BindingRule.REGEX, claims)
+                sequenced -> byNumber(
+                    inGroup, path, entry, partner, Read(null, ordinals.getValue(entry)), BindingRule.SEQUENCE, claims,
+                )
+                reader.hasRegex ->
+                    byNumber(inGroup, path, entry, partner, reader.regex(entry.base), BindingRule.REGEX, claims)
                 else -> {
                     // A name match or a tie settles the file; only no name at all reads a number.
                     val named = byName.longestPrefix(entry.base)
-                    if (named.isNotEmpty()) byName(path, entry, partner, named)
-                    else byNumber(path, entry, partner, reader.sxxeyy(entry.base), BindingRule.SXXEYY, claims)
+                    if (named.isNotEmpty()) byName(inGroup, path, entry, partner, named)
+                    else byNumber(inGroup, path, entry, partner, reader.sxxeyy(entry.base), BindingRule.SXXEYY, claims)
                 }
             }
         }
@@ -234,19 +256,29 @@ private class Binder(
         return SourceBinding(path, bound)
     }
 
-    /** [entry] paired with the one of [named] its name starts with, episode or not; a tie is a problem. */
-    private fun byName(path: String, entry: TreeEntry, partner: TreeEntry?, named: List<MainFile>): BoundFile? {
+    /** [entry] paired with the one of [named] its name starts with, episode or not; a tie is a problem. Every main
+     *  is a candidate, so a file named after another group's main cannot fall to a shorter name in this one. */
+    private fun byName(
+        inGroup: (File) -> Boolean,
+        path: String,
+        entry: TreeEntry,
+        partner: TreeEntry?,
+        named: List<MainFile>,
+    ): BoundFile? {
         val main = named.singleOrNull()
         if (main == null) {
             problems += NameTie(path, entry, named.map { it.file })
             return null
         }
+        if (!inGroup(main.file)) return null
         val rule = if (main.lower == entry.base.lowercase()) BindingRule.EXACT else BindingRule.SUFFIX
         return BoundFile(entry, main.file, rule, partner)
     }
 
-    /** [entry] paired with the main that claims [read]'s mapped episode; no number, or no main, is a problem. */
+    /** [entry] paired with the main that claims [read]'s mapped episode; no number, or no main, is a problem, and a
+     *  main outside the group ([inGroup]) makes it another group's file. */
     private fun byNumber(
+        inGroup: (File) -> Boolean,
         path: String,
         entry: TreeEntry,
         partner: TreeEntry?,
@@ -262,6 +294,7 @@ private class Binder(
             problems += UnpairedFile(path, entry)
             return null
         }
+        if (!inGroup(main)) return null
         if (main in run) read.season?.let { seasons += it to entry.relPath }
         return BoundFile(entry, main, rule, partner)
     }

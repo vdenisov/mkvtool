@@ -230,7 +230,7 @@ hand-assembled `episodes.txt` — use `core/CharsetDetection.kt` rather than qui
 | `Probe.kt` | `mkvmerge -J`: `parseProbe`, `probeFile`, typed track records, signatures, slot grouping, `layoutKey`, `findDuplicates` |
 | `CheckReport.kt` | `buildCheckReport` — the consistency **model**, with no presentation in it |
 | `Substitution.kt` | the template engine: variables, scopes, `friendlyCodec`, language names, validation |
-| `Config.kt` | the typed config model, its lenient load with `sharedTracks` resolution, `groupProblems`, `bindingProblems`, `partitionByGroup`, and the derived `TrackSelection` |
+| `Config.kt` | the typed config model, its lenient load with `sharedTracks` resolution, `groupProblems`, `bindingProblems`, `partitionByGroup`, `effectiveSelection`, and the derived `TrackSelection` |
 | `MediaFiles.kt` | file selection: `compileMasks`, the extension rule, the pre-mask/post-mask split |
 | `Inspect.kt`, `Mux.kt`, `Rename.kt` | the three big engines and their result models |
 | `Tmdb.kt`, `FetchEpisodes.kt` | the HTTP fetcher behind a seam, and what gets written to disk |
@@ -555,12 +555,14 @@ nothing new. `sharedTracks` is a list of named track entries; a track entry with
 definition with the entry's own keys laid over it, on the raw mapping at parse time, so an override keeps
 the absent-versus-declared distinction (`default: false` beats `true`, an empty `title:` clears one). A
 file claimed by two groups is an error, one claimed by none a skip; `partitionByGroup` answers that over a
-file list with the episode lookup injected. `auto: <hash>` is reserved for a future config generator to
-mark the entries it wrote; every reader ignores it like any unknown key. Until `mux` runs one pass per
-group it refuses a grouped config with exit 2, since muxing the empty top level would copy video alone;
-`inspect` says it does not report per group and carries on, uncounted, and `--identify` does not list
-the groups' sources. The new keys stay out of `docs/` until then, and `ConfigDocsParityTest` holds them in
-a pending set.
+file list with the episode lookup injected, and binding is where it runs (see Binding below).
+`effectiveSelection` is a group's selection in the form two groups are compared in — `use:` names dropped,
+the track order resolved — so equal means the same output. `auto: <hash>` is reserved for a future config
+generator to mark the entries it wrote; every reader ignores it like any unknown key. Until `mux` runs one
+pass per group it refuses a grouped config with exit 2, since muxing the empty top level would copy video
+alone; `inspect` says it does not report per group and carries on, uncounted, and `--identify` does not
+list the groups' sources. The new keys stay out of `docs/` until then, and `ConfigDocsParityTest` holds
+them in a pending set.
 
 **Matchers, the episode map and `outputName`.** They say how
 each file gets its episode and what the output is called, which is what lets a config face raw release
@@ -747,6 +749,14 @@ masks chose: the season and duplicate-episode checks and pairing by number are a
 sample beside its episode can be excluded rather than moved, while `sequence` still numbers every main. The
 tree leaves out `destinationDir`, as discovery's does.
 
+**Groups are split inside binding**, between reading the mains and pairing the sources, because groups claim
+by episode; `BindingResult.partition` carries the split, over every main. A group's source looks a file's
+main up among every main, as above, so a file named after another group's `X 2.mkv` cannot fall to this
+group's `X.mkv`, and then keeps only the pairings with its own members: a file whose main another group
+claims, or none does, is simply not that source's, which is what lets two groups share one mask. A file no
+main can be found for is still unpaired, and a tie still a tie. A group's source may not pin `sequence`,
+since numbering 1..N cannot know which of the group's episodes the first file is.
+
 ### Language guessing
 
 Spellings are **derived from CLDR at load time** rather than typed out: for each of a curated list of
@@ -873,10 +883,10 @@ held no media.
 `inspect` binds as `mux` does and emits the same `BindingReport`, narrowed to the masked run, with
 `fatal = false`: problems print as warnings and the run carries on. With no config it binds over the default
 one. Over a config `bindingProblems` refused (binding takes one that passed; a bad regex would throw) or one
-declaring groups (whose sources would all bind against every main), it keeps `general`'s matchers when they
-passed and drops the sources, the config problem already reported. Binding problems are not config problems,
-but `--strict` counts them, because they are what `mux` would refuse the batch for, and a script gating on
-`inspect --strict` should fail exactly where `mux` would.
+declaring groups (whose sources wait for `inspect` to report per group), it keeps `general`'s matchers
+when they passed and drops the sources, the config problem already reported. Binding problems are not
+config problems, but `--strict` counts them, because they are what `mux` would refuse the batch for, and a
+script gating on `inspect --strict` should fail exactly where `mux` would.
 `--identify` lists a `files:` source's paired file per episode beside the `file:` sources, or `(not found)`
 under the source's masks, and a file a source paired is never listed as unmatched or as an extra, whatever
 discovery made of its name. A batch with binding problems still resolves its `file:` templates from what

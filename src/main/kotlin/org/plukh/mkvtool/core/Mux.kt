@@ -554,7 +554,7 @@ fun muxDirectory(
     // Only a files: source reads the tree, and on a network share the walk is the slow part.
     val walks = config.groups.any { group -> group.additionalSources.any { it.files != null } }
     val tree = if (walks) walkTree(dir, excludedPaths(dir, config)) else emptyList()
-    val bound = bindFiles(config, selection.all, tree, options.substitution.episodeData, run = selection.selected)
+    val bound = bindFiles(dir, config, selection.all, tree, options.substitution.episodeData, run = selection.selected)
     binding = bound
     // Reported only as far as this run reaches: a masked-out episode was never asked for.
     renderer.render(BindingReport(bound.narrowedTo(selection.matched.toSet()), fatal = true))

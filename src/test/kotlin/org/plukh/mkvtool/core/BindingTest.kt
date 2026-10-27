@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withData
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.shouldBe
 import java.io.File
 
 /**
@@ -449,7 +450,8 @@ class BindingTest : FunSpec({
             val config = Config(general = GeneralConfig(matching = case.general), additionalSources = case.sources)
             val tree = (case.mains + case.files).map(::entry)
 
-            digest(bindFiles(config, mainFiles, tree, case.episodes)) shouldContainExactlyInAnyOrder case.expected
+            digest(bindFiles(ROOT, config, mainFiles, tree, case.episodes)) shouldContainExactlyInAnyOrder
+                case.expected
         }
 
         test("each source is named by its config path, and a file: source binds nothing") {
@@ -460,7 +462,7 @@ class BindingTest : FunSpec({
                 ),
             )
 
-            bindFiles(config, emptyList(), emptyList()).sources.map { it.path } shouldContainExactly listOf(
+            bindFiles(ROOT, config, emptyList(), emptyList()).sources.map { it.path } shouldContainExactly listOf(
                 "groups[0].additionalSources[0]",
                 "groups[1].additionalSources[1]",
             )
@@ -471,7 +473,7 @@ class BindingTest : FunSpec({
             val mains = listOf("S01E01.mkv", "S01E01.sample.mkv", "S02E05.mkv").map { File(ROOT, it) }
             val config = Config(additionalSources = listOf(files("Subs/*", regex = """^(\d+)$""")))
 
-            val result = bindFiles(config, mains, listOf(entry("Subs/01.srt")), run = mains.take(1))
+            val result = bindFiles(ROOT, config, mains, listOf(entry("Subs/01.srt")), run = mains.take(1))
 
             digest(result) shouldContainExactlyInAnyOrder listOf(
                 "season 01",
@@ -481,7 +483,7 @@ class BindingTest : FunSpec({
                 "additionalSources[0]: Subs/01.srt -> S01E01.mkv REGEX",
             )
             // With no mask the same directory clashes, loudly.
-            val unmasked = bindFiles(config, mains, listOf(entry("Subs/01.srt")))
+            val unmasked = bindFiles(ROOT, config, mains, listOf(entry("Subs/01.srt")))
             unmasked.problems.map { it::class } shouldContainExactlyInAnyOrder
                 listOf(DuplicateEpisode::class, SeasonConflict::class)
         }
@@ -492,7 +494,7 @@ class BindingTest : FunSpec({
 
             val subs = listOf(entry("Subs/a.srt"), entry("Subs/b.srt"))
 
-            val result = bindFiles(config, mains, subs, run = mains - mains[1])
+            val result = bindFiles(ROOT, config, mains, subs, run = mains - mains[1])
 
             digest(result) shouldContainExactlyInAnyOrder listOf(
                 "season 01",
@@ -504,12 +506,166 @@ class BindingTest : FunSpec({
             )
         }
     }
+
+    context("bindFiles with groups") {
+        data class Case(
+            val label: String,
+            val mains: List<String>,
+            val files: List<String>,
+            /** Null for a config without groups. */
+            val groups: List<GroupConfig>?,
+            val expected: List<String>,
+            val general: MatcherConfig = MatcherConfig(),
+            val episodes: EpisodeData? = null,
+        )
+
+        val e = (1..4).map { "Show S01E0$it" }
+        val rus = files("Rus/*.mka")
+        val byNumber = files("Subs/*", regex = """^(\d+)$""")
+
+        withData(
+            nameFn = { it.label },
+            Case(
+                "two groups sharing a mask each pair their own members' files",
+                mains = e.map { "$it.mkv" },
+                files = e.map { "Rus/$it.mka" },
+                groups = listOf(group(1..2, sources = listOf(rus)), group(3..4, sources = listOf(rus))),
+                expected = listOf(
+                    "season 01",
+                    "main ${e[0]}.mkv E01 SXXEYY",
+                    "main ${e[1]}.mkv E02 SXXEYY",
+                    "main ${e[2]}.mkv E03 SXXEYY",
+                    "main ${e[3]}.mkv E04 SXXEYY",
+                    "groups[0].additionalSources[0]: Rus/${e[0]}.mka -> ${e[0]}.mkv EXACT",
+                    "groups[0].additionalSources[0]: Rus/${e[1]}.mka -> ${e[1]}.mkv EXACT",
+                    "groups[1].additionalSources[0]: Rus/${e[2]}.mka -> ${e[2]}.mkv EXACT",
+                    "groups[1].additionalSources[0]: Rus/${e[3]}.mka -> ${e[3]}.mkv EXACT",
+                    "group 0: ${e[0]}.mkv, ${e[1]}.mkv",
+                    "group 1: ${e[2]}.mkv, ${e[3]}.mkv",
+                ),
+            ),
+            Case(
+                "an unclaimed main is no group's, and its file is no source's, without a problem",
+                mains = e.take(3).map { "$it.mkv" },
+                files = e.take(3).map { "Rus/$it.mka" },
+                groups = listOf(group(1..2, sources = listOf(rus))),
+                expected = listOf(
+                    "season 01",
+                    "main ${e[0]}.mkv E01 SXXEYY",
+                    "main ${e[1]}.mkv E02 SXXEYY",
+                    "main ${e[2]}.mkv E03 SXXEYY",
+                    "groups[0].additionalSources[0]: Rus/${e[0]}.mka -> ${e[0]}.mkv EXACT",
+                    "groups[0].additionalSources[0]: Rus/${e[1]}.mka -> ${e[1]}.mkv EXACT",
+                    "group 0: ${e[0]}.mkv, ${e[1]}.mkv",
+                    "unclaimed ${e[2]}.mkv",
+                ),
+            ),
+            Case(
+                "a main claimed by a range and a mask is in neither group, and so is its file",
+                mains = e.take(3).map { "$it.mkv" },
+                files = e.take(3).map { "Rus/$it.mka" },
+                groups = listOf(
+                    group(1..2, sources = listOf(rus)),
+                    group(3..3, masks = listOf("*E02*"), sources = listOf(rus)),
+                ),
+                expected = listOf(
+                    "season 01",
+                    "main ${e[0]}.mkv E01 SXXEYY",
+                    "main ${e[1]}.mkv E02 SXXEYY",
+                    "main ${e[2]}.mkv E03 SXXEYY",
+                    "groups[0].additionalSources[0]: Rus/${e[0]}.mka -> ${e[0]}.mkv EXACT",
+                    "groups[1].additionalSources[0]: Rus/${e[2]}.mka -> ${e[2]}.mkv EXACT",
+                    "group 0: ${e[0]}.mkv",
+                    "group 1: ${e[2]}.mkv",
+                    "double-claimed ${e[1]}.mkv by 0, 1",
+                ),
+            ),
+            Case(
+                "a file named after another group's main does not fall to a shorter name in this one",
+                mains = listOf("X.mkv", "X 2.mkv"),
+                files = listOf("X 2.srt"),
+                groups = listOf(
+                    group(masks = listOf("X.mkv"), sources = listOf(files("*.srt"))),
+                    group(masks = listOf("X 2.mkv")),
+                ),
+                expected = listOf("main X.mkv -", "main X 2.mkv -", "group 0: X.mkv", "group 1: X 2.mkv"),
+            ),
+            Case(
+                "a number reaching another group's main is that group's; one reaching no main is unpaired",
+                mains = e.take(2).map { "$it.mkv" },
+                files = listOf("Subs/01.srt", "Subs/02.srt", "Subs/09.srt"),
+                groups = listOf(group(1..1, sources = listOf(byNumber)), group(2..2)),
+                expected = listOf(
+                    "season 01",
+                    "main ${e[0]}.mkv E01 SXXEYY",
+                    "main ${e[1]}.mkv E02 SXXEYY",
+                    "groups[0].additionalSources[0]: Subs/01.srt -> ${e[0]}.mkv REGEX",
+                    "problem: groups[0].additionalSources[0]: Subs/09.srt unpaired",
+                    "group 0: ${e[0]}.mkv",
+                    "group 1: ${e[1]}.mkv",
+                ),
+            ),
+            Case(
+                "a group claims by the episode a number maps to, not the number read",
+                mains = listOf("Show - 13.mkv", "Show - 14.mkv"),
+                files = emptyList(),
+                groups = listOf(group(1..1), group(2..2)),
+                general = MatcherConfig(episodeRegex = """ - (\d+)$""", episodeMap = episodeMap("13-14" to "1-2")),
+                episodes = EpisodeData(season = "01"),
+                expected = listOf(
+                    "season 01",
+                    "main Show - 13.mkv E01 (read 13) REGEX",
+                    "main Show - 14.mkv E02 (read 14) REGEX",
+                    "group 0: Show - 13.mkv",
+                    "group 1: Show - 14.mkv",
+                ),
+            ),
+            Case(
+                "a config without groups is one group of every main",
+                mains = listOf("${e[0]}.mkv", "NCOP.mkv"),
+                files = emptyList(),
+                groups = null,
+                expected = listOf(
+                    "season 01",
+                    "main ${e[0]}.mkv E01 SXXEYY",
+                    "main NCOP.mkv -",
+                    "group 0: NCOP.mkv, ${e[0]}.mkv",
+                ),
+            ),
+        ) { case ->
+            val config = Config(general = GeneralConfig(matching = case.general), declaredGroups = case.groups)
+            val tree = (case.mains + case.files).map(::entry)
+
+            val result = bindFiles(ROOT, config, case.mains.map { File(ROOT, it) }, tree, case.episodes)
+
+            groupDigest(result) shouldContainExactlyInAnyOrder case.expected
+        }
+
+        test("narrowing to a run narrows the partition") {
+            val mains = e.take(3).map { File(ROOT, "$it.mkv") }
+            val config = Config(declaredGroups = listOf(group(1..2), group(masks = listOf("*E02*"))))
+
+            val narrowed = bindFiles(ROOT, config, mains, mains.map { entry(it.name) }).narrowedTo(setOf(mains[1]))
+
+            narrowed.partition shouldBe GroupPartition(
+                members = listOf(emptyList(), emptyList()),
+                doubleClaimed = mapOf(mains[1] to listOf(0, 1)),
+                unclaimed = emptyList(),
+            )
+        }
+    }
 })
 
 private val ROOT = File("media")
 
 private fun files(vararg masks: String, pin: String? = null, regex: String? = null) =
     AdditionalSource(files = masks.toList(), matching = MatcherConfig(matcher = pin, episodeRegex = regex))
+
+private fun group(
+    vararg episodes: IntRange,
+    masks: List<String> = emptyList(),
+    sources: List<AdditionalSource> = emptyList(),
+) = GroupConfig(membership = Membership(episodes = episodes.toList(), files = masks), additionalSources = sources)
 
 private fun episodeMap(vararg entries: Pair<String, String>) =
     EpisodeMap(entries.map { EpisodeMapEntry(it.first, it.second) })
@@ -539,6 +695,15 @@ private fun digest(result: BindingResult): List<String> =
             source.bound.map { "${source.path}: ${filesOf(it)} -> ${it.main.name} ${it.rule}" }
         } +
         result.problems.map { "problem: ${problemLine(it)}" }
+
+/** [digest], plus a line per group's members, per double-claimed main and per unclaimed one. */
+private fun groupDigest(result: BindingResult): List<String> =
+    digest(result) +
+        result.partition.members.mapIndexed { g, members -> "group $g: ${names(members)}" } +
+        result.partition.doubleClaimed.map { (main, groups) ->
+            "double-claimed ${main.name} by ${groups.joinToString()}"
+        } +
+        result.partition.unclaimed.map { "unclaimed ${it.name}" }
 
 private fun problemLine(problem: BindingProblem): String = when (problem) {
     SeasonUnknown -> "season unknown"

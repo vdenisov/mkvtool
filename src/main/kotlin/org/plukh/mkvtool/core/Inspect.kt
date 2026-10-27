@@ -255,7 +255,8 @@ fun inspectDirectory(
 
     val tree = walkTree(dir, excludedPaths(dir, options.config))
 
-    // Binding takes only what passed its checks (a bad regex would throw); a grouped config's sources bind to all.
+    // Binding takes only what passed its checks (a bad regex would throw); a grouped config's sources wait for
+    // inspect to report per group.
     val config = options.config
     val bindingConfig = when {
         config == null -> Config()
@@ -263,7 +264,8 @@ fun inspectDirectory(
         mainMatcherProblems(config, "").isEmpty() -> Config(general = GeneralConfig(matching = config.general.matching))
         else -> Config()
     }
-    val binding = bindFiles(bindingConfig, selection.all, tree, options.substitution.episodeData, selection.selected)
+    val binding =
+        bindFiles(dir, bindingConfig, selection.all, tree, options.substitution.episodeData, selection.selected)
     val selected = selection.selected
     // Even with binding problems: binding is the only source of an episode.
     val substitution = options.substitution.boundTo(binding)
