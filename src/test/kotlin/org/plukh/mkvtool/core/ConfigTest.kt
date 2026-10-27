@@ -700,6 +700,65 @@ class ConfigTest : FunSpec({
         }
     }
 
+    context("effectiveSelection") {
+        data class SelectionCase(val label: String, val first: String, val second: String, val equal: Boolean)
+
+        // Two groups' selections, each written as one group's body under the same shared definition.
+        fun selections(first: String, second: String): Pair<EffectiveSelection, EffectiveSelection> {
+            val groups = yaml(
+                """
+                |sharedTracks:
+                |  - name: jpn
+                |    id: 1
+                |    language: ja
+                |    default: true
+                |groups:
+                |  - episodes: 1
+                |${first.prependIndent("    ")}
+                |  - episodes: 2
+                |${second.prependIndent("    ")}
+                """.trimMargin(),
+            ).groups
+            return groups[0].effectiveSelection() to groups[1].effectiveSelection()
+        }
+
+        val inline = "mainSource:\n  audioTracks:\n    - {id: 1, language: ja, default: true}"
+        withData(
+            nameFn = { it.label },
+            SelectionCase(
+                "a use and the same keys inline",
+                "mainSource:\n  audioTracks:\n    - use: jpn",
+                inline,
+                true,
+            ),
+            SelectionCase(
+                "an override and the same keys inline",
+                "mainSource:\n  audioTracks:\n    - {use: jpn, default: false}",
+                "mainSource:\n  audioTracks:\n    - {id: 1, language: ja, default: false}",
+                true,
+            ),
+            SelectionCase(
+                "an override that makes a difference",
+                "mainSource:\n  audioTracks:\n    - {use: jpn, language: en}",
+                inline,
+                false,
+            ),
+            SelectionCase("a written order equal to the derived one", "$inline\ntrackOrder: '0:0, 0:1'", inline, true),
+            SelectionCase("a written order that differs", "$inline\ntrackOrder: '0:1,0:0'", inline, false),
+            SelectionCase("a written order with an empty entry", "$inline\ntrackOrder: '0:0,,0:1'", inline, false),
+            SelectionCase(
+                "a source with another mask",
+                "additionalSources:\n  - files: 'Rus/*.mka'",
+                "additionalSources:\n  - files: 'Eng/*.mka'",
+                false,
+            ),
+        ) { (_, first, second, equal) ->
+            val (a, b) = selections(first, second)
+
+            (a == b) shouldBe equal
+        }
+    }
+
     context("matchers") {
         test("a v1-shaped config sets no matcher and no outputName") {
             val config = yaml("general: {destinationDir: mkv}\nadditionalSources:\n  - file: \"\${fileName}.mka\"\n")
@@ -932,6 +991,15 @@ class ConfigTest : FunSpec({
                 listOf(
                     "config.yaml sets additionalSources[0].episodeMap; the episode map belongs in general, which " +
                         "maps every number read",
+                ),
+            ),
+            ProblemCase(
+                "a sequence on a group's source, which cannot know which of the group's episodes comes first",
+                "groups:\n  - episodes: 7-12\n    additionalSources:\n      - files: '*.mka'\n" +
+                    "        matcher: Sequence\n",
+                listOf(
+                    "config.yaml pins Sequence on groups[0].additionalSources[0], which a group's source does not " +
+                        "support; pair it by name or an episodeRegex",
                 ),
             ),
         ) { (_, text, problems) ->

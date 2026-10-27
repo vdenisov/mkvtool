@@ -356,6 +356,11 @@ fun bindingProblems(config: Config, configName: String): List<String> {
                         "which has no files to bind"
             }
             problems += matcherProblems(source.matching, path, main = false, configName)
+            // Numbering 1..N cannot know which of a group's episodes its first file is.
+            if (config.declaredGroups != null && source.matching.pin in MATCHERS) {
+                problems += "$configName pins ${source.matching.matcher} on $path, which a group's source " +
+                    "does not support; pair it by name or an episodeRegex"
+            }
         }
     }
     return problems
@@ -475,6 +480,29 @@ fun trackSelectionOf(mainSource: MainSourceConfig?): TrackSelection {
         }.toMap(),
     )
 }
+
+/** What a group muxes, in the form two groups' selections are compared in: equal means the same output. */
+data class EffectiveSelection(
+    val mainSource: MainSourceConfig,
+    val additionalSources: List<AdditionalSource>,
+    val trackOrder: String,
+)
+
+/** This group's [EffectiveSelection]. */
+fun GroupConfig.effectiveSelection(): EffectiveSelection = EffectiveSelection(
+    // A `use:` and the same keys written inline are one track; the name only says where they came from.
+    mainSource = mainSource.copy(
+        videoTrack = mainSource.videoTrack?.copy(ref = null),
+        audioTracks = mainSource.audioTracks.map { it.copy(ref = null) },
+        subtitleTracks = mainSource.subtitleTracks.map { it.copy(ref = null) },
+    ),
+    additionalSources = additionalSources.map { source ->
+        source.copy(tracks = source.tracks.map { it.copy(ref = null) })
+    },
+    // An omitted order is the derived one, and mkvmerge ignores spaces around an entry; an empty entry stays,
+    // since mkvmerge refuses it.
+    trackOrder = (trackOrder ?: deriveTrackOrder(this)).split(',').joinToString(",") { it.trim() },
+)
 
 /** Every track entry of the group with the shared track it names, by config path within the group. */
 private fun GroupConfig.trackRefs(): List<Pair<String, String?>> =

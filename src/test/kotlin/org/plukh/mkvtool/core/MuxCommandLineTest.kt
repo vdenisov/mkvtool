@@ -203,15 +203,20 @@ class MuxCommandLineTest : FunSpec({
                 // Neither the top level nor the other group may leak into the second group's pass.
                 mainSource = MainSourceConfig(audioTracks = listOf(track(9, "xx", "Top level"))),
                 declaredGroups = listOf(
-                    GroupConfig(name = "tv", mainSource = MainSourceConfig(audioTracks = listOf(track(1, "ja", "Ja")))),
+                    GroupConfig(
+                        name = "tv",
+                        membership = Membership(episodes = listOf(2..2)),
+                        mainSource = MainSourceConfig(audioTracks = listOf(track(1, "ja", "Ja"))),
+                    ),
                     GroupConfig(
                         name = "bd",
+                        membership = Membership(episodes = listOf(1..1)),
                         mainSource = MainSourceConfig(audioTracks = listOf(track(2, "en", "English"))),
                         additionalSources = listOf(subs),
                     ),
                 ),
             )
-            val binding = bindFiles(config, listOf(file), listOf(entry("Subs/Show - S01E01.srt")))
+            val binding = bindFiles(File("."), config, listOf(file), listOf(entry("Subs/Show - S01E01.srt")))
             val options = MuxOptions(
                 config = config,
                 mkvmergeExe = EXE,
@@ -368,7 +373,7 @@ private fun Config.commandFor(
     usesCodec: Boolean = false,
     probe: (File) -> ProbeResult = { error("no probe expected") },
 ): List<String> {
-    val binding = bindFiles(this, listOf(file), emptyList())
+    val binding = bindFiles(File("."), this, listOf(file), emptyList())
     val options = MuxOptions(
         config = this,
         mkvmergeExe = EXE,

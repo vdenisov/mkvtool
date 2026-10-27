@@ -257,7 +257,7 @@ class SubstitutionTest : FunSpec({
         test("a masked-out main of another season lends episodeNum no width") {
             val five = File("Show - S01E05.mkv")
             val mains = listOf(five, File("Show - S02E120.mkv"))
-            val binding = bindFiles(Config(), mains, emptyList(), run = listOf(five))
+            val binding = bindFiles(File("."), Config(), mains, emptyList(), run = listOf(five))
 
             SubstitutionEngine().boundTo(binding).fileVarsFor(five).vars["episodeNum"] shouldBe "05"
         }
@@ -527,4 +527,4 @@ private fun fieldsOf(config: Map<*, *>): List<TemplateField> = collectTemplateFi
 
 /** [data]'s engine bound to the files [names], by the rule a config with no matcher binds with. */
 private fun boundEngine(data: EpisodeData?, vararg names: String): SubstitutionEngine =
-    SubstitutionEngine(data).boundTo(bindFiles(Config(), names.map(::File), emptyList(), data))
+    SubstitutionEngine(data).boundTo(bindFiles(File("."), Config(), names.map(::File), emptyList(), data))
