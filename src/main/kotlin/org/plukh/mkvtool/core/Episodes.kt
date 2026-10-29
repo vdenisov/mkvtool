@@ -77,9 +77,12 @@ data class EpisodeData(
 
 /** Season and episode numbers from [baseName], or null when it carries none. Case-insensitive, and the
  *  leftmost token wins when a name somehow holds two. */
-fun parseSeasonEpisode(baseName: String?): SeasonEpisode? {
+fun parseSeasonEpisode(baseName: String?): SeasonEpisode? = readSeasonEpisode(baseName)?.first
+
+/** [parseSeasonEpisode], with the episode's digits as [baseName] spells them. */
+internal fun readSeasonEpisode(baseName: String?): Pair<SeasonEpisode, String>? {
     val match = SEASON_EPISODE.find(baseName.orEmpty().lowercase()) ?: return null
-    return SeasonEpisode(match.groupValues[1], pad(match.groupValues[2].toInt()))
+    return SeasonEpisode(match.groupValues[1], pad(match.groupValues[2].toInt())) to match.groupValues[2]
 }
 
 /**

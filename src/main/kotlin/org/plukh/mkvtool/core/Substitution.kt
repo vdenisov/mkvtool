@@ -28,7 +28,7 @@ import java.util.MissingResourceException
 /** Variables describing the episode being muxed. Valid in every templated field. */
 val FILE_VARS = setOf(
     "fileName", "extension", "showName", "seasonNum", "seasonN",
-    "episodeNum", "episodeN", "episodeName", "seasonName", "showYear",
+    "episodeNum", "episodeN", "episodeRead", "episodeName", "seasonName", "showYear",
 )
 
 /** Variables describing the track a title belongs to. Valid only in a title. */
@@ -138,6 +138,26 @@ private val LOOSE_PATTERN = Regex("""\$\{[^}]*\}""")
 fun substitute(template: String, vars: Map<String, String?>): String =
     template.replace(VAR_PATTERN) { match -> vars[match.groupValues[1]] ?: "" }
 
+/** The variable names [template] uses. */
+fun variablesIn(template: String): Set<String> =
+    VAR_PATTERN.findAll(template).mapTo(LinkedHashSet()) { it.groupValues[1] }
+
+/** Whether [template]'s own text, outside its variables, carries a `*` or a `?`. */
+fun hasWildcard(template: String): Boolean = template.replace(VAR_PATTERN, "").any { it == '*' || it == '?' }
+
+/** [template] expanded from [vars] as a glob: its own text is glob text, and each value matches literally. */
+fun templateGlob(template: String, vars: Map<String, String?>): Regex {
+    val parts = ArrayList<Pair<String, Boolean>>()
+    var last = 0
+    for (match in VAR_PATTERN.findAll(template)) {
+        parts += template.substring(last, match.range.first) to true
+        parts += vars[match.groupValues[1]].orEmpty() to false
+        last = match.range.last + 1
+    }
+    parts += template.substring(last) to true
+    return globRegex(parts)
+}
+
 /** One episode's file-scope variables, and which of them no source could supply. */
 data class FileVars(val vars: Map<String, String?>, val missing: Set<String>)
 
@@ -154,11 +174,13 @@ private infix fun String?.orIfEmpty(fallback: String?): String? =
  *
  * [episodeData] is supplied already parsed — the same seam as [normalizeYaml]: the caller owns reading
  * and parsing, this owns the semantics. [bound] is each main file's episode as binding decided it, and the
- * only source of one: a file it does not hold has no episode.
+ * only source of one: a file it does not hold has no episode. [read] is the number each main's name spelled,
+ * before the episode map.
  */
 class SubstitutionEngine(
     val episodeData: EpisodeData? = null,
     private val bound: Map<File, SeasonEpisode> = emptyMap(),
+    private val read: Map<File, String> = emptyMap(),
 ) {
 
     private val cache = HashMap<File, FileVars>()
@@ -172,14 +194,18 @@ class SubstitutionEngine(
      * main whose name gave another season is left out: the masks kept it out of the run, and its number would
      * widen this season's.
      */
-    fun boundTo(binding: BindingResult): SubstitutionEngine {
-        val episodes = binding.episodes
-            .filter { binding.season == null || it.season == null || it.season == binding.season }
-            .associate { main ->
-                val season = binding.season ?: main.season ?: episodeData?.season.orEmpty()
-                main.main to SeasonEpisode(season, pad(main.episode!!))
-            }
-        return SubstitutionEngine(episodeData, episodes)
+    fun boundTo(binding: BindingResult): SubstitutionEngine = boundTo(binding.season, binding.mains)
+
+    /** This engine over [mains]' episodes, in [season]; binding's own view, before its result exists. */
+    fun boundTo(season: String?, mains: List<MainEpisode>): SubstitutionEngine {
+        val inSeason = mains
+            .filter { it.episode != null }
+            .filter { season == null || it.season == null || it.season == season }
+        val episodes = inSeason.associate { main ->
+            main.main to SeasonEpisode(season ?: main.season ?: episodeData?.season.orEmpty(), pad(main.episode!!))
+        }
+        val read = inSeason.mapNotNull { main -> main.read?.let { main.main to it } }.toMap()
+        return SubstitutionEngine(episodeData, episodes, read)
     }
 
     /**
@@ -213,6 +239,7 @@ class SubstitutionEngine(
                 pad(it, episodeWidth(listOfNotNull(it, boundMax, metadataMax.takeIf { metadata != null })))
             },
             "episodeN" to episode?.toString(),
+            "episodeRead" to read[file],
             "episodeName" to (fromData orIfEmpty canonical?.title),
             "showName" to (metadata?.show orIfEmpty canonical?.showName),
             "seasonName" to metadata?.seasonName,

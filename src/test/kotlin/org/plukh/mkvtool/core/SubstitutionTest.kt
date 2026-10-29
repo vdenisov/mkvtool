@@ -98,6 +98,32 @@ class SubstitutionTest : FunSpec({
         ) { substitute(it.template, vars) shouldBe it.expected }
     }
 
+    context("templates as globs") {
+        test("only a template's own text carries a wildcard") {
+            hasWildcard("Subs/*\${fileName}.ass") shouldBe true
+            hasWildcard("Subs/\${fileName}.ass") shouldBe false
+            hasWildcard("Subs/\${fileName}?.ass") shouldBe true
+        }
+
+        test("a substituted value matches literally, a wildcard in it included") {
+            val glob = templateGlob("Subs/\${fileName} *.ass", mapOf("fileName" to "A*B"))
+
+            glob.matches("Subs/A*B [Dub].ass") shouldBe true
+            glob.matches("Subs/AxxB [Dub].ass") shouldBe false
+        }
+
+        test("a template reads the tree for a wildcard or a paired format's half, and for nothing else") {
+            readsTree("Subs/*\${fileName}.ass") shouldBe true
+            readsTree("Subs/\${fileName}.IDX") shouldBe true
+            readsTree("Subs/\${fileName}.sub") shouldBe true
+            readsTree("\${fileName}[Studio].mka") shouldBe false
+        }
+
+        test("variablesIn names each variable once") {
+            variablesIn("\${a}/\${b}-\${a}") shouldBe setOf("a", "b")
+        }
+    }
+
     context("fileVarsFor") {
         test("takes the episode name from metadata, and everything else from the canonical name") {
             val engine = boundEngine(
@@ -170,7 +196,8 @@ class SubstitutionTest : FunSpec({
             val vars = engine.fileVarsFor(File("no episode here.mkv"))
 
             vars.missing shouldContainExactly setOf(
-                "seasonNum", "seasonN", "episodeNum", "episodeN", "episodeName", "showName", "seasonName", "showYear",
+                "seasonNum", "seasonN", "episodeNum", "episodeN", "episodeRead", "episodeName", "showName", "seasonName",
+                "showYear",
             )
             // Whatever the file name itself can answer is never missing.
             vars.vars["fileName"] shouldBe "no episode here"
@@ -191,7 +218,7 @@ class SubstitutionTest : FunSpec({
             val engine = SubstitutionEngine(EpisodeData(season = "01", byEpisode = mapOf("01" to "One")))
 
             engine.fileVarsFor(File("Show.S01E01.mkv")).missing shouldContainExactly
-                setOf("episodeNum", "episodeN", "episodeName", "showName", "seasonName", "showYear")
+                setOf("episodeNum", "episodeN", "episodeRead", "episodeName", "showName", "seasonName", "showYear")
         }
 
         test("results are memoized per file") {
@@ -204,7 +231,7 @@ class SubstitutionTest : FunSpec({
         test("bound, the episode is binding's, not the name's, and the title is looked up under it") {
             // A regex read 13 and the map made it episode 1; the season is the metadata's, the run's only one.
             val main = File("[Grp] Show - 13 (BD).mkv")
-            val mains = listOf(MainEpisode(main, 13, 1))
+            val mains = listOf(MainEpisode(main, "13", 1))
             val binding = BindingResult("01", BindingRule.REGEX, mains, emptyList(), emptyList())
             val data = EpisodeData(season = "01", byEpisode = mapOf("01" to "Pilot"))
             val engine = SubstitutionEngine(data).boundTo(binding)
@@ -214,6 +241,17 @@ class SubstitutionTest : FunSpec({
             vars["episodeNum"] shouldBe "01"
             vars["episodeName"] shouldBe "Pilot"
             vars["fileName"] shouldBe "[Grp] Show - 13 (BD)"
+            vars["episodeRead"] shouldBe "13"
+        }
+
+        test("episodeRead is the number as the name spelled it, and missing for a main that read none") {
+            val main = File("R - 013.mkv")
+            val mains = listOf(MainEpisode(main, "013", 1))
+            val binding = BindingResult("01", BindingRule.REGEX, mains, emptyList(), emptyList())
+            val engine = SubstitutionEngine().boundTo(binding)
+
+            engine.fileVarsFor(main).vars["episodeRead"] shouldBe "013"
+            ("episodeRead" in engine.fileVarsFor(File("NCOP.mkv")).missing) shouldBe true
         }
 
         test("episodeNum is written at the width of the season the metadata describes") {
@@ -245,8 +283,8 @@ class SubstitutionTest : FunSpec({
         test("bound, episodeNum takes its width from every main, a masked-out one included") {
             val five = File("Show - S01E05.mkv")
             val mains = listOf(
-                MainEpisode(five, 5, 5),
-                MainEpisode(File("Show - S01E100.mkv"), 100, 100),
+                MainEpisode(five, "05", 5),
+                MainEpisode(File("Show - S01E100.mkv"), "100", 100),
             )
             val binding = BindingResult("01", BindingRule.SXXEYY, mains, emptyList(), emptyList())
             val engine = SubstitutionEngine().boundTo(binding)
@@ -481,7 +519,7 @@ class SubstitutionTest : FunSpec({
             val fatal = report(validation, fatal = true)
             fatal shouldContain "*** Error: config.yaml has 1 substitution problem:"
             fatal shouldContain "  general.title: \${epsiodeName}"
-            fatal shouldContain "      valid here: episodeN, episodeName, episodeNum, extension, fileName, " +
+            fatal shouldContain "      valid here: episodeN, episodeName, episodeNum, episodeRead, extension, fileName, " +
                 "seasonN, seasonName, seasonNum, showName, showYear"
 
             val warned = report(validation, fatal = false)

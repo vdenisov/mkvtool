@@ -169,8 +169,8 @@ class InspectCommand : Callable<Int> {
             configProblems++
         }
         // Episode metadata produces no findings of its own, so an unusable one is a warning and deliberately
-        // *not* a config problem. It can still fail --strict through binding — a `sequence` with no episode
-        // count to meet — because that is a batch mux would refuse.
+        // *not* a config problem. It can still fail --strict through binding — no season left to name —
+        // because that is a batch mux would refuse.
         val episodes = loadEpisodeMetadata(dir, offset = 1)
         if (episodes is EpisodeMetadata.Unusable) {
             renderer.render(Warning("${episodes.message}; continuing without episode metadata."))

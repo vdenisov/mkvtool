@@ -2,24 +2,32 @@ package org.plukh.mkvtool.core
 
 import org.plukh.mkvtool.out.CommandResult
 import java.io.File
+import java.util.Locale
 
-/** Which rule paired a file: a name rule, or the number rule that read its episode. */
-enum class BindingRule { EXACT, SUFFIX, REGEX, SXXEYY, SEQUENCE }
+/** Which rule read the main files' episodes: the config's `episodeRegex`, or `SxxEyy`. */
+enum class BindingRule { REGEX, SXXEYY }
 
 /**
- * A main file's [episode], mapped from the release number the run's rule [read]; both null when it read none.
- * [season] is the one its name gave, if any.
+ * A main file's [episode], mapped from the number the run's rule [read], as the name spells it; both null when it
+ * read none. [season] is the one its name gave, if any.
  */
-data class MainEpisode(val main: File, val read: Int?, val episode: Int?, val season: String? = null)
+data class MainEpisode(val main: File, val read: String?, val episode: Int?, val season: String? = null)
 
-/** A source file paired with [main] by [rule], and the [partner] that travels with it when it is half of a pair. */
-data class BoundFile(val entry: TreeEntry, val main: File, val rule: BindingRule, val partner: TreeEntry? = null) {
-    /** [entry], and [partner] when there is one. */
-    val files: List<TreeEntry> get() = listOfNotNull(entry, partner)
-}
+/**
+ * The file a source's template resolved to for [main]: [path] as the command line names it, and the [partner] that
+ * travels with it when it is half of a pair.
+ */
+data class CompanionFile(val main: File, val path: String, val file: File, val partner: File? = null)
 
-/** One `files:` source's files paired with main files, by its config [path]. */
-data class SourceBinding(val path: String, val bound: List<BoundFile>)
+/**
+ * One source's resolved files, by its config [path]: [companions] for the mains it found exactly one file for, and
+ * [ambiguous] the paths it matched for the mains it found several for. A main in neither has no file of this source.
+ */
+data class SourceBinding(
+    val path: String,
+    val companions: List<CompanionFile>,
+    val ambiguous: Map<File, List<String>> = emptyMap(),
+)
 
 /** Why a batch cannot be bound. Any one of them fails the whole batch; the user fixes the files or the config. */
 sealed interface BindingProblem
@@ -33,25 +41,16 @@ data class SeasonConflict(val bySeason: Map<String, List<String>>, val metadata:
 /** Several [mains] on one [episode]. */
 data class DuplicateEpisode(val episode: Int, val mains: List<File>) : BindingProblem
 
-/** A `sequence` over [files] files where [expected] were wanted; null when there was nothing to count against. */
-data class SequenceCount(val path: String, val files: Int, val expected: Int?) : BindingProblem
+/** The template of source [path] matching several files, [matches], for [main]. */
+data class AmbiguousCompanion(val path: String, val main: File, val matches: List<String>) : BindingProblem
 
-/** A file source [path]'s masks match that pairs with no main file. */
-data class UnpairedFile(val path: String, val entry: TreeEntry) : BindingProblem
-
-/** A file named after several [mains] at once, which share a base name. */
-data class NameTie(val path: String, val entry: TreeEntry, val mains: List<File>) : BindingProblem
-
-/** Several [entries] of one source paired with one [main]. */
-data class SharedMain(val path: String, val main: File, val entries: List<TreeEntry>) : BindingProblem
-
-/** One file paired by several sources, at [paths]. */
-data class SharedFile(val entry: TreeEntry, val paths: List<String>) : BindingProblem
+/** One file, [path], picked for one [main] by several sources, at [sources]. */
+data class RepeatedCompanion(val path: String, val main: File, val sources: List<String>) : BindingProblem
 
 /**
  * The batch's one [season], the [rule] its main files were read by, every main file with the episode it read if
- * any, each `files:` source's pairings, and the mains split by the group claiming each. Nothing may act on it
- * while [problems] is not empty.
+ * any, each source's files, and the mains split by the group claiming each. Nothing may act on it while
+ * [problems] is not empty.
  */
 data class BindingResult(
     val season: String?,
@@ -67,17 +66,22 @@ data class BindingResult(
     /** The mains that read an episode. */
     val episodes: List<MainEpisode> get() = mains.filter { it.episode != null }
 
-    private val byPathAndMain: Map<Pair<String, File>, BoundFile> by lazy {
-        sources.flatMap { source -> source.bound.map { (source.path to it.main) to it } }.toMap()
+    private val byPathAndMain: Map<Pair<String, File>, CompanionFile> by lazy {
+        sources.flatMap { source -> source.companions.map { (source.path to it.main) to it } }.toMap()
     }
 
-    /** The file the `files:` source at config [path] paired with [main], or null when it paired none. */
-    fun boundFile(path: String, main: File): BoundFile? = byPathAndMain[path to main]
+    /** The file the source at config [path] resolved to for [main], or null when it resolved to none. */
+    fun companion(path: String, main: File): CompanionFile? = byPathAndMain[path to main]
 
     /** This binding as far as a run over [files] reaches; the problems stay whole, since they fail the batch. */
     fun narrowedTo(files: Set<File>): BindingResult = copy(
         mains = mains.filter { it.main in files },
-        sources = sources.map { source -> source.copy(bound = source.bound.filter { it.main in files }) },
+        sources = sources.map { source ->
+            source.copy(
+                companions = source.companions.filter { it.main in files },
+                ambiguous = source.ambiguous.filterKeys { it in files },
+            )
+        },
         partition = GroupPartition(
             members = partition.members.map { members -> members.filter { it in files } },
             unclaimed = partition.unclaimed.filter { it in files },
@@ -92,18 +96,15 @@ data class BindingResult(
 data class BindingReport(val binding: BindingResult, val fatal: Boolean) : CommandResult
 
 /**
- * Gives each of [mains] an episode by one rule (`sequence`, the regex, or `SxxEyy`), and pairs each file a
- * `files:` source matches in [tree] with a main file. A main no rule reads is a main with no episode, which
- * only a name can pair with; anything ambiguous or unpaired is a problem, and nothing is guessed.
+ * Gives each of [mains] an episode by one rule (the regex, or `SxxEyy`), splits them by group, and resolves each
+ * group's source templates for its mains. A main no rule reads is a main with no episode; anything ambiguous is a
+ * problem, and nothing is guessed.
  *
- * [mains] is the full list, before any command-line mask: with the longest name winning, a masked-out
- * `X 2.mkv` would let `X 2.srt` pair with `X.mkv` with the suffix " 2". [tree] leaves out `destinationDir`, and
- * [config] has passed [bindingProblems]. The mains are split by group between being read and being paired, since
- * groups claim by episode; a group's source keeps only the pairings with its own members, and a file whose main
- * another group claims, or none does, is simply not that source's. [dir] is the media directory. [episodes] is a
- * season to agree with and what the main files' `sequence` counts against.
- * [run] is the mains the masks selected: the season and duplicate-episode checks, and pairing by number, are
- * about those, so a sample the run leaves out cannot clash with its episode; a `sequence` still numbers every main.
+ * [mains] is the full list, before any command-line mask, and [run] the mains the masks selected: the season and
+ * duplicate-episode checks and the templates are about the run, so a sample it leaves out cannot clash with its
+ * episode. [dir] is the media directory a literal template resolves against, [tree] what a wildcard is matched
+ * against, leaving out `destinationDir`. [config] has passed [bindingProblems]. [episodes] is a season to agree
+ * with and the variables a template may use.
  */
 fun bindFiles(
     dir: File,
@@ -114,12 +115,12 @@ fun bindFiles(
     run: Collection<File> = mains,
 ): BindingResult = Binder(dir, config, mains, run.toSet(), episodes).bind(tree)
 
-private const val SEQUENCE = "sequence"
+/** A release number as a rule read it, as the name spells it, with the season when the name carries one. */
+private data class Read(val season: String?, val spelled: String) {
+    val number: Int get() = spelled.toInt()
+}
 
-/** A release number as a rule read it, with the season when the name carries one. */
-private data class Read(val season: String?, val number: Int)
-
-/** The number rules of one config entry: its regexes, compiled once. */
+/** The number rules of `general`: its regexes, compiled once. */
 private class NumberReader(matching: MatcherConfig) {
     // A blank regex is no regex, as bindingProblems reads it.
     private val episodeRegex = matching.episodeRegex?.takeUnless { it.isBlank() }?.let(::Regex)
@@ -132,14 +133,14 @@ private class NumberReader(matching: MatcherConfig) {
         val number = episodeRegex?.let { capturedIn(base, it) } ?: return null
         if (seasonRegex == null) return Read(null, number)
         val season = capturedIn(base, seasonRegex) ?: return null
-        return Read(pad(season), number)
+        return Read(pad(season.toInt()), number)
     }
 
-    fun sxxeyy(base: String): Read? = parseSeasonEpisode(base)?.let { Read(it.season, it.episode.toInt()) }
+    fun sxxeyy(base: String): Read? = readSeasonEpisode(base)?.let { (parsed, spelled) -> Read(parsed.season, spelled) }
 
     /** Group 1 of [regex]'s first match in [base], or null when it is no number. */
-    private fun capturedIn(base: String, regex: Regex): Int? =
-        regex.find(base)?.groupValues?.get(1)?.takeIf { ALL_DIGITS.matches(it) }?.toIntOrNull()
+    private fun capturedIn(base: String, regex: Regex): String? =
+        regex.find(base)?.groupValues?.get(1)?.takeIf { ALL_DIGITS.matches(it) && it.toIntOrNull() != null }
 }
 
 private class Binder(
@@ -151,157 +152,122 @@ private class Binder(
 ) {
     private val problems = ArrayList<BindingProblem>()
 
-    /** Files already reported as pairing with no main, or a tie: groups sharing a mask each meet the same one. */
-    private val unpaired = HashSet<TreeEntry>()
-
-    /** Every season a paired file read, with the name it was read from. */
+    /** Every season a main in the run read, with the name it was read from. */
     private val seasons = ArrayList<Pair<String, String>>()
     private val ranges = config.general.matching.episodeMap?.entries.orEmpty().mapNotNull { entry ->
         entry.fromRange?.let { from -> entry.toRange?.let { from to it } }
     }
-    private val byName = byLongestBase(mains)
     private val reader = NumberReader(config.general.matching)
-    private val rule = when {
-        config.general.matching.pin == SEQUENCE -> BindingRule.SEQUENCE
-        reader.hasRegex -> BindingRule.REGEX
-        else -> BindingRule.SXXEYY
-    }
+    private val rule = if (reader.hasRegex) BindingRule.REGEX else BindingRule.SXXEYY
 
     fun bind(tree: List<TreeEntry>): BindingResult {
-        // A refused `sequence` is one problem that says it all: every main stays unread, and nothing pairs.
-        val bound = bindMains()
-        val read = bound ?: mains.map { MainEpisode(it, null, null) }
-        val episodeOf = read.associate { it.main to it.episode }
-        val partition = partitionByGroup(config.groups, mains) { episodeOf[it] }
-        val groups = config.groups.indices.mapNotNull { config.groupRef(it) }
-        if (bound == null) return BindingResult(null, rule, read, emptyList(), problems, partition, groups)
-        // Each main's group; a main no group claims has none.
-        val groupOf = partition.members.flatMapIndexed { g, members -> members.map { it to g } }.toMap()
-
-        // Episode to the mains claiming it; only a main that read one can claim, or clash over, an episode.
-        val claims = bound.mapNotNull { main -> main.episode?.let { it to main.main } }
-            .groupBy({ it.first }, { it.second })
-        claims.forEach { (episode, claimed) ->
-            val inRun = claimed.filter { it in run }
-            if (inRun.size > 1) problems += DuplicateEpisode(episode, inRun)
-        }
-
-        val mainPaths = mains.mapTo(HashSet()) { it.absolutePath }
-        val sources = config.groups.flatMapIndexed { g, group ->
-            group.additionalSources.mapIndexedNotNull { i, source ->
-                source.files?.let { masks ->
-                    val candidates = candidatesOf(masks, tree, mainPaths)
-                    bindSource({ groupOf[it] == g }, config.sourcePath(g, i), source.matching, candidates, claims)
-                }
-            }
-        }
-        sharedFiles(sources)
-        val season = seasonOf(bound.any { it.episode != null && it.main in run })
-        return BindingResult(season, rule, bound, sources, problems, partition, groups)
-    }
-
-    /** Every main with the episode the run's rule read, or null when the mains' `sequence` was refused. */
-    private fun bindMains(): List<MainEpisode>? {
-        if (rule == BindingRule.SEQUENCE) {
-            if (mains.isEmpty()) return emptyList()
-            val expected = episodes?.byEpisode?.size?.takeIf { it > 0 }
-            if (expected != mains.size) {
-                problems += SequenceCount("general", mains.size, expected)
-                return null
-            }
-            return mains.sortedBy { it.name }.mapIndexed { i, main -> MainEpisode(main, i + 1, mapped(i + 1)) }
-        }
-        return mains.map { main ->
+        val bound = mains.map { main ->
             val base = baseNameOf(main.name)
             val read = if (rule == BindingRule.REGEX) reader.regex(base) else reader.sxxeyy(base)
             if (main in run) read?.season?.let { seasons += it to main.name }
-            MainEpisode(main, read?.number, read?.let { mapped(it.number) }, read?.season)
+            MainEpisode(main, read?.spelled, read?.let { mapped(it.number) }, read?.season)
         }
+        val episodeOf = bound.associate { it.main to it.episode }
+        val partition = partitionByGroup(config.groups, mains) { episodeOf[it] }
+        val groups = config.groups.indices.mapNotNull { config.groupRef(it) }
+
+        // Only a main that read an episode can clash over one.
+        bound.filter { it.episode != null && it.main in run }.groupBy { it.episode!! }.forEach { (episode, clashing) ->
+            if (clashing.size > 1) problems += DuplicateEpisode(episode, clashing.map { it.main })
+        }
+        val season = seasonOf(bound.any { it.episode != null && it.main in run })
+
+        val engine = SubstitutionEngine(episodes).boundTo(season, bound)
+        val sources = resolveSources(engine, partition, tree)
+        return BindingResult(season, rule, bound, sources, problems, partition, groups)
     }
 
-    /** [inGroup] says whether a main is one of the source's group's members. */
-    private fun bindSource(
-        inGroup: (File) -> Boolean,
-        path: String,
-        matching: MatcherConfig,
-        candidates: List<Pair<TreeEntry, TreeEntry?>>,
-        claims: Map<Int, List<File>>,
-    ): SourceBinding {
-        val reader = NumberReader(matching)
-        val sequenced = matching.pin == SEQUENCE
-        // Episodes, not mains: a masked-out sample shares its episode, and needs no file of its own.
-        if (sequenced && candidates.size != claims.size) {
-            problems += SequenceCount(path, candidates.size, claims.size)
-            return SourceBinding(path, emptyList())
-        }
-        val ordinals = if (sequenced) {
-            candidates.map { it.first }.sortedBy { it.relPath }.withIndex().associate { it.value to it.index + 1 }
-        } else {
-            emptyMap()
-        }
+    /**
+     * Each group's source templates resolved for the group's mains in the run. A template naming a variable nothing
+     * knows resolves nothing, validation having reported it; one a main has no value for resolves nothing for that
+     * main. A main missing a variable its group's templates use is stage two's to drop, so it raises no problem.
+     */
+    private fun resolveSources(
+        engine: SubstitutionEngine,
+        partition: GroupPartition,
+        tree: List<TreeEntry>,
+    ): List<SourceBinding> {
+        // A wildcard can match a main file as easily as a companion; a main is never another main's source.
+        val mainPaths = mains.mapTo(HashSet()) { fileKey(it) }
+        val candidates = tree.filter { fileKey(it.file) !in mainPaths }
+        // mkvmerge reads a pair through its primary half, so the partner beside it is the same track, not a rival.
+        val pairs = withPartners(candidates) { it }.filter { it.second != null }
+        val partnerOf = pairs.associate { (entry, partner) -> fileKey(entry.file) to partner!!.file }
+        val primaryOf = pairs.associate { (entry, partner) -> fileKey(partner!!.file) to entry }
+        // Each kept main's files, by file, with the sources that picked each.
+        val picks = LinkedHashMap<Pair<File, String>, MutableList<Pair<String, CompanionFile>>>()
 
-        val bound = candidates.mapNotNull { (entry, partner) ->
-            when {
-                sequenced -> byNumber(
-                    inGroup, path, entry, partner, Read(null, ordinals.getValue(entry)), BindingRule.SEQUENCE, claims,
-                )
-                reader.hasRegex ->
-                    byNumber(inGroup, path, entry, partner, reader.regex(entry.base), BindingRule.REGEX, claims)
-                else -> {
-                    // A name match or a tie settles the file; only no name at all reads a number.
-                    val named = byName.longestPrefix(entry.base)
-                    if (named.isNotEmpty()) byName(inGroup, path, entry, partner, named)
-                    else byNumber(inGroup, path, entry, partner, reader.sxxeyy(entry.base), BindingRule.SXXEYY, claims)
+        val sources = config.groups.flatMapIndexed { g, group ->
+            val used = validateTemplates(collectTemplateFields(config, g)).usedFileVars
+            group.additionalSources.mapIndexedNotNull { i, source ->
+                val template = source.file?.takeIf { it.isNotEmpty() } ?: return@mapIndexedNotNull null
+                val path = config.sourcePath(g, i)
+                // An unknown name would expand to nothing, and `*${'$'}{typo}*` would then cross folders as `**`.
+                val names = variablesIn(template)
+                if (names.any { it !in FILE_VARS }) return@mapIndexedNotNull SourceBinding(path, emptyList())
+                val wildcard = hasWildcard(template)
+                val ambiguous = LinkedHashMap<File, List<String>>()
+                val companions = partition.members[g].filter { it in run }.mapNotNull { main ->
+                    val vars = engine.fileVarsFor(main)
+                    if (names.any { it in vars.missing }) return@mapNotNull null
+                    val matches = resolve(template, wildcard, vars.vars, candidates, main)
+                        .map { asPrimary(it, primaryOf, partnerOf) }
+                        .distinctBy { fileKey(it.file) }
+                    if (matches.size > 1) ambiguous[main] = matches.map { it.path }
+                    if (vars.missing.none { it in used }) {
+                        if (matches.size > 1) problems += AmbiguousCompanion(path, main, matches.map { it.path })
+                        matches.singleOrNull()?.let {
+                            picks.getOrPut(main to fileKey(it.file)) { ArrayList() } += path to it
+                        }
+                    }
+                    matches.singleOrNull()
                 }
+                SourceBinding(path, companions, ambiguous)
             }
         }
-        bound.groupBy { it.main }.filterValues { it.size > 1 }.forEach { (main, shared) ->
-            problems += SharedMain(path, main, shared.map { it.entry })
+
+        // Two sources handing one main one file would mux it twice.
+        picks.forEach { (key, picked) ->
+            if (picked.size > 1) {
+                problems += RepeatedCompanion(picked.first().second.path, key.first, picked.map { it.first })
+            }
         }
-        return SourceBinding(path, bound)
+        return sources
     }
 
-    /** [entry] paired with the one of [named] its name starts with, episode or not; a tie is a problem. Every main
-     *  is a candidate, so a file named after another group's main cannot fall to a shorter name in this one. */
-    private fun byName(
-        inGroup: (File) -> Boolean,
-        path: String,
-        entry: TreeEntry,
-        partner: TreeEntry?,
-        named: List<MainFile>,
-    ): BoundFile? {
-        val main = named.singleOrNull()
-        if (main == null) {
-            if (unpaired.add(entry)) problems += NameTie(path, entry, named.map { it.file })
-            return null
-        }
-        if (!inGroup(main.file)) return null
-        val rule = if (main.lower == entry.base.lowercase()) BindingRule.EXACT else BindingRule.SUFFIX
-        return BoundFile(entry, main.file, rule, partner)
+    /** What [template] names for [main]: the one file a literal names, or every file a wildcard matches. */
+    private fun resolve(
+        template: String,
+        wildcard: Boolean,
+        vars: Map<String, String?>,
+        candidates: List<TreeEntry>,
+        main: File,
+    ): List<CompanionFile> {
+        val path = substitute(template, vars)
+        val file = resolveAgainst(dir, path)
+        // A file whose own name holds a `*` or `?` (legal off Windows) is named literally, as a mask names it.
+        if (!wildcard || file.isFile) return if (file.isFile) listOf(CompanionFile(main, path, file)) else emptyList()
+        val glob = templateGlob(template, vars)
+        return candidates.filter { glob.matches(it.relPath) }.map { CompanionFile(main, it.relPath, it.file) }
     }
 
-    /** [entry] paired with the main that claims [read]'s mapped episode; no number, or no main, is a problem, and a
-     *  main outside the group ([inGroup]) makes it another group's file. */
-    private fun byNumber(
-        inGroup: (File) -> Boolean,
-        path: String,
-        entry: TreeEntry,
-        partner: TreeEntry?,
-        read: Read?,
-        rule: BindingRule,
-        claims: Map<Int, List<File>>,
-    ): BoundFile? {
-        val claimed = read?.let { claims[mapped(it.number)] }.orEmpty()
-        val main = claimed.singleOrNull() ?: claimed.filter { it in run }.singleOrNull()
-        // A clash among the run's mains has failed the batch already, and one outside the run is not its concern.
-        if (main == null && claimed.size > 1) return null
-        if (read == null || main == null) {
-            if (unpaired.add(entry)) problems += UnpairedFile(path, entry)
-            return null
-        }
-        if (!inGroup(main)) return null
-        if (main in run) read.season?.let { seasons += it to entry.relPath }
-        return BoundFile(entry, main, rule, partner)
+    /**
+     * [companion] as the half of a pair mkvmerge reads, with its partner: a template naming either half, or both,
+     * names one track.
+     */
+    private fun asPrimary(
+        companion: CompanionFile,
+        primaryOf: Map<String, TreeEntry>,
+        partnerOf: Map<String, File>,
+    ): CompanionFile {
+        val primary = primaryOf[fileKey(companion.file)]
+            ?.let { companion.copy(path = it.relPath, file = it.file) } ?: companion
+        return primary.copy(partner = partnerOf[fileKey(primary.file)])
     }
 
     /** [number] through the episode map: the first range holding it, else itself. */
@@ -310,14 +276,7 @@ private class Binder(
         return to.first + number - from.first
     }
 
-    private fun sharedFiles(sources: List<SourceBinding>) {
-        sources.flatMap { source -> source.bound.flatMap { bound -> bound.files.map { it to source.path } } }
-            .groupBy({ it.first }, { it.second })
-            .filterValues { it.size > 1 }
-            .forEach { (entry, paths) -> problems += SharedFile(entry, paths) }
-    }
-
-    /** The one season the paired files and the metadata agree on; none, when a main bound, is a problem. */
+    /** The one season the run's mains and the metadata agree on; none, when a main read an episode, is a problem. */
     private fun seasonOf(anyBound: Boolean): String? {
         val bySeason = seasons.groupBy({ it.first }, { it.second })
         val metadata = episodes?.season
@@ -331,16 +290,18 @@ private class Binder(
     }
 }
 
-/** What [masks] match in [tree], mains aside, each with its partner when it is the primary half of a pair. */
-private fun candidatesOf(
-    masks: List<String>,
-    tree: List<TreeEntry>,
-    mainPaths: Set<String>,
-): List<Pair<TreeEntry, TreeEntry?>> {
-    val regexes = masks.map(::maskRegex)
-    val matched = tree.filter { entry ->
-        entry.file.absolutePath !in mainPaths && regexes.any { it.matches(entry.relPath) }
-    }
-    // mkvmerge reads a pair through its primary half, so the partner beside it is the same track, not a rival.
-    return withPartners(matched) { it }
+/**
+ * Whether [template] needs the walked tree: for a wildcard's matches, or for the partner of a paired format's half.
+ * Every other template names its one file on its own.
+ */
+fun readsTree(template: String): Boolean {
+    val extension = template.substringAfterLast('.').lowercase(Locale.ROOT)
+    return hasWildcard(template) || extension in PAIRED_EXTENSIONS || extension in PAIRED_EXTENSIONS.values
 }
+
+/**
+ * A file's identity across the ways one directory listing and one template spell it: the normalized absolute path,
+ * case folded where the file system ignores case. No file system call, which on a network share is the cost.
+ */
+private fun fileKey(file: File): String =
+    file.absoluteFile.normalize().path.let { if (File.separatorChar == '\\') it.lowercase(Locale.ROOT) else it }

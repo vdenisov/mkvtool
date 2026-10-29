@@ -39,8 +39,8 @@ class ConfigDocsParityTest : FunSpec({
         "id", "language", "default", "charset",
         "additionalSources", "file", "tracks",
         "additionalOptions", "trackOrder",
-        "sharedTracks", "name", "use", "groups", "episodes", "files",
-        "matcher", "episodeRegex", "seasonRegex", "episodeMap", "outputName",
+        "sharedTracks", "name", "use", "groups", "episodes",
+        "episodeRegex", "seasonRegex", "episodeMap", "outputName",
     )
 
     /**

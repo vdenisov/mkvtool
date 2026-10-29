@@ -516,24 +516,21 @@ class InspectTest : FunSpec({
     // inspect binds as mux does, so what would make mux refuse the batch is a warning here and fails --strict.
     test("a binding problem is a warning, and --strict fails on it").config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()
-        stageInput(workDir, "a.mkv")
-        File(workDir, "config.yaml").writeText(
-            "general:\n  matcher: \"sequence\"\nadditionalSources:\n  - files: \"Rus sound/*.mka\"\n",
-            StandardCharsets.UTF_8,
-        )
+        stageInput(workDir, "Show S01E01.mkv")
+        stageInput(workDir, "Show S01E01.mp4")
+        File(workDir, "config.yaml").writeText("general: {}\n", StandardCharsets.UTF_8)
 
         val run = inspect(workDir, "--strict")
         withClue(run.output) {
             run.exitCode shouldBe 2
             run.output shouldContain "*** Warning: the files cannot be bound to episodes (1 problem):"
-            run.output shouldContain
-                "general.matcher is sequence over 1 main file, but there is no episode metadata to count against"
+            run.output shouldContain "episode 1 is claimed by 2 main files: Show S01E01.mkv, Show S01E01.mp4"
             run.output shouldContain "*** Strict mode: 1 binding problem (mux would refuse this batch)."
             run.output shouldNotContain "config problem"
         }
     }
 
-    test("--identify prints the binding table, a files: source's file per episode, and an unread main as a main")
+    test("--identify prints the binding table, a source's file per episode, and an unread main as a main")
         .config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()
         stageInput(workDir, "[Grp] Show - 13 (BD).mkv")
@@ -550,7 +547,8 @@ class InspectTest : FunSpec({
             run.output shouldContain "*** Binding: 3 main files, season 01, by episodeRegex"
             run.output shouldContain "  01   13    [Grp] Show - 13 (BD).mkv"
             run.output shouldContain "  -    -     NCOP.mkv"
-            run.output shouldContain "             additionalSources[0]  Subs/13.srt  (regex)"
+            run.output shouldContain "             additionalSources[0]  Subs/13.srt"
+            run.output shouldNotContain "(regex)"
             run.output shouldContain "  + Subs/13.srt"
             run.output shouldContain "*** NCOP.mkv"
             run.output shouldNotContain "*** Extras"
@@ -577,14 +575,12 @@ class InspectTest : FunSpec({
     test("a binding problem is a counted config problem").config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()
         stageInput(workDir, "a.mkv")
-        File(workDir, "config.yaml").writeText("general:\n  matcher: \"fuzzy\"\n", StandardCharsets.UTF_8)
+        File(workDir, "config.yaml").writeText("general:\n  seasonRegex: \"S(\\\\d+)\"\n", StandardCharsets.UTF_8)
 
         val run = inspect(workDir, "--strict")
         withClue(run.output) {
             run.exitCode shouldBe 2
-            run.output shouldContain
-                "*** Warning: config.yaml has an unknown matcher 'fuzzy' at general.matcher; " +
-                "the only pin is 'sequence'."
+            run.output shouldContain "*** Warning: config.yaml sets general.seasonRegex without an episodeRegex."
             run.output shouldContain "config problem"
         }
     }

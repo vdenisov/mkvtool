@@ -2,6 +2,7 @@ package org.plukh.mkvtool.core
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withData
+import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -9,289 +10,95 @@ import io.kotest.matchers.shouldBe
 import java.io.File
 
 /**
- * The binding engine over name-only fixtures: binding reads no file, so no tree is staged on disk. Each
- * expectation is a digest line: the season, a main's episode and the run's rule (`-` for a main
- * that read none), a pairing, a problem.
+ * The binding engine. Reading the main files is name work over unstaged fixtures; resolving the companions stages
+ * its files in a temporary directory, since a literal template asks the disk. Each expectation is a digest line:
+ * the season, a main's episode and the run's rule (`-` for a main that read none), a resolved companion, a problem.
  */
 class BindingTest : FunSpec({
 
-    context("bindFiles") {
+    context("bindFiles: reading the main files") {
         data class Case(
             val label: String,
             val mains: List<String>,
-            val files: List<String>,
-            val sources: List<AdditionalSource>,
             val expected: List<String>,
             val general: MatcherConfig = MatcherConfig(),
             val episodes: EpisodeData? = null,
         )
 
-        val raw5 = "[Salender-Raws] Hellsing OVA - 05 (BD 1080p)"
-        val raw6 = "[Salender-Raws] Hellsing OVA - 06 (BD 1080p)"
         val mn = "[Salender-Raws] Mnemosyne - Mnemosyne no Musume-tachi"
-        val e01 = "Show - S01E01 - Title"
-        val e02 = "Show - S01E02 - Next"
         val season1 = EpisodeData(season = "01")
-        val hash = MatcherConfig(episodeRegex = """#(\d+)""")
         val dash = MatcherConfig(episodeRegex = """ - (\d+)$""")
         val inBrackets = MatcherConfig(episodeRegex = """ - (\d+) \(""")
 
         withData(
             nameFn = { it.label },
             Case(
-                "a raw release's companions pair by exact name across directories",
-                mains = listOf("$raw5.mkv", "$raw6.mkv"),
-                files = listOf(
-                    "Rus Sound/$raw5.mka",
-                    "Rus Sound/$raw6.mka",
-                    "Rus Subs/$raw5.ass",
-                    "Rus Subs/$raw6.ass",
-                ),
-                sources = listOf(files("Rus Sound/*.mka"), files("Rus Subs/*.ass")),
-                general = inBrackets,
-                episodes = season1,
-                expected = listOf(
-                    "season 01",
-                    "main $raw5.mkv E05 REGEX",
-                    "main $raw6.mkv E06 REGEX",
-                    "additionalSources[0]: Rus Sound/$raw5.mka -> $raw5.mkv EXACT",
-                    "additionalSources[0]: Rus Sound/$raw6.mka -> $raw6.mkv EXACT",
-                    "additionalSources[1]: Rus Subs/$raw5.ass -> $raw5.mkv EXACT",
-                    "additionalSources[1]: Rus Subs/$raw6.ass -> $raw6.mkv EXACT",
-                ),
-            ),
-            Case(
-                "the longest main name wins, so a file named after #12 is not #1's with a suffix",
-                mains = listOf("Show #1.mkv", "Show #12.mkv"),
-                files = listOf("Show #12.srt", "Show #1.rus.srt"),
-                sources = listOf(files("*.srt")),
-                general = hash,
-                episodes = season1,
-                expected = listOf(
-                    "season 01",
-                    "main Show #1.mkv E01 REGEX",
-                    "main Show #12.mkv E12 REGEX",
-                    "additionalSources[0]: Show #12.srt -> Show #12.mkv EXACT",
-                    "additionalSources[0]: Show #1.rus.srt -> Show #1.mkv SUFFIX",
-                ),
-            ),
-            Case(
-                // Why a caller passes every main, not the masked ones: this is what a masked-out sibling costs.
-                "without its own main, a sibling pairs with the shorter name and a suffix",
-                mains = listOf("Show #1.mkv"),
-                files = listOf("Show #1 2.srt"),
-                sources = listOf(files("*.srt")),
-                general = hash,
-                episodes = season1,
-                expected = listOf(
-                    "season 01",
-                    "main Show #1.mkv E01 REGEX",
-                    "additionalSources[0]: Show #1 2.srt -> Show #1.mkv SUFFIX",
-                ),
-            ),
-            Case(
-                "a suffix may not continue the main's number, so #12 without its main pairs with nothing",
-                mains = listOf("Show #1.mkv"),
-                files = listOf("Show #12.srt", "Show #1a.srt"),
-                sources = listOf(files("*.srt")),
-                general = hash,
-                episodes = season1,
-                expected = listOf(
-                    "season 01",
-                    "main Show #1.mkv E01 REGEX",
-                    "additionalSources[0]: Show #1a.srt -> Show #1.mkv SUFFIX",
-                    "problem: additionalSources[0]: Show #12.srt unpaired",
-                ),
-            ),
-            Case(
-                "a three-digit episode is its own, so E10 and E100 do not tie",
-                mains = listOf("Show S01E10.mkv", "Show S01E100.mkv"),
-                files = listOf("Subs/Other S01E10.srt", "Subs/Other S01E100.srt"),
-                sources = listOf(files("Subs/*")),
-                expected = listOf(
-                    "season 01",
-                    "main Show S01E10.mkv E10 SXXEYY",
-                    "main Show S01E100.mkv E100 SXXEYY",
-                    "additionalSources[0]: Subs/Other S01E10.srt -> Show S01E10.mkv SXXEYY",
-                    "additionalSources[0]: Subs/Other S01E100.srt -> Show S01E100.mkv SXXEYY",
-                ),
-            ),
-            Case(
-                "names match whatever their case",
-                mains = listOf("$e01.mkv"),
-                files = listOf("Subs/show - s01e01 - title.ASS"),
-                sources = listOf(files("Subs/*")),
-                expected = listOf(
-                    "season 01",
-                    "main $e01.mkv E01 SXXEYY",
-                    "additionalSources[0]: Subs/show - s01e01 - title.ASS -> $e01.mkv EXACT",
-                ),
-            ),
-            Case(
-                "a VobSub .sub travels with its .idx whatever its case, and a lone .sub pairs on its own",
-                mains = listOf("$e01.mkv", "$e02.mkv"),
-                files = listOf("Subs/$e01.idx", "Subs/show - s01e01 - title.sub", "Subs/$e02.sub"),
-                sources = listOf(files("Subs/*")),
-                expected = listOf(
-                    "season 01",
-                    "main $e01.mkv E01 SXXEYY",
-                    "main $e02.mkv E02 SXXEYY",
-                    "additionalSources[0]: Subs/$e01.idx +Subs/show - s01e01 - title.sub -> $e01.mkv EXACT",
-                    "additionalSources[0]: Subs/$e02.sub -> $e02.mkv EXACT",
-                ),
-            ),
-            Case(
-                "a source's files are what its masks match, mains aside, whatever their extension",
-                mains = listOf("$e01.mkv"),
-                files = listOf("$e01.txt", "Subs/$e01.srt"),
-                sources = listOf(files("*")),
-                expected = listOf(
-                    "season 01",
-                    "main $e01.mkv E01 SXXEYY",
-                    "additionalSources[0]: $e01.txt -> $e01.mkv EXACT",
-                ),
-            ),
-            Case(
-                "two files of one source on one main are a problem",
-                mains = listOf("$e01.mkv", "$e02.mkv"),
-                files = listOf("Subs/$e01.ass", "Subs/Other S01E01.srt", "Subs/$e02.ass"),
-                sources = listOf(files("Subs/*")),
-                expected = listOf(
-                    "season 01",
-                    "main $e01.mkv E01 SXXEYY",
-                    "main $e02.mkv E02 SXXEYY",
-                    "additionalSources[0]: Subs/$e01.ass -> $e01.mkv EXACT",
-                    "additionalSources[0]: Subs/Other S01E01.srt -> $e01.mkv SXXEYY",
-                    "additionalSources[0]: Subs/$e02.ass -> $e02.mkv EXACT",
-                    "problem: additionalSources[0]: $e01.mkv shared by Subs/$e01.ass, Subs/Other S01E01.srt",
-                ),
-            ),
-            Case(
-                "one file two sources pair is a problem",
-                mains = listOf("$e01.mkv"),
-                files = listOf("Subs/$e01.ass"),
-                sources = listOf(files("Subs/*"), files("Subs/*.ass")),
-                expected = listOf(
-                    "season 01",
-                    "main $e01.mkv E01 SXXEYY",
-                    "additionalSources[0]: Subs/$e01.ass -> $e01.mkv EXACT",
-                    "additionalSources[1]: Subs/$e01.ass -> $e01.mkv EXACT",
-                    "problem: Subs/$e01.ass in additionalSources[0], additionalSources[1]",
-                ),
-            ),
-            Case(
-                "two mains on one episode are a problem, and a file named after both a tie",
-                mains = listOf("Show S01E01.mkv", "Show S01E01.mp4"),
-                files = listOf("Subs/Show S01E01.ass"),
-                sources = listOf(files("Subs/*")),
-                expected = listOf(
-                    "season 01",
-                    "main Show S01E01.mkv E01 SXXEYY",
-                    "main Show S01E01.mp4 E01 SXXEYY",
-                    "problem: E01 claimed by Show S01E01.mkv, Show S01E01.mp4",
-                    "problem: additionalSources[0]: Subs/Show S01E01.ass named after Show S01E01.mkv, Show S01E01.mp4",
-                ),
-            ),
-            Case(
-                "a file that pairs with no main is a problem",
-                mains = listOf("$e01.mkv"),
-                files = listOf("Subs/Bonus.ass"),
-                sources = listOf(files("Subs/*")),
-                expected = listOf(
-                    "season 01",
-                    "main $e01.mkv E01 SXXEYY",
-                    "problem: additionalSources[0]: Subs/Bonus.ass unpaired",
-                ),
-            ),
-            Case(
-                "a main no rule reads has no episode, and a file named after it pairs with it",
-                mains = listOf("$e01.mkv", "NCOP.mkv"),
-                files = listOf("Subs/$e01.ass", "Subs/NCOP.ass"),
-                sources = listOf(files("Subs/*")),
-                expected = listOf(
-                    "season 01",
-                    "main $e01.mkv E01 SXXEYY",
-                    "main NCOP.mkv -",
-                    "additionalSources[0]: Subs/$e01.ass -> $e01.mkv EXACT",
-                    "additionalSources[0]: Subs/NCOP.ass -> NCOP.mkv EXACT",
-                ),
-            ),
-            Case(
-                "un-numbered mains with no metadata have no season, and that is no problem",
-                mains = listOf("Movie.mkv", "OVA.mkv"),
-                files = emptyList(),
-                sources = emptyList(),
-                expected = listOf("main Movie.mkv -", "main OVA.mkv -"),
-            ),
-            Case(
-                "a number rule cannot reach a main with no episode",
-                mains = listOf("$e01.mkv", "NCOP.mkv"),
-                files = listOf("Subs/01.srt", "Subs/02.srt"),
-                sources = listOf(files("Subs/*", regex = """^(\d+)$""")),
-                expected = listOf(
-                    "season 01",
-                    "main $e01.mkv E01 SXXEYY",
-                    "main NCOP.mkv -",
-                    "additionalSources[0]: Subs/01.srt -> $e01.mkv REGEX",
-                    "problem: additionalSources[0]: Subs/02.srt unpaired",
-                ),
-            ),
-            Case(
-                "a main with an empty base name is named after by nothing",
-                mains = listOf(".mkv"),
-                files = listOf("Subs/Orphan.srt"),
-                sources = listOf(files("Subs/*")),
-                expected = listOf("main .mkv -", "problem: additionalSources[0]: Subs/Orphan.srt unpaired"),
-            ),
-            Case(
-                "numbered-only mains take the metadata's season, and extras no mask reaches stay out",
+                "a raw release reads by its regex, and takes the metadata's season",
                 mains = listOf("$mn - 01 (BD 1080p).mkv", "$mn - 02 (BD 1080p).mkv"),
-                files = listOf(
-                    "Rus Sound/$mn - 01 (BD 1080p).mka",
-                    "Rus Sound/$mn - 02 (BD 1080p).mka",
-                    "Subs/$mn - 02 (BD 1080p).ass",
-                    "Extras/$mn - NCOP (BD 1080p).mkv",
-                    "Extras/$mn - NCOP (BD 1080p).ass",
-                ),
-                sources = listOf(files("Rus Sound/*.mka"), files("Subs/*.ass")),
                 general = inBrackets,
                 episodes = season1,
                 expected = listOf(
                     "season 01",
                     "main $mn - 01 (BD 1080p).mkv E01 REGEX",
                     "main $mn - 02 (BD 1080p).mkv E02 REGEX",
-                    "additionalSources[0]: Rus Sound/$mn - 01 (BD 1080p).mka -> $mn - 01 (BD 1080p).mkv EXACT",
-                    "additionalSources[0]: Rus Sound/$mn - 02 (BD 1080p).mka -> $mn - 02 (BD 1080p).mkv EXACT",
-                    "additionalSources[1]: Subs/$mn - 02 (BD 1080p).ass -> $mn - 02 (BD 1080p).mkv EXACT",
                 ),
+            ),
+            Case(
+                "a three-digit episode is its own, so E10 and E100 do not clash",
+                mains = listOf("Show S01E10.mkv", "Show S01E100.mkv"),
+                expected = listOf("season 01", "main Show S01E10.mkv E10 SXXEYY", "main Show S01E100.mkv E100 SXXEYY"),
+            ),
+            Case(
+                "two mains on one episode are a problem",
+                mains = listOf("Show S01E01.mkv", "Show S01E01.mp4"),
+                expected = listOf(
+                    "season 01",
+                    "main Show S01E01.mkv E01 SXXEYY",
+                    "main Show S01E01.mp4 E01 SXXEYY",
+                    "problem: E01 claimed by Show S01E01.mkv, Show S01E01.mp4",
+                ),
+            ),
+            Case(
+                "a main no rule reads has no episode",
+                mains = listOf("Show - S01E01 - Title.mkv", "NCOP.mkv"),
+                expected = listOf("season 01", "main Show - S01E01 - Title.mkv E01 SXXEYY", "main NCOP.mkv -"),
+            ),
+            Case(
+                "un-numbered mains with no metadata have no season, and that is no problem",
+                mains = listOf("Movie.mkv", "OVA.mkv"),
+                expected = listOf("main Movie.mkv -", "main OVA.mkv -"),
             ),
             Case(
                 "numbered-only mains with no metadata have no season",
                 mains = listOf("$mn - 01 (BD 1080p).mkv"),
-                files = emptyList(),
-                sources = emptyList(),
                 general = inBrackets,
                 expected = listOf("main $mn - 01 (BD 1080p).mkv E01 REGEX", "problem: season unknown"),
             ),
             Case(
-                "absolute numbering maps onto real episodes, where a companion's SxxEyy finds them",
-                mains = listOf("Show - 13.mkv", "Show - 14.mkv"),
-                files = listOf("Subs/Show S02E01.srt"),
-                sources = listOf(files("Subs/*")),
+                "a season split after the fact is a regex and a map, and keeps the number read",
+                mains = listOf("[Grp] Show - 13.mkv", "[Grp] Show - 14.mkv"),
                 general = dash.copy(episodeMap = episodeMap("13-24" to "1-12")),
                 episodes = EpisodeData(season = "02"),
                 expected = listOf(
                     "season 02",
-                    "main Show - 13.mkv E01 (read 13) REGEX",
-                    "main Show - 14.mkv E02 (read 14) REGEX",
-                    "additionalSources[0]: Subs/Show S02E01.srt -> Show - 13.mkv SXXEYY",
+                    "main [Grp] Show - 13.mkv E01 (read 13) REGEX",
+                    "main [Grp] Show - 14.mkv E02 (read 14) REGEX",
+                ),
+            ),
+            Case(
+                "the number read is kept as the name spells it",
+                mains = listOf("R - 013.mkv", "R - 014.mkv"),
+                general = dash.copy(episodeMap = episodeMap("13-14" to "1-2")),
+                episodes = season1,
+                expected = listOf(
+                    "season 01",
+                    "main R - 013.mkv E01 (read 013) REGEX",
+                    "main R - 014.mkv E02 (read 014) REGEX",
                 ),
             ),
             Case(
                 "with no episode map, the number read is the episode",
                 mains = listOf("Raw - 05.mkv"),
-                files = emptyList(),
-                sources = emptyList(),
                 general = dash,
                 episodes = season1,
                 expected = listOf("season 01", "main Raw - 05.mkv E05 REGEX"),
@@ -299,23 +106,19 @@ class BindingTest : FunSpec({
             Case(
                 "a number the map does not cover is itself, and a problem when it lands on a mapped one",
                 mains = listOf("R - 01.mkv", "R - 02.mkv", "R - 03.mkv"),
-                files = emptyList(),
-                sources = emptyList(),
                 general = dash.copy(episodeMap = episodeMap("3" to "2")),
                 episodes = season1,
                 expected = listOf(
                     "season 01",
                     "main R - 01.mkv E01 REGEX",
                     "main R - 02.mkv E02 REGEX",
-                    "main R - 03.mkv E02 (read 3) REGEX",
+                    "main R - 03.mkv E02 (read 03) REGEX",
                     "problem: E02 claimed by R - 02.mkv, R - 03.mkv",
                 ),
             ),
             Case(
                 "files on two seasons are a problem",
                 mains = listOf("Show S01E01.mkv", "Show S02E02.mkv"),
-                files = emptyList(),
-                sources = emptyList(),
                 expected = listOf(
                     "main Show S01E01.mkv E01 SXXEYY",
                     "main Show S02E02.mkv E02 SXXEYY",
@@ -325,8 +128,6 @@ class BindingTest : FunSpec({
             Case(
                 "a season the files read against another in the metadata is a problem",
                 mains = listOf("Season 3 E04.mkv"),
-                files = emptyList(),
-                sources = emptyList(),
                 general = MatcherConfig(episodeRegex = """ E(\d+)""", seasonRegex = """Season (\d+)"""),
                 episodes = EpisodeData(season = "02"),
                 expected = listOf(
@@ -337,173 +138,233 @@ class BindingTest : FunSpec({
             Case(
                 "a main its seasonRegex misses has no episode",
                 mains = listOf("Season 1 E01.mkv", "Show E05.mkv"),
-                files = emptyList(),
-                sources = emptyList(),
                 general = MatcherConfig(episodeRegex = """ E(\d+)""", seasonRegex = """Season (\d+)"""),
                 expected = listOf("season 01", "main Season 1 E01.mkv E01 REGEX", "main Show E05.mkv -"),
             ),
             Case(
                 "a main whose regex capture is not a number has no episode",
                 mains = listOf("A - 05.mkv", "A - x5.mkv"),
-                files = emptyList(),
-                sources = emptyList(),
                 general = MatcherConfig(episodeRegex = """ - (\w+)$"""),
                 episodes = season1,
                 expected = listOf("season 01", "main A - 05.mkv E05 REGEX", "main A - x5.mkv -"),
             ),
-            Case(
-                "a source's regex pairs a file named after nothing but its number",
-                mains = listOf("A - S01E01.mkv"),
-                files = listOf("Subs/01.srt"),
-                sources = listOf(files("Subs/*", regex = """^(\d+)$""")),
-                expected = listOf(
-                    "season 01",
-                    "main A - S01E01.mkv E01 SXXEYY",
-                    "additionalSources[0]: Subs/01.srt -> A - S01E01.mkv REGEX",
-                ),
-            ),
-            Case(
-                "a source's regex is its rule: a number no main holds is a problem, whatever else the name says",
-                mains = listOf("Show S01E01.mkv"),
-                files = listOf("Subs/Sub #3 S01E01.ass"),
-                sources = listOf(files("Subs/*", regex = """ #(\d+)""")),
-                expected = listOf(
-                    "season 01",
-                    "main Show S01E01.mkv E01 SXXEYY",
-                    "problem: additionalSources[0]: Subs/Sub #3 S01E01.ass unpaired",
-                ),
-            ),
-            Case(
-                "a source's sequence takes its files in path order as episodes 1..N",
-                mains = listOf("Show S01E01.mkv", "Show S01E02.mkv"),
-                files = listOf("Subs/b.srt", "Subs/a.srt"),
-                sources = listOf(files("Subs/*", pin = "sequence")),
-                expected = listOf(
-                    "season 01",
-                    "main Show S01E01.mkv E01 SXXEYY",
-                    "main Show S01E02.mkv E02 SXXEYY",
-                    "additionalSources[0]: Subs/a.srt -> Show S01E01.mkv SEQUENCE",
-                    "additionalSources[0]: Subs/b.srt -> Show S01E02.mkv SEQUENCE",
-                ),
-            ),
-            Case(
-                "a source's sequence over more files than mains is a problem",
-                mains = listOf("Show S01E01.mkv", "Show S01E02.mkv"),
-                files = listOf("Subs/a.srt", "Subs/b.srt", "Subs/c.srt"),
-                sources = listOf(files("Subs/*", pin = "sequence")),
-                expected = listOf(
-                    "season 01",
-                    "main Show S01E01.mkv E01 SXXEYY",
-                    "main Show S01E02.mkv E02 SXXEYY",
-                    "problem: additionalSources[0] sequence over 3 files, expected 2",
-                ),
-            ),
-            Case(
-                "a source's sequence number no main holds is a problem",
-                mains = listOf("Show S01E05.mkv", "Show S01E06.mkv"),
-                files = listOf("Subs/a.srt", "Subs/b.srt"),
-                sources = listOf(files("Subs/*", pin = "sequence")),
-                expected = listOf(
-                    "season 01",
-                    "main Show S01E05.mkv E05 SXXEYY",
-                    "main Show S01E06.mkv E06 SXXEYY",
-                    "problem: additionalSources[0]: Subs/a.srt unpaired",
-                    "problem: additionalSources[0]: Subs/b.srt unpaired",
-                ),
-            ),
-            Case(
-                "the main files' sequence takes them in name order, through the map",
-                mains = listOf("b.mkv", "a.mkv"),
-                files = emptyList(),
-                sources = emptyList(),
-                general = MatcherConfig(matcher = "sequence", episodeMap = episodeMap("1-2" to "13-14")),
-                episodes = EpisodeData(season = "01", byEpisode = mapOf("13" to "One", "14" to "Two")),
-                expected = listOf("season 01", "main a.mkv E13 (read 1) SEQUENCE", "main b.mkv E14 (read 2) SEQUENCE"),
-            ),
-            Case(
-                "the main files' sequence against another episode count is the one problem, sources added nothing",
-                mains = listOf("a.mkv", "b.mkv"),
-                files = listOf("Subs/Other S01E01.srt", "Seq/x.srt"),
-                sources = listOf(files("Subs/*"), files("Seq/*", pin = "sequence")),
-                general = MatcherConfig(matcher = "sequence"),
-                episodes = EpisodeData(season = "01", byEpisode = mapOf("01" to "One", "02" to "Two", "03" to "Three")),
-                // Refused, nothing else binds, so no season is settled and no source adds to the problem.
-                expected = listOf(
-                    "main a.mkv -",
-                    "main b.mkv -",
-                    "problem: general sequence over 2 files, expected 3",
-                ),
-            ),
-            Case(
-                "the main files' sequence with no metadata is a problem",
-                mains = listOf("a.mkv", "b.mkv"),
-                files = emptyList(),
-                sources = emptyList(),
-                general = MatcherConfig(matcher = "sequence"),
-                expected = listOf(
-                    "main a.mkv -",
-                    "main b.mkv -",
-                    "problem: general sequence over 2 files, expected nothing",
-                ),
-            ),
         ) { case ->
-            val mainFiles = case.mains.map { File(ROOT, it) }
-            val config = Config(general = GeneralConfig(matching = case.general), additionalSources = case.sources)
-            val tree = (case.mains + case.files).map(::entry)
+            val config = Config(general = GeneralConfig(matching = case.general))
 
-            digest(bindFiles(ROOT, config, mainFiles, tree, case.episodes)) shouldContainExactlyInAnyOrder
-                case.expected
+            val result = bindFiles(ROOT, config, case.mains.map { File(ROOT, it) }, emptyList(), case.episodes)
+
+            digest(result) shouldContainExactlyInAnyOrder case.expected
         }
 
-        test("each source is named by its config path, and a file: source binds nothing") {
-            val config = Config(
-                declaredGroups = listOf(
-                    DeclaredGroup(additionalSources = listOf(files("a/*"))),
-                    DeclaredGroup(additionalSources = listOf(AdditionalSource(file = "x.mka"), files("b/*"))),
-                ),
-            )
-
-            bindFiles(ROOT, config, emptyList(), emptyList()).sources.map { it.path } shouldContainExactly listOf(
-                "groups[0].additionalSources[0]",
-                "groups[1].additionalSources[1]",
-            )
-        }
-
-        test("only the run the masks chose can clash over an episode or a season, and a number pairs within it") {
+        test("only the run the masks chose can clash over an episode or a season") {
             // The sample beside episode 1 and a stray from season 2 are masked out, so this run has neither problem.
             val mains = listOf("S01E01.mkv", "S01E01.sample.mkv", "S02E05.mkv").map { File(ROOT, it) }
-            val config = Config(additionalSources = listOf(files("Subs/*", regex = """^(\d+)$""")))
 
-            val result = bindFiles(ROOT, config, mains, listOf(entry("Subs/01.srt")), run = mains.take(1))
-
-            digest(result) shouldContainExactlyInAnyOrder listOf(
-                "season 01",
-                "main S01E01.mkv E01 SXXEYY",
-                "main S01E01.sample.mkv E01 SXXEYY",
-                "main S02E05.mkv E05 SXXEYY",
-                "additionalSources[0]: Subs/01.srt -> S01E01.mkv REGEX",
-            )
+            bindFiles(ROOT, Config(), mains, emptyList(), run = mains.take(1)).problems.shouldBeEmpty()
             // With no mask the same directory clashes, loudly.
-            val unmasked = bindFiles(ROOT, config, mains, listOf(entry("Subs/01.srt")))
-            unmasked.problems.map { it::class } shouldContainExactlyInAnyOrder
+            bindFiles(ROOT, Config(), mains, emptyList()).problems.map { it::class } shouldContainExactlyInAnyOrder
                 listOf(DuplicateEpisode::class, SeasonConflict::class)
         }
+    }
 
-        test("a source's sequence counts episodes, so a masked-out sample beside its episode needs no file") {
-            val mains = listOf("S01E01.mkv", "S01E01.sample.mkv", "S01E02.mkv").map { File(ROOT, it) }
-            val config = Config(additionalSources = listOf(files("Subs/*", pin = "sequence")))
+    context("bindFiles: resolving the companions") {
+        data class Case(
+            val label: String,
+            val mains: List<String>,
+            val files: List<String>,
+            val sources: List<String>,
+            val expected: List<String>,
+            val general: MatcherConfig = MatcherConfig(),
+            val episodes: EpisodeData? = null,
+            /** The mains the masks selected, every one when null. */
+            val run: List<String>? = null,
+            val title: String? = null,
+        )
 
-            val subs = listOf(entry("Subs/a.srt"), entry("Subs/b.srt"))
+        val e01 = "Show - S01E01"
+        val e02 = "Show - S01E02"
 
-            val result = bindFiles(ROOT, config, mains, subs, run = mains - mains[1])
+        withData(
+            nameFn = { it.label },
+            Case(
+                "a literal template names the file, or none, as it always did",
+                mains = listOf("$e01.mkv", "$e02.mkv"),
+                files = listOf("$e01[Studio].mka"),
+                sources = listOf("\${fileName}[Studio].mka"),
+                expected = listOf("additionalSources[0]: $e01[Studio].mka -> $e01.mkv"),
+            ),
+            Case(
+                "a wildcard finds the file a CRC makes unguessable",
+                mains = listOf("$e01.mkv", "$e02.mkv"),
+                files = listOf("Subs/[Dub] Show - 01 [AB12CD34].ass", "Subs/[Dub] Show - 02 [99FF00AA].ass"),
+                sources = listOf("Subs/* - \${episodeNum} [*].ass"),
+                expected = listOf(
+                    "additionalSources[0]: Subs/[Dub] Show - 01 [AB12CD34].ass -> $e01.mkv",
+                    "additionalSources[0]: Subs/[Dub] Show - 02 [99FF00AA].ass -> $e02.mkv",
+                ),
+            ),
+            Case(
+                "a wildcard matching several files is a problem; one matching none is not",
+                mains = listOf("$e01.mkv", "$e02.mkv"),
+                files = listOf("Subs/Show 01 a.ass", "Subs/Show 01 b.ass"),
+                sources = listOf("Subs/Show \${episodeNum} *.ass"),
+                expected = listOf(
+                    "additionalSources[0]: $e01.mkv matches Subs/Show 01 a.ass, Subs/Show 01 b.ass",
+                    "problem: additionalSources[0]: $e01.mkv matches Subs/Show 01 a.ass, Subs/Show 01 b.ass",
+                ),
+            ),
+            Case(
+                "a VobSub pair is one match, its .sub travelling with the .idx",
+                mains = listOf("$e01.mkv"),
+                files = listOf("Subs/$e01.idx", "Subs/$e01.sub"),
+                sources = listOf("Subs/\${fileName}.*"),
+                expected = listOf("additionalSources[0]: Subs/$e01.idx +$e01.sub -> $e01.mkv"),
+            ),
+            Case(
+                "a template naming the .idx alone still takes its .sub along",
+                mains = listOf("$e01.mkv", "$e02.mkv"),
+                files = listOf("Subs/$e01 x.idx", "Subs/$e01 x.sub", "Subs/$e02.idx", "Subs/$e02.sub"),
+                sources = listOf("Subs/\${fileName}*.idx"),
+                expected = listOf(
+                    "additionalSources[0]: Subs/$e01 x.idx +$e01 x.sub -> $e01.mkv",
+                    "additionalSources[0]: Subs/$e02.idx +$e02.sub -> $e02.mkv",
+                ),
+            ),
+            Case(
+                "a template naming the .sub alone names the pair, through its .idx",
+                mains = listOf("$e01.mkv"),
+                files = listOf("Subs/$e01.idx", "Subs/$e01.sub"),
+                sources = listOf("Subs/\${fileName}*.sub"),
+                expected = listOf("additionalSources[0]: Subs/$e01.idx +$e01.sub -> $e01.mkv"),
+            ),
+            Case(
+                "one source naming a pair's .idx and another its .sub name one track twice",
+                mains = listOf("$e01.mkv"),
+                files = listOf("Subs/$e01.idx", "Subs/$e01.sub"),
+                sources = listOf("Subs/\${fileName}.idx", "Subs/\${fileName}*.sub"),
+                expected = listOf(
+                    "additionalSources[0]: Subs/$e01.idx +$e01.sub -> $e01.mkv",
+                    "additionalSources[1]: Subs/$e01.idx +$e01.sub -> $e01.mkv",
+                    "problem: Subs/$e01.idx picked for $e01.mkv by additionalSources[0], additionalSources[1]",
+                ),
+            ),
+            Case(
+                "a wildcard never picks a main file",
+                mains = listOf("$e01.mkv"),
+                files = listOf("$e01.ass"),
+                sources = listOf("*E\${episodeNum}*"),
+                expected = listOf("additionalSources[0]: $e01.ass -> $e01.mkv"),
+            ),
+            Case(
+                "only the run's mains are resolved, so a masked-out sample beside its episode costs nothing",
+                mains = listOf("S01E01.mkv", "S01E01.sample.mkv"),
+                files = listOf("Subs/S01E01.ass"),
+                sources = listOf("Subs/*E\${episodeNum}*.ass"),
+                run = listOf("S01E01.mkv"),
+                expected = listOf("additionalSources[0]: Subs/S01E01.ass -> S01E01.mkv"),
+            ),
+            Case(
+                "one file a wildcard picks for two episodes is the template's to get right, not binding's to refuse",
+                mains = listOf("Show S01E01.mkv", "Show S01E10.mkv"),
+                files = listOf("Subs/S01E10.ass"),
+                sources = listOf("Subs/*E\${episodeN}*.ass"),
+                expected = listOf(
+                    "additionalSources[0]: Subs/S01E10.ass -> Show S01E01.mkv",
+                    "additionalSources[0]: Subs/S01E10.ass -> Show S01E10.mkv",
+                ),
+            ),
+            Case(
+                "one file a template names for every episode is no problem",
+                mains = listOf("$e01.mkv", "$e02.mkv"),
+                files = listOf("fonts.mks"),
+                sources = listOf("fonts.mks"),
+                expected = listOf(
+                    "additionalSources[0]: fonts.mks -> $e01.mkv",
+                    "additionalSources[0]: fonts.mks -> $e02.mkv",
+                ),
+            ),
+            Case(
+                "one file two sources pick for one episode is a problem, since it would be muxed twice",
+                mains = listOf("$e01.mkv"),
+                files = listOf("Subs/E01 [Full].ass"),
+                sources = listOf("Subs/*\${episodeNum}*.ass", "Subs/*\${episodeNum}*[Full].ass"),
+                expected = listOf(
+                    "additionalSources[0]: Subs/E01 [Full].ass -> $e01.mkv",
+                    "additionalSources[1]: Subs/E01 [Full].ass -> $e01.mkv",
+                    "problem: Subs/E01 [Full].ass picked for $e01.mkv by additionalSources[0], additionalSources[1]",
+                ),
+            ),
+            Case(
+                "a main stage two will drop raises no problem, its ambiguity included, which is still recorded",
+                mains = listOf("Show S01E01.mkv"),
+                files = listOf("Subs/E01 a.ass", "Subs/E01 b.ass"),
+                sources = listOf("Subs/*\${episodeNum}*.ass"),
+                title = "\${episodeName}",
+                expected = listOf("additionalSources[0]: Show S01E01.mkv matches Subs/E01 a.ass, Subs/E01 b.ass"),
+            ),
+            Case(
+                "a main stage two will drop is still resolved, so --identify can show what is there",
+                mains = listOf("Show S01E01.mkv"),
+                files = listOf("Subs/E01.ass"),
+                sources = listOf("Subs/*\${episodeNum}*.ass"),
+                title = "\${episodeName}",
+                expected = listOf("additionalSources[0]: Subs/E01.ass -> Show S01E01.mkv"),
+            ),
+            Case(
+                "a template naming a variable nothing knows resolves nothing, rather than a ** across folders",
+                mains = listOf("$e01.mkv"),
+                files = listOf("Subs/a/x.ass", "Subs/b/y.ass"),
+                sources = listOf("Subs/*\${fileNmae}*.ass"),
+                expected = emptyList(),
+            ),
+            Case(
+                "a template needing a variable a main has no value for is left to stage two",
+                mains = listOf("Show S01E01.mkv"),
+                files = listOf("Subs/Pilot.ass"),
+                sources = listOf("Subs/\${episodeName}*.ass"),
+                expected = emptyList(),
+            ),
+            Case(
+                "a companion numbered like the release is named by the number read",
+                mains = listOf("[Grp] Show - 13.mkv"),
+                files = listOf("Subs/13.srt"),
+                sources = listOf("Subs/\${episodeRead}.srt"),
+                general = MatcherConfig(episodeRegex = """ - (\d+)$""", episodeMap = episodeMap("13" to "1")),
+                episodes = EpisodeData(season = "01"),
+                expected = listOf("additionalSources[0]: Subs/13.srt -> [Grp] Show - 13.mkv"),
+            ),
+        ) { case ->
+            val dir = tempdir()
+            (case.mains + case.files).forEach { File(dir, it).apply { parentFile.mkdirs() }.writeText("x") }
+            val mains = case.mains.map { File(dir, it) }
+            val config = Config(
+                general = GeneralConfig(matching = case.general, title = case.title?.let(::Template)),
+                additionalSources = case.sources.map { AdditionalSource(file = it) },
+            )
+            val run = case.run?.map { File(dir, it) } ?: mains
 
-            digest(result) shouldContainExactlyInAnyOrder listOf(
-                "season 01",
-                "main S01E01.mkv E01 SXXEYY",
-                "main S01E01.sample.mkv E01 SXXEYY",
-                "main S01E02.mkv E02 SXXEYY",
-                "additionalSources[0]: Subs/a.srt -> S01E01.mkv SEQUENCE",
-                "additionalSources[0]: Subs/b.srt -> S01E02.mkv SEQUENCE",
+            val result = bindFiles(dir, config, mains, walkTree(dir), case.episodes ?: EpisodeData(season = "01"), run)
+
+            companionDigest(result) shouldContainExactlyInAnyOrder case.expected
+        }
+
+        test("each group resolves its own sources, named by their config paths") {
+            val dir = tempdir()
+            listOf("S01E01.mkv", "S01E02.mkv", "S01E01.ass", "S01E02.mka").forEach { File(dir, it).writeText("x") }
+            val config = Config(
+                declaredGroups = listOf(
+                    group(1..1, sources = listOf(AdditionalSource(file = "\${fileName}.ass"))),
+                    group(2..2, sources = listOf(AdditionalSource(), AdditionalSource(file = "\${fileName}.mka"))),
+                ),
+            )
+
+            val result = bindFiles(dir, config, listOf(File(dir, "S01E01.mkv"), File(dir, "S01E02.mkv")), walkTree(dir))
+
+            result.sources.map { it.path } shouldContainExactly
+                listOf("groups[0].additionalSources[0]", "groups[1].additionalSources[1]")
+            companionDigest(result) shouldContainExactlyInAnyOrder listOf(
+                "groups[0].additionalSources[0]: S01E01.ass -> S01E01.mkv",
+                "groups[1].additionalSources[1]: S01E02.mka -> S01E02.mkv",
             )
         }
     }
@@ -512,7 +373,6 @@ class BindingTest : FunSpec({
         data class Case(
             val label: String,
             val mains: List<String>,
-            val files: List<String>,
             /** Null for a config without groups. */
             val groups: List<DeclaredGroup>?,
             val expected: List<String>,
@@ -521,57 +381,18 @@ class BindingTest : FunSpec({
         )
 
         val e = (1..4).map { "Show S01E0$it" }
-        val rus = files("Rus/*.mka")
-        val byNumber = files("Subs/*", regex = """^(\d+)$""")
 
         withData(
             nameFn = { it.label },
             Case(
-                "two groups sharing a mask each pair their own members' files",
-                mains = e.map { "$it.mkv" },
-                files = e.map { "Rus/$it.mka" },
-                groups = listOf(group(1..2, sources = listOf(rus)), group(3..4, sources = listOf(rus))),
-                expected = listOf(
-                    "season 01",
-                    "main ${e[0]}.mkv E01 SXXEYY",
-                    "main ${e[1]}.mkv E02 SXXEYY",
-                    "main ${e[2]}.mkv E03 SXXEYY",
-                    "main ${e[3]}.mkv E04 SXXEYY",
-                    "groups[0].additionalSources[0]: Rus/${e[0]}.mka -> ${e[0]}.mkv EXACT",
-                    "groups[0].additionalSources[0]: Rus/${e[1]}.mka -> ${e[1]}.mkv EXACT",
-                    "groups[1].additionalSources[0]: Rus/${e[2]}.mka -> ${e[2]}.mkv EXACT",
-                    "groups[1].additionalSources[0]: Rus/${e[3]}.mka -> ${e[3]}.mkv EXACT",
-                    "group 0: ${e[0]}.mkv, ${e[1]}.mkv",
-                    "group 1: ${e[2]}.mkv, ${e[3]}.mkv",
-                ),
-            ),
-            Case(
-                "a stray file under a mask two groups share is one problem, not one per group",
-                mains = e.take(2).map { "$it.mkv" },
-                files = listOf("Rus/${e[0]}.mka", "Rus/Show S01E09.mka"),
-                groups = listOf(group(1..1, sources = listOf(rus)), group(2..2, sources = listOf(rus))),
-                expected = listOf(
-                    "season 01",
-                    "main ${e[0]}.mkv E01 SXXEYY",
-                    "main ${e[1]}.mkv E02 SXXEYY",
-                    "groups[0].additionalSources[0]: Rus/${e[0]}.mka -> ${e[0]}.mkv EXACT",
-                    "problem: groups[0].additionalSources[0]: Rus/Show S01E09.mka unpaired",
-                    "group 0: ${e[0]}.mkv",
-                    "group 1: ${e[1]}.mkv",
-                ),
-            ),
-            Case(
-                "an unclaimed main is no group's, and its file is no source's, without a problem",
+                "an unclaimed main is no group's, without a problem",
                 mains = e.take(3).map { "$it.mkv" },
-                files = e.take(3).map { "Rus/$it.mka" },
-                groups = listOf(group(1..2, sources = listOf(rus))),
+                groups = listOf(group(1..2)),
                 expected = listOf(
                     "season 01",
                     "main ${e[0]}.mkv E01 SXXEYY",
                     "main ${e[1]}.mkv E02 SXXEYY",
                     "main ${e[2]}.mkv E03 SXXEYY",
-                    "groups[0].additionalSources[0]: Rus/${e[0]}.mka -> ${e[0]}.mkv EXACT",
-                    "groups[0].additionalSources[0]: Rus/${e[1]}.mka -> ${e[1]}.mkv EXACT",
                     "group 0: ${e[0]}.mkv, ${e[1]}.mkv",
                     "unclaimed ${e[2]}.mkv",
                 ),
@@ -579,7 +400,6 @@ class BindingTest : FunSpec({
             Case(
                 "a main that reads no episode is no declared group's",
                 mains = listOf("${e[0]}.mkv", "NCOP.mkv"),
-                files = emptyList(),
                 groups = listOf(group(1..1)),
                 expected = listOf(
                     "season 01",
@@ -590,39 +410,8 @@ class BindingTest : FunSpec({
                 ),
             ),
             Case(
-                "a file named after another group's main does not fall to a shorter name in this one",
-                mains = listOf("A 1.mkv", "A 1 x 2.mkv"),
-                files = listOf("A 1 x 2.srt"),
-                groups = listOf(group(1..1, sources = listOf(files("*.srt"))), group(2..2)),
-                general = MatcherConfig(episodeRegex = """ (\d+)$"""),
-                episodes = EpisodeData(season = "01"),
-                expected = listOf(
-                    "season 01",
-                    "main A 1.mkv E01 REGEX",
-                    "main A 1 x 2.mkv E02 REGEX",
-                    "group 0: A 1.mkv",
-                    "group 1: A 1 x 2.mkv",
-                ),
-            ),
-            Case(
-                "a number reaching another group's main is that group's; one reaching no main is unpaired",
-                mains = e.take(2).map { "$it.mkv" },
-                files = listOf("Subs/01.srt", "Subs/02.srt", "Subs/09.srt"),
-                groups = listOf(group(1..1, sources = listOf(byNumber)), group(2..2)),
-                expected = listOf(
-                    "season 01",
-                    "main ${e[0]}.mkv E01 SXXEYY",
-                    "main ${e[1]}.mkv E02 SXXEYY",
-                    "groups[0].additionalSources[0]: Subs/01.srt -> ${e[0]}.mkv REGEX",
-                    "problem: groups[0].additionalSources[0]: Subs/09.srt unpaired",
-                    "group 0: ${e[0]}.mkv",
-                    "group 1: ${e[1]}.mkv",
-                ),
-            ),
-            Case(
                 "a group claims by the episode a number maps to, not the number read",
                 mains = listOf("Show - 13.mkv", "Show - 14.mkv"),
-                files = emptyList(),
                 groups = listOf(group(1..1), group(2..2)),
                 general = MatcherConfig(episodeRegex = """ - (\d+)$""", episodeMap = episodeMap("13-14" to "1-2")),
                 episodes = EpisodeData(season = "01"),
@@ -637,7 +426,6 @@ class BindingTest : FunSpec({
             Case(
                 "a config without groups is one group of every main",
                 mains = listOf("${e[0]}.mkv", "NCOP.mkv"),
-                files = emptyList(),
                 groups = null,
                 expected = listOf(
                     "season 01",
@@ -648,9 +436,8 @@ class BindingTest : FunSpec({
             ),
         ) { case ->
             val config = Config(general = GeneralConfig(matching = case.general), declaredGroups = case.groups)
-            val tree = (case.mains + case.files).map(::entry)
 
-            val result = bindFiles(ROOT, config, case.mains.map { File(ROOT, it) }, tree, case.episodes)
+            val result = bindFiles(ROOT, config, case.mains.map { File(ROOT, it) }, emptyList(), case.episodes)
 
             groupDigest(result) shouldContainExactlyInAnyOrder case.expected
         }
@@ -659,8 +446,7 @@ class BindingTest : FunSpec({
             val mains = e.take(3).map { File(ROOT, "$it.mkv") }
             val config = Config(declaredGroups = listOf(group(1..1), group(2..2)))
 
-            val narrowed = bindFiles(ROOT, config, mains, mains.map { entry(it.name) })
-                .narrowedTo(setOf(mains[1], mains[2]))
+            val narrowed = bindFiles(ROOT, config, mains, emptyList()).narrowedTo(setOf(mains[1], mains[2]))
 
             narrowed.partition shouldBe GroupPartition(
                 members = listOf(emptyList(), listOf(mains[1])),
@@ -684,40 +470,31 @@ class BindingTest : FunSpec({
 
 private val ROOT = File("media")
 
-private fun files(vararg masks: String, pin: String? = null, regex: String? = null) =
-    AdditionalSource(files = masks.toList(), matching = MatcherConfig(matcher = pin, episodeRegex = regex))
-
 private fun group(vararg episodes: IntRange, sources: List<AdditionalSource> = emptyList()) =
     DeclaredGroup(membership = Membership(episodes = episodes.toList()), additionalSources = sources)
 
 private fun episodeMap(vararg entries: Pair<String, String>) =
     EpisodeMap(entries.map { EpisodeMapEntry(it.first, it.second) })
 
-/** What [walkTree] would report for [relPath] under [ROOT]. */
-private fun entry(relPath: String): TreeEntry {
-    val name = relPath.substringAfterLast('/')
-    val dir = relPath.substringBeforeLast('/', "")
-    return TreeEntry(
-        file = File(ROOT, relPath),
-        relPath = relPath,
-        dirRel = dir,
-        leaf = dir.substringAfterLast('/').ifEmpty { null },
-        base = baseNameOf(name),
-        ext = extensionOf(name),
-    )
-}
-
 private fun digest(result: BindingResult): List<String> =
     listOfNotNull(result.season?.let { "season $it" }) +
         result.mains.map { main ->
             val episode = main.episode ?: return@map "main ${main.main.name} -"
-            val read = if (main.read == episode) "" else " (read ${main.read})"
+            val read = if (main.read == pad(episode)) "" else " (read ${main.read})"
             "main ${main.main.name} ${spelled(episode)}$read ${result.rule}"
         } +
-        result.sources.flatMap { source ->
-            source.bound.map { "${source.path}: ${filesOf(it)} -> ${it.main.name} ${it.rule}" }
-        } +
         result.problems.map { "problem: ${problemLine(it)}" }
+
+/** The companions each source resolved, what it found several files for, and the problems. */
+private fun companionDigest(result: BindingResult): List<String> =
+    result.sources.flatMap { source ->
+        source.companions.map { companion ->
+            val partner = companion.partner?.let { " +${it.name}" }.orEmpty()
+            "${source.path}: ${companion.path}$partner -> ${companion.main.name}"
+        } + source.ambiguous.map { (main, matches) ->
+            "${source.path}: ${main.name} matches ${matches.sorted().joinToString()}"
+        }
+    } + result.problems.map { "problem: ${problemLine(it)}" }
 
 /** [digest], plus a line per group's members and per unclaimed main. */
 private fun groupDigest(result: BindingResult): List<String> =
@@ -732,16 +509,10 @@ private fun problemLine(problem: BindingProblem): String = when (problem) {
             listOfNotNull(problem.metadata?.let { "metadata $it" })
         ).joinToString(", ", prefix = "seasons ")
     is DuplicateEpisode -> "${spelled(problem.episode)} claimed by ${names(problem.mains)}"
-    is SequenceCount ->
-        "${problem.path} sequence over ${problem.files} files, expected ${problem.expected ?: "nothing"}"
-    is UnpairedFile -> "${problem.path}: ${problem.entry.relPath} unpaired"
-    is NameTie -> "${problem.path}: ${problem.entry.relPath} named after ${names(problem.mains)}"
-    is SharedMain -> "${problem.path}: ${problem.main.name} shared by ${problem.entries.joinToString { it.relPath }}"
-    is SharedFile -> "${problem.entry.relPath} in ${problem.paths.joinToString()}"
+    is AmbiguousCompanion -> "${problem.path}: ${problem.main.name} matches ${problem.matches.sorted().joinToString()}"
+    is RepeatedCompanion -> "${problem.path} picked for ${problem.main.name} by ${problem.sources.joinToString()}"
 }
 
 private fun names(files: List<File>) = files.map { it.name }.sorted().joinToString()
 
 private fun spelled(episode: Int) = "E" + pad(episode)
-
-private fun filesOf(bound: BoundFile) = bound.entry.relPath + bound.partner?.let { " +${it.relPath}" }.orEmpty()

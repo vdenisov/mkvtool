@@ -1,27 +1,22 @@
 package org.plukh.mkvtool.cli.render
 
+import org.plukh.mkvtool.core.AmbiguousCompanion
 import org.plukh.mkvtool.core.BindingProblem
 import org.plukh.mkvtool.core.BindingReport
 import org.plukh.mkvtool.core.BindingResult
 import org.plukh.mkvtool.core.BindingRule
-import org.plukh.mkvtool.core.BoundFile
+import org.plukh.mkvtool.core.CompanionFile
 import org.plukh.mkvtool.core.DuplicateEpisode
 import org.plukh.mkvtool.core.GroupRef
-import org.plukh.mkvtool.core.NameTie
+import org.plukh.mkvtool.core.RepeatedCompanion
 import org.plukh.mkvtool.core.SeasonConflict
 import org.plukh.mkvtool.core.SeasonUnknown
-import org.plukh.mkvtool.core.SequenceCount
-import org.plukh.mkvtool.core.SharedFile
-import org.plukh.mkvtool.core.SharedMain
-import org.plukh.mkvtool.core.UnpairedFile
-import org.plukh.mkvtool.core.groupLabel
 import org.plukh.mkvtool.core.pad as episodeNumber
 import org.plukh.mkvtool.core.sourceLabel
 import org.plukh.mkvtool.out.ResultTextRenderer
 import org.plukh.mkvtool.out.TextStyle
 import org.plukh.mkvtool.out.plural
 import java.io.File
-import java.util.Locale
 
 /**
  * A batch's binding, identical in `mux` and `inspect` but for the verdict on its problems: errors where the
@@ -37,7 +32,7 @@ class BindingReportRenderer(private val table: Boolean = false) : ResultTextRend
         if (table && binding.mains.isNotEmpty()) renderTable(binding, style)
 
         // Skipped, never refused: claiming a file is the config's decision, and leaving one out is a decision too.
-        // Unsaid when the batch is refused, which skips nothing; a refused `sequence` would list every main.
+        // Unsaid when the batch is refused, which skips nothing.
         val unclaimed = binding.partition.unclaimed
         val refused = result.fatal && binding.problems.isNotEmpty()
         if (unclaimed.isNotEmpty() && !refused) {
@@ -64,21 +59,21 @@ class BindingReportRenderer(private val table: Boolean = false) : ResultTextRend
         val rule = mainRuleName(binding.rule)
         s.out.println(s.cyan("*** Binding: ${plural(mains.size, "main file")}$season, by $rule"))
 
-        val mapped = mains.any { it.read != it.episode }
+        val mapped = mains.any { it.read?.toInt() != it.episode }
         val readWidth = if (mapped) READ_WIDTH else 0
         s.out.println(s.cyan("  ${pad("EP", EP_WIDTH)}${if (mapped) pad("READ", READ_WIDTH) else ""}MAIN"))
 
         val byMain = binding.sources.flatMap { source ->
-            source.bound.map { it.main to (sourceLabel(source.path, binding.groups) to it) }
+            source.companions.map { it.main to (sourceLabel(source.path, binding.groups) to it) }
         }.groupBy({ it.first }, { it.second })
         val pathWidth = binding.sources.maxOfOrNull { sourceLabel(it.path, binding.groups).length } ?: 0
         val indent = " ".repeat(2 + EP_WIDTH + readWidth)
 
         for (main in mains) {
-            val read = if (mapped) pad(numberOrDash(main.read), READ_WIDTH) else ""
+            val read = if (mapped) pad(main.read ?: "-", READ_WIDTH) else ""
             s.out.println("  ${pad(numberOrDash(main.episode), EP_WIDTH)}$read${main.main.name}")
-            byMain[main.main].orEmpty().forEach { (path, bound) ->
-                s.out.println("$indent${pad(path, pathWidth)}  ${boundName(bound)}  (${sourceRuleName(bound.rule)})")
+            byMain[main.main].orEmpty().forEach { (path, companion) ->
+                s.out.println("$indent${pad(path, pathWidth)}  ${companionName(companion)}")
             }
         }
         s.out.println()
@@ -105,28 +100,13 @@ private fun bindingProblemLines(problem: BindingProblem, groups: List<GroupRef>)
         }
         is DuplicateEpisode ->
             listOf("episode ${problem.episode} is claimed by ${problem.mains.size} main files: ${names(problem.mains)}")
-        is SequenceCount -> {
-            val counted = plural(problem.files, if (problem.path == "general") "main file" else "file")
-            val expected = problem.expected ?: 0
-            val against = when {
-                problem.path != "general" -> "but the main files read ${plural(expected, "episode")}"
-                problem.expected == null -> "but there is no episode metadata to count against"
-                else -> "but the episode metadata lists ${problem.expected}"
-            }
-            listOf("${label(problem.path)}.matcher is sequence over $counted, $against")
-        }
-        is UnpairedFile -> listOf("${label(problem.path)}: ${problem.entry.relPath} pairs with no main file")
-        is NameTie -> listOf(
-            "${label(problem.path)}: ${problem.entry.relPath} is named after more than one main file: " +
-                names(problem.mains),
+        is AmbiguousCompanion -> listOf(
+            "${label(problem.path)}: ${problem.matches.size} files match for ${problem.main.name}: " +
+                problem.matches.joinToString(", "),
         )
-        is SharedMain -> listOf(
-            "${label(problem.path)}: more than one file pairs with ${problem.main.name}: " +
-                problem.entries.joinToString(", ") { it.relPath },
-        )
-        is SharedFile -> listOf(
-            "${problem.entry.relPath} is matched by more than one source: " +
-                problem.paths.joinToString(", ") { label(it) },
+        is RepeatedCompanion -> listOf(
+            "${problem.path} is picked for ${problem.main.name} by more than one source: " +
+                problem.sources.joinToString(", ") { label(it) },
         )
     }
 }
@@ -134,15 +114,12 @@ private fun bindingProblemLines(problem: BindingProblem, groups: List<GroupRef>)
 /** The config key a main rule comes from, which is what a reader goes and looks at. */
 private fun mainRuleName(rule: BindingRule): String = when (rule) {
     BindingRule.REGEX -> "episodeRegex"
-    BindingRule.SEQUENCE -> "sequence"
-    else -> "SxxEyy"
+    BindingRule.SXXEYY -> "SxxEyy"
 }
 
-private fun sourceRuleName(rule: BindingRule): String = rule.name.lowercase(Locale.ROOT)
-
-/** A paired file, and the partner that travels with it. */
-private fun boundName(bound: BoundFile): String =
-    bound.entry.relPath + bound.partner?.let { " + ${it.file.name}" }.orEmpty()
+/** A resolved file, and the partner that travels with it. */
+private fun companionName(companion: CompanionFile): String =
+    companion.path + companion.partner?.let { " + ${it.name}" }.orEmpty()
 
 private fun names(files: List<File>): String = files.joinToString(", ") { it.name }
 

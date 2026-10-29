@@ -576,6 +576,7 @@ field:
 | `seasonNum` | `01` | the run's season as [binding](docs/reference.md#binding-files-to-episodes) settles it, else `episodes.yaml` |
 | `episodeNum` | `02` | the episode [binding](docs/reference.md#binding-files-to-episodes) gives the file, by default the `SxxEyy` in its name; three digits in a season past 99 |
 | `seasonN`, `episodeN` | `1`, `2` | the same numbers unpadded, for prose such as `Episode ${episodeN}` |
+| `episodeRead` | `13` | the number exactly as the main file's name spells it, before `episodeMap`: for companions numbered like the release |
 | `episodeName` | `Traces to Nowhere` | `episodes.yaml` / `episodes.txt`, else the canonical file name |
 | `seasonName` | `Season 1` | `episodes.yaml` |
 | `showYear` | `1990` | `episodes.yaml` |

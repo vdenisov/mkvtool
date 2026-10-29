@@ -163,6 +163,20 @@ class MediaFilesTest : FunSpec({
 
         test("case follows the platform's file names") {
             maskRegex("*.MKV").matches("a.mkv") shouldBe (File.separatorChar == '\\')
+            // Beyond ASCII too: a Cyrillic episode name cased otherwise on disk is still the same file there.
+            maskRegex("*РУССКИЙ*").matches("русский.mka") shouldBe (File.separatorChar == '\\')
+        }
+
+        test("a literal part of a glob matches as written, its * and ? and backslash included") {
+            val glob = globRegex(listOf("Subs/" to true, "a*b?\\c" to false, " *.srt" to true))
+
+            glob.matches("Subs/a*b?\\c [x].srt") shouldBe true
+            glob.matches("Subs/aZZbYYc [x].srt") shouldBe false
+        }
+
+        test("a ** split by a literal part is no ** at all") {
+            globRegex(listOf("*" to true, "*" to false, "x" to true)).matches("ab*x") shouldBe true
+            globRegex(listOf("*" to true, "*" to false, "x" to true)).matches("a/b*x") shouldBe false
         }
     }
 

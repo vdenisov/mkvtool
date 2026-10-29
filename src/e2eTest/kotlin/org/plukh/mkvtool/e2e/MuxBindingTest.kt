@@ -23,9 +23,9 @@ import org.plukh.mkvtool.e2e.support.writeEpisodesYaml
 import java.io.File
 
 /**
- * `mux` over a config that binds files to episodes: raw release names muxed as they are, a source's files
- * paired with main files, what is skipped and what stops the batch — plus the output-collision check,
- * which every run gets.
+ * `mux` over a config that binds files to episodes: raw release names muxed as they are, a source's template
+ * resolved per episode, wildcards included, what is skipped and what stops the batch — plus the output-collision
+ * check, which every run gets.
  */
 class MuxBindingTest : FunSpec({
 
@@ -73,31 +73,19 @@ class MuxBindingTest : FunSpec({
             run.output shouldContain "*** Binding: 2 main files, season 01, by episodeRegex\n" +
                 "  EP   READ  MAIN\n" +
                 "  01   13    [Grp] Show - 13 (BD).mkv\n" +
-                "             additionalSources[0]  Subs/13.srt  (regex)\n" +
+                "             additionalSources[0]  Subs/13.srt\n" +
                 "  02   14    [Grp] Show - 14 (BD).mkv\n" +
-                "             additionalSources[0]  Subs/14.srt  (regex)\n"
+                "             additionalSources[0]  Subs/14.srt\n"
             File(workDir, "mkv").exists() shouldBe false
         }
     }
 
-    test("a source's file pairs with its main file by the source's own regex, and is muxed in")
+    test("a wildcard template finds the companion a CRC makes unguessable, and it is muxed in")
         .config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()
         stageInput(workDir, "A - S01E01.mkv")
-        stageExternalText(workDir, "Subs/01.srt")
-        writeConfig(
-            workDir,
-            cfg(
-                audioTracks = listOf(JAPANESE),
-                additionalSources = listOf(
-                    AdditionalSourceSpec(
-                        files = listOf("Subs/*.srt"),
-                        episodeRegex = "^(\\d+)$",
-                        tracks = listOf(SourceTrackSpec(language = "en", title = "English")),
-                    ),
-                ),
-            ),
-        )
+        stageExternalText(workDir, "Subs/[Dub] A - 01 [AB12CD34].srt")
+        writeConfig(workDir, crcCfg())
 
         val run = mux(workDir)
 
@@ -105,6 +93,25 @@ class MuxBindingTest : FunSpec({
             run.exitCode shouldBe 0
             val tracks = probe(File(workDir, "mkv/A - S01E01.mkv")).allTracks
             tracks.filter { it.type == "subtitles" }.map { it.language } shouldBe listOf("eng")
+        }
+    }
+
+    test("a wildcard matching several files stops the batch before anything is written")
+        .config(enabledOrReasonIf = needsMkvmerge) {
+        val workDir = tempdir()
+        stageInput(workDir, "A - S01E01.mkv")
+        stageExternalText(workDir, "Subs/[Dub] A - 01 [AB12CD34].srt")
+        stageExternalText(workDir, "Subs/[Fan] A - 01 [99FF00AA].srt")
+        writeConfig(workDir, crcCfg())
+
+        val run = mux(workDir)
+
+        withClue(run.output) {
+            run.exitCode shouldBe 2
+            run.output shouldContain "*** Error: the files cannot be bound to episodes (1 problem):"
+            run.output shouldContain "additionalSources[0]: 2 files match for A - S01E01.mkv: " +
+                "Subs/[Dub] A - 01 [AB12CD34].srt, Subs/[Fan] A - 01 [99FF00AA].srt"
+            File(workDir, "mkv").exists() shouldBe false
         }
     }
 
@@ -168,18 +175,10 @@ class MuxBindingTest : FunSpec({
         val workDir = tempdir()
         stageInput(workDir, "A - S01E01.mkv")
         stageInput(workDir, "A - S01E02.mkv")
-        stageExternalText(workDir, "Subs/A - S01E01.srt")
+        stageExternalText(workDir, "Subs/A - S01E01 [AB12].srt")
         writeConfig(
             workDir,
-            cfg(
-                audioTracks = listOf(JAPANESE),
-                additionalSources = listOf(
-                    AdditionalSourceSpec(
-                        files = listOf("Subs/*.srt"),
-                        tracks = listOf(SourceTrackSpec(language = "en", title = "English")),
-                    ),
-                ),
-            ),
+            cfg(audioTracks = listOf(JAPANESE), additionalSources = listOf(subs("Subs/\${fileName} [*].srt"))),
         )
 
         val run = mux(workDir)
@@ -187,7 +186,7 @@ class MuxBindingTest : FunSpec({
         withClue(run.output) {
             run.exitCode shouldBe 0
             run.output shouldContain "*** 1 file will be skipped: companion files are missing"
-            run.output shouldContain "additionalSources[0].files: Subs/*.srt  (missing for 1 file)"
+            run.output shouldContain "Subs/\${fileName} [*].srt  (missing for 1 file)"
             outputNames(workDir) shouldBe listOf("A - S01E01.mkv")
         }
     }
@@ -249,3 +248,11 @@ private val JAPANESE = TrackSpec(id = 1, language = "ja", title = "Japanese", de
 /** Output with the platform separator folded to a bare newline, for the multi-line assertions. */
 private fun mux(workDir: File, vararg args: String): Run =
     mkvtool("mux", *args, workDir = workDir).let { it.copy(output = it.output.replace("\r\n", "\n")) }
+
+/** A config whose English subtitles carry a per-file CRC, found by a wildcard. */
+private fun crcCfg() =
+    cfg(audioTracks = listOf(JAPANESE), additionalSources = listOf(subs("Subs/* - \${episodeNum} [*].srt")))
+
+/** An English subtitle source named by [template]. */
+private fun subs(template: String) =
+    AdditionalSourceSpec(file = template, tracks = listOf(SourceTrackSpec(language = "en", title = "English")))
