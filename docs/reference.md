@@ -457,7 +457,8 @@ the full tables; in short:
 
 - **File scope**, valid in any of those fields: `fileName`, `extension`,
   `showName`, `seasonNum`, `episodeNum`, `seasonN`, `episodeN` (the two numbers
-  unpadded), `episodeName`, `seasonName`, `showYear`.
+  unpadded), `episodeRead` (the number as the main file's name spells it, before
+  `episodeMap`), `episodeName`, `seasonName`, `showYear`.
   Values come from `episodes.yaml` (or `episodes.txt`) in the media directory,
   falling back to a canonical `Show - SxxEyy - Title` file name.
 - **Track scope**, valid only in a track's `title`: `language`, `languageName`
@@ -508,6 +509,27 @@ episode. `${fileName}` — the base name, no extension, of the current main sour
 way: `"Rus sound/[Studio]/${fileName}.mka"`. A track's `title` here also takes
 the track-scope variables, describing the companion's own language and codec.
 
+**Wildcards** cover a name a template cannot spell, such as a per-file CRC:
+`"Subs/* - ${episodeNum} [*].ass"`. `*` is any run within a folder, `**` any run
+across folders, `?` one character; brackets are literal, and a variable's value
+always matches as written. A wildcard matches paths relative to the media
+directory, with no `./`, `../` or folder starting with a dot (the tree it is
+matched against skips those), and must find exactly one file: none drops that
+episode like a missing companion, several stop the batch. A file that exists
+under the template's exact name is that file, even if the name holds a `*` or
+`?`. A VobSub `.idx` and its `.sub` count as one file. One file two sources
+pick for the same episode stops the batch too, since it would be muxed twice.
+
+A glob has no notion of where a number ends, and the tool does not second-guess
+one: `*E${episodeN}*` matches `S01E10.ass` for episode 1, and `*${episodeNum}*`
+matches the season's `S01` as readily as an episode `01`. Write the number the
+way the names do: `"Subs/*E${episodeNum}*.ass"`, or
+`"Subs/*S??E${episodeNum}*.ass"` to pin the whole token.
+
+A companion numbered like the release rather than like the episode —
+`Subs/13.srt` beside `[Grp] Show - 13.mkv`, which `episodeMap` makes episode 1
+— is named by `${episodeRead}`: `"Subs/${episodeRead}.srt"`.
+
 `mkvtool inspect --identify` lists each configured source with the path its
 pattern resolved to for that episode, which is the quickest way to check one. It also
 finds external files that no config mentions — see
@@ -527,8 +549,6 @@ additionalSources:
     #   - "0:none"
 ```
 
-A source can name its files with `files` instead of `file`: see
-[Binding files to episodes](#binding-files-to-episodes).
 
 ### Binding files to episodes
 
@@ -541,29 +561,25 @@ first. None of them is needed for renamed files.
 general:
   episodeRegex: " - (\\d+) \\("   # group 1 of the first match is the number
   seasonRegex: "S(\\d+)"          # optional; with it, both must match
-  # matcher: "sequence"           # instead of a regex: 1..N in name order
   episodeMap:
     13-24: 1-12                   # release numbers to real ones
 additionalSources:
-  - files: ["Subs/*.srt", "Subs/*.ass"]
-    episodeRegex: "^(\\d+)"       # optional; this source's own rule
+  - file: "Subs/${episodeRead}.srt"   # named by the number the main file's name gave
     tracks:
       - language: "en"
         title: "English"
 ```
 
-**Main files get their episode by one rule per run**: `matcher: "sequence"`
-when set, `episodeRegex` when set, `SxxEyy` otherwise. A regex is a search over
-the base name (no extension), and its group 1 is the number. `sequence`
-numbers the main files 1, 2, 3, … in name order, and the count must equal the
-number of episodes in `episodes.yaml`; it is never a default, because a
-positional match can pair the wrong files without a sign. A regex beside
-`sequence` is an error.
+**Main files get their episode by one rule per run**: `episodeRegex` when set,
+`SxxEyy` otherwise. A regex is a search over the base name (no extension), and
+its group 1 is the number. A release with no readable number at all is renamed
+by hand: matching files by their position in a list is the one rule that can
+pair the wrong files without a sign, so the tool does not offer it.
 
 **A main file the rule cannot read is still a main file** — a creditless
 opening (`NCOP.mkv`) beside the episodes, say, or a movie. It is muxed under its
-own name, inspected and checked; only a title or `outputName` that needs its
-episode drops it, with the usual warning.
+own name, inspected and checked; only a title, `outputName` or companion
+template that needs its episode drops it, with the usual warning.
 
 **One season per run.** The season comes from what the files read (`SxxEyy`,
 `seasonRegex`) and from `episodes.yaml`; when nothing names one, or two
@@ -572,64 +588,47 @@ every run. A regex without `seasonRegex` needs `episodes.yaml` for that reason.
 Main files with no episode name no season, so a directory of them needs none.
 
 **`episodeMap`** turns release numbers into real ones, range to range with equal
-lengths: `13-24: 1-12` makes a season-two file numbered 13 episode 1. Every
-number read is mapped, the additional sources' included; a number no range
-covers stays itself, and with no map at all the number read is the episode.
-The release side may start at 0 (a `00` prologue), the real side at 1. The map
-lives under `general` only.
+lengths: `13-24: 1-12` makes a season-two file numbered 13 episode 1. A number
+no range covers stays itself, and with no map at all the number read is the
+episode. The release side may start at 0 (a `00` prologue), the real side at 1.
+`${episodeRead}` keeps the number as the name spelled it, for companions
+numbered like the release. The map lives under `general` only.
 
-**An additional source's `files`** are masks over the directory tree, relative to
-the media directory (`*` within a folder, `**` across folders), and each file
-they match is paired with a main file:
-
-1. by its own `episodeRegex` when the source sets one, the main with that
-   episode (a `seasonRegex` works as above);
-2. by `matcher: "sequence"`, the source's files in path order against the
-   episodes the main files read;
-3. otherwise by name — the main file whose name the file's name starts with,
-   the longest one winning (`Show - S01E01 - Title 2.srt` goes with
-   `…Title 2.mkv`, not `…Title.mkv`), and never one whose trailing number the
-   file's name continues (`Ep 10.srt` is not `Ep 1.mkv`'s, nor then
-   `Ep.mkv`'s) — and only when no main name fits, by its `SxxEyy`.
-
-A VobSub `.sub` travels with its `.idx`. A source sets `file` or `files`, not
-both.
-
-**An episode that has no file from a `files` source is dropped** with a warning,
-like a missing `file` companion, and the rest of the batch is muxed.
+**An additional source's `file`** is resolved per episode, wildcards included
+(see [Additional sources](#additional-sources)). An episode it finds no file
+for is dropped with a warning, and the rest of the batch is muxed.
 
 **Anything else stops the batch with exit 2 before anything is written**, with
-every problem listed: two main files on one episode, a `sequence` count that is
-off, a matched file that pairs with no main file, a file named after two main
-files that share a base name, two files of one source on one main file, or one
-file matched by two sources. Fix the names or the config and run again; nothing
-is guessed. The episode and season checks are about the files the run selects,
-so a sample beside its episode can be left out with `--exclude` instead.
+every problem listed: two main files on one episode, a season conflict, a
+wildcard matching several files, or one file two sources pick for one episode.
+Fix the names or the config and run again; nothing is guessed. The checks are
+about the files the run selects, so a sample beside its episode can be left out
+with `--exclude` instead.
 
 An episode that `episodes.yaml` does not list is not a binding problem: a title
 asking for its name drops that file, as it always has.
 
 `mux --dry-run` and `inspect --identify` print what binding decided, once per
 batch: each main file's episode (and the number it read, when `episodeMap`
-changed it), each source's file beneath it with the rule that paired it, and
-`-` for a main file no rule read:
+changed it), each source's file beneath it, and `-` for a main file no rule
+read:
 
 ```
 *** Binding: 3 main files, season 01, by episodeRegex
   EP   READ  MAIN
   01   13    [Grp] Show - 13 (BD).mkv
-             additionalSources[0]  Subs/13.srt  (regex)
+             additionalSources[0]  Subs/13.srt
   02   14    [Grp] Show - 14 (BD).mkv
-             additionalSources[0]  Subs/14.srt  (regex)
+             additionalSources[0]  Subs/14.srt
   -    -     NCOP.mkv
 ```
 
 `inspect` binds exactly as `mux` does, but never stops: a problem is a warning
-there, and `--identify` lists each episode's file from a `files` source with its
-tracks. With no config it binds by `SxxEyy`. Over a config with a mistake in its
-binding keys, it binds by `general`'s keys if those are sound, and pairs no
-`files` source. Under `inspect --strict`, a binding problem fails the run, since it is
-exactly what `mux` would refuse the batch for.
+there, and `--identify` lists each episode's resolved file with its tracks, or
+says it found none or several. With no config it binds by `SxxEyy`, and over a
+config whose matcher keys have a mistake, by `SxxEyy` as well. Under
+`inspect --strict`, a binding problem fails the run, since it is exactly what
+`mux` would refuse the batch for.
 
 ### Groups
 
@@ -710,9 +709,6 @@ groups:
         - use: "jpn"
           default: true                # the entry's own keys win over jpn's
 ```
-
-A group's source can pair its files by name or by an `episodeRegex`, but not by
-`sequence`.
 
 **A file no group claims is skipped** with a warning, and the rest of the
 season is muxed — a main whose name gives no episode (`NCOP.mkv`) included.

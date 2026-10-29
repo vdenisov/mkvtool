@@ -57,6 +57,9 @@ sealed interface SourceListing {
     /** Not on disk. Never fatal here — `--identify` describes what exists rather than asserting it. */
     data object Missing : SourceListing
 
+    /** A wildcard matching several files, none of which binding would pick. */
+    data class Ambiguous(val matches: List<String>) : SourceListing
+
     data class Unreadable(val reason: String) : SourceListing
 
     data class Tracks(val tracks: List<ProbedTrack>) : SourceListing
@@ -255,15 +258,14 @@ fun inspectDirectory(
 
     val tree = walkTree(dir, excludedPaths(dir, options.config))
 
-    // Binding takes only what passed its checks (a bad regex would throw); a grouped config's sources wait for
-    // inspect to report per group.
+    // Binding takes only matchers that passed their checks (a bad regex would throw), and binds by SxxEyy
+    // otherwise; a grouped config's sources wait for inspect to report per group.
     val config = options.config
-    val bindingConfig = when {
-        config == null -> Config()
-        config.declaredGroups == null && bindingProblems(config, "").isEmpty() -> config
-        mainMatcherProblems(config, "").isEmpty() -> Config(general = GeneralConfig(matching = config.general.matching))
-        else -> Config()
-    }
+    val bindingConfig = config?.let {
+        val matching = if (mainMatcherProblems(it, "").isEmpty()) it.general.matching else MatcherConfig()
+        val general = it.general.copy(matching = matching)
+        if (it.declaredGroups == null) it.copy(general = general) else Config(general = general)
+    } ?: Config()
     val binding =
         bindFiles(dir, bindingConfig, selection.all, tree, options.substitution.episodeData, selection.selected)
     val selected = selection.selected
@@ -280,14 +282,13 @@ fun inspectDirectory(
         tree = tree,
         mainExtensions = options.allowedExtensions,
     )
-    // A file a files: source paired is a source, whatever discovery made of its name or its type.
-    val paired = binding.sources.flatMap { source -> source.bound.flatMap { it.files } }.toSet()
-    // A tie among a source's files is binding's problem, and its report already names the mains.
-    val boundTies = binding.problems.filterIsInstance<NameTie>().mapTo(HashSet()) { it.entry }
+    // A file a source resolved to is a source, whatever discovery made of its name or its type.
+    val paired = binding.sources.flatMap { source -> source.companions.flatMap { listOfNotNull(it.file, it.partner) } }
+        .mapTo(HashSet(), ::pathKey)
     val leftovers = ExternalLeftovers(
-        unmatched = discovered.unmatched.filterNot { it in paired }.map { it.relPath },
-        extras = discovered.extras.filterNot { it in paired }.map { it.relPath },
-        tied = discovered.tied.filterNot { it.entry in paired || it.entry in boundTies }
+        unmatched = discovered.unmatched.filterNot { pathKey(it.file) in paired }.map { it.relPath },
+        extras = discovered.extras.filterNot { pathKey(it.file) in paired }.map { it.relPath },
+        tied = discovered.tied.filterNot { pathKey(it.entry.file) in paired }
             .map { tie -> TiedFile(tie.entry.relPath, tie.mains.map { it.name }.sorted()) },
     )
 
@@ -306,7 +307,7 @@ fun inspectDirectory(
 
     // Only --identify resolves them, so a check-only run costs no substitution and no extra subprocess.
     val configuredSources: Map<File, List<ResolvedSource>> =
-        if (options.identify) selected.associateWith { resolveSources(dir, it, options.config, substitution, binding) }
+        if (options.identify) selected.associateWith { resolveSources(it, options.config, substitution, binding) }
         else emptyMap()
 
     val companionProbes = (probeWorthy.map { it.entry.file } +
@@ -532,22 +533,21 @@ private fun externalsFor(
     }
 }
 
-/** An `additionalSources` path resolved for one episode, before it was read; [file] is null when a `files:`
- *  source paired none, and [path] then names the source by its masks. */
-private data class ResolvedSource(val path: String, val file: File?) {
+/** An `additionalSources` template resolved for one episode, before it was read; [file] is null when it resolved
+ *  to none, and [ambiguous] holds what a wildcard matched when it matched several. */
+private data class ResolvedSource(val path: String, val file: File?, val ambiguous: List<String> = emptyList()) {
     fun toResult(cache: Map<String, ProbeResult?>): ConfiguredSource = ConfiguredSource(
         path = path,
         listing = when (val probed = file?.let { cache[pathKey(it)] }) {
-            null -> SourceListing.Missing
+            null -> if (ambiguous.isEmpty()) SourceListing.Missing else SourceListing.Ambiguous(ambiguous)
             is ProbeResult.Failed -> SourceListing.Unreadable(probed.reason)
             is ProbeResult.Probed -> SourceListing.Tracks(probed.allTracks)
         },
     )
 }
 
-/** [main]'s configured sources: a `file:` template resolved for it, or the file a `files:` source paired with it. */
+/** [main]'s configured sources, each the file binding resolved its template to, or the template as substituted. */
 private fun resolveSources(
-    dir: File,
     main: File,
     config: Config?,
     substitution: SubstitutionEngine,
@@ -556,19 +556,14 @@ private fun resolveSources(
     // A declared group's sources wait until inspect reports per group; the implicit one is the top level.
     if (config == null || config.declaredGroups != null) return emptyList()
     return config.groups.single().additionalSources.mapIndexedNotNull { i, source ->
-        val masks = source.files
-        val template = source.file
+        val template = source.file ?: return@mapIndexedNotNull null
+        val path = config.sourcePath(0, i)
+        val substituted = substitute(template, substitution.fileVarsFor(main).vars)
+        val ambiguous = binding.sources.firstOrNull { it.path == path }?.ambiguous?.get(main)
         when {
-            masks != null -> {
-                val path = config.sourcePath(0, i)
-                binding.boundFile(path, main)?.let { ResolvedSource(it.entry.relPath, it.entry.file) }
-                    ?: ResolvedSource("$path.files: ${masks.joinToString(", ")}", null)
-            }
-            template != null -> {
-                val path = substitute(template, substitution.fileVarsFor(main).vars)
-                ResolvedSource(path, resolveAgainst(dir, path))
-            }
-            else -> null
+            ambiguous != null -> ResolvedSource(substituted, null, ambiguous)
+            else -> binding.companion(path, main)?.let { ResolvedSource(it.path, it.file) }
+                ?: ResolvedSource(substituted, null)
         }
     }
 }

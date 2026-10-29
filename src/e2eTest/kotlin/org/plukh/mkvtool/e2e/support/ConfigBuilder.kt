@@ -38,8 +38,6 @@ data class AdditionalSourceSpec(
     val file: String? = null,
     val tracks: List<SourceTrackSpec>,
     val additionalOptions: List<String> = emptyList(),
-    val files: List<String>? = null,
-    val episodeRegex: String? = null,
 )
 
 /**
@@ -86,8 +84,6 @@ fun cfg(
         additionalSources.forEach { source ->
             val keys = listOfNotNull(
                 source.file?.let { "file: \"${it.yamlEscaped()}\"" },
-                source.files?.let { masks -> "files: [${masks.joinToString(", ") { "\"${it.yamlEscaped()}\"" }}]" },
-                source.episodeRegex?.let { "episodeRegex: \"${it.yamlEscaped()}\"" },
                 "tracks:",
             )
             keys.forEachIndexed { i, key -> append(if (i == 0) "  - $key\n" else "    $key\n") }
@@ -160,8 +156,8 @@ fun companionCfg(
 
 /**
  * The config the raw-release binding cases run against: main files named `[Grp] Show - 13 (BD).mkv` read by
- * an `episodeRegex` and mapped `13-14` to `1-2`, and a `files:` source of bare-numbered `Subs/13.srt` paired
- * by its own regex. The season comes from `episodes.yaml`, which each case writes.
+ * an `episodeRegex` and mapped `13-14` to `1-2`, and a source of bare-numbered `Subs/13.srt` named by the number
+ * read. The season comes from `episodes.yaml`, which each case writes.
  */
 fun rawReleaseCfg(
     mkvmergeExe: String = requiredMkvmerge(),
@@ -171,8 +167,7 @@ fun rawReleaseCfg(
     generalExtra = listOf("""episodeRegex: ' - (\d+) \('""", "episodeMap:", "  13-14: 1-2"),
     additionalSources = listOf(
         AdditionalSourceSpec(
-            files = listOf("Subs/*.srt"),
-            episodeRegex = """^(\d+)$""",
+            file = "Subs/${'$'}{episodeRead}.srt",
             tracks = listOf(SourceTrackSpec(language = "en", title = "English")),
         ),
     ),

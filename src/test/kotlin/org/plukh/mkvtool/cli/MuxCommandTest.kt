@@ -199,22 +199,21 @@ class MuxCommandTest : FunSpec({
             muxConfigProblem(grouped, "config.yaml") shouldBe "config.yaml has no id for mainSource.audioTracks[0]"
         }
 
-        test("binding keys and an outputName are muxed with, not refused") {
+        test("binding keys, an outputName and a wildcard template are muxed with, not refused") {
             val named = config().copy(general = GeneralConfig(destinationDir = "mkv", outputName = Template("x")))
-            val bound = config(sources = listOf(AdditionalSource(files = listOf("Rus sound/*.mka"))))
+            val wildcard = config(sources = listOf(AdditionalSource(file = "Rus sound/*\${episodeNum}*.mka")))
 
             muxConfigProblem(named, "config.yaml") shouldBe null
-            // A source with files: names no file on purpose, so it is not reported as having none.
-            muxConfigProblem(bound, "config.yaml") shouldBe null
+            muxConfigProblem(wildcard, "config.yaml") shouldBe null
         }
 
         test("a binding problem is a refusal") {
-            val pinned = config().copy(
-                general = GeneralConfig(destinationDir = "mkv", matching = MatcherConfig(matcher = "fuzzy")),
+            val seasonOnly = config().copy(
+                general = GeneralConfig(destinationDir = "mkv", matching = MatcherConfig(seasonRegex = "S(\\d+)")),
             )
 
-            muxConfigProblem(pinned, "config.yaml") shouldBe
-                "config.yaml has an unknown matcher 'fuzzy' at general.matcher; the only pin is 'sequence'"
+            muxConfigProblem(seasonOnly, "config.yaml") shouldBe
+                "config.yaml sets general.seasonRegex without an episodeRegex"
         }
     }
 })

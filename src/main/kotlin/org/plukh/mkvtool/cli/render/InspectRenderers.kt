@@ -162,6 +162,7 @@ private fun renderConfiguredSources(sources: List<ConfiguredSource>, s: TextStyl
         s.out.println(s.cyan("  + ${source.path}"))
         when (val listing = source.listing) {
             is SourceListing.Missing -> s.out.println("    (not found)")
+            is SourceListing.Ambiguous -> s.out.println("    (ambiguous: ${listing.matches.joinToString(", ")})")
             is SourceListing.Unreadable ->
                 s.out.println("    (mkvmerge could not identify this file: ${listing.reason})")
             // A raw .ass or .srt has no language and no codec_id at all, so that cell is routinely empty.

@@ -259,8 +259,7 @@ fun muxConfigProblem(config: Config, configName: String): String? {
         group.additionalSources.forEachIndexed { i, source ->
             // A source with no file is nothing to mux: v1 threw on it, and passing mkvmerge an empty argument
             // between its parentheses would be a worse answer than saying so.
-            // A source with files: names none on purpose; binding pairs one with each main.
-            if (source.file.isNullOrEmpty() && source.files == null) {
+            if (source.file.isNullOrEmpty()) {
                 return "$configName has no file for ${config.writtenPrefix(g) { it.additionalSources }}" +
                     groupSourcePath(i)
             }
@@ -332,7 +331,7 @@ class MuxCommandBuilder(
     /** The group's track order, resolved. */
     private val trackOrder: String,
     private val probe: (File) -> ProbeResult,
-    /** The batch's binding, which says what each `files:` source's files paired with. */
+    /** The batch's binding, which says what file each source's template resolved to. */
     private val binding: BindingResult,
     /** Whether any of the group's templates uses `${'$'}{codec}`. False means no track is ever probed, so a group
      *  without it costs no subprocesses at all. */
@@ -358,8 +357,8 @@ class MuxCommandBuilder(
     /** The config path of the group's additional source [index]. */
     fun sourcePath(index: Int): String = config.sourcePath(groupIndex, index)
 
-    /** The file binding paired [file] with for `files:` source [index], or null when it paired none. */
-    fun boundFileFor(index: Int, file: File): BoundFile? = binding.boundFile(sourcePath(index), file)
+    /** The file source [index]'s template resolved to for [file], or null when it resolved to none. */
+    fun companionFor(index: Int, file: File): CompanionFile? = binding.companion(sourcePath(index), file)
 
     fun commandFor(file: File): List<String> {
         val base = file.nameWithoutExtension
@@ -422,17 +421,13 @@ class MuxCommandBuilder(
         command += listOf("(", "$base.$extension", ")")
 
         group.additionalSources.forEachIndexed { i, source ->
-            // A pair goes on as its primary half alone: mkvmerge finds the partner beside it.
-            val path = if (source.files != null) {
-                boundFileFor(i, file)?.entry?.relPath.orEmpty()
-            } else {
-                expand(source.file)
-            }
+            // The companion pre-flight has dropped every main a source resolved nothing for.
+            val companion = companionFor(i, file) ?: error("no file resolved for ${sourcePath(i)} and ${file.name}")
             for (track in source.tracks) {
                 // Always 0, and the config cannot set it: mkvmerge sees a companion as a single-track file.
                 command += languageOption(COMPANION_TRACK_ID, track.language)
                 command += trackNameOption(COMPANION_TRACK_ID, track.title) {
-                    expand(it, trackVarsFor(track.language, companionTrack(path)))
+                    expand(it, trackVarsFor(track.language, companionTrack(companion.file)))
                 }
                 if (track.charset != null) {
                     command += listOf("--sub-charset", "$COMPANION_TRACK_ID:${track.charset}")
@@ -440,7 +435,7 @@ class MuxCommandBuilder(
                 command += listOf("--default-track-flag", "$COMPANION_TRACK_ID:${flag(track.default)}")
             }
             command += source.additionalOptions
-            command += listOf("(", path, ")")
+            command += listOf("(", companion.path, ")")
         }
 
         command += listOf(
@@ -473,11 +468,9 @@ class MuxCommandBuilder(
     }
 
     /** The same for a companion, which mkvmerge always reports as holding exactly track 0. */
-    private fun companionTrack(path: String): ProbedTrack? {
+    private fun companionTrack(file: File): ProbedTrack? {
         if (!usesCodec) return null
-        val info = companionProbes.getOrPut(path) {
-            resolveAgainst(dir, path).takeIf { it.isFile }?.let(probe)
-        }
+        val info = companionProbes.getOrPut(file.path) { probe(file) }
         return (info as? ProbeResult.Probed)?.allTracks?.firstOrNull { it.id == COMPANION_TRACK_ID }
     }
 
@@ -558,8 +551,8 @@ fun muxDirectory(
 
     // Every main, or a masked-out `X 2.mkv` would hand `X 2.srt` to `X.mkv`; the episode checks take the run.
     val config = options.config
-    // Only a files: source reads the tree, and on a network share the walk is the slow part.
-    val walks = config.groups.any { group -> group.additionalSources.any { it.files != null } }
+    // Only a wildcard's matches and a pair's partner need the tree, and on a network share the walk is the slow part.
+    val walks = config.groups.any { group -> group.additionalSources.any { it.file?.let(::readsTree) == true } }
     val tree = if (walks) walkTree(dir, excludedPaths(dir, config)) else emptyList()
     val bound = bindFiles(dir, config, selection.all, tree, options.substitution.episodeData, run = selection.selected)
     binding = bound
@@ -731,7 +724,7 @@ private fun preparePass(
 
     // Never strict, unlike stage two: a dub studio releasing 22 of 24 episodes is ordinary, and the two
     // that are missing would have failed in mkvmerge anyway.
-    val companionDrops = companionDropsFor(dir, media(), builder)
+    val companionDrops = companionDropsFor(media(), builder)
     if (companionDrops != null) {
         renderer.render(companionDrops)
         val names = companionDrops.fileNames.toSet()
@@ -832,11 +825,10 @@ private fun substitutionDropsFor(
 }
 
 /**
- * The companion pre-flight: which episodes an `additionalSources` pattern resolves to nothing for, or a
- * `files:` source paired no file with, or null when every companion is there. A `files:` source is named by
- * its masks, under its path within the group: the pass's label already names the group.
+ * The companion pre-flight: which episodes an `additionalSources` template resolved to no file for, as binding
+ * resolved it, or null when every companion is there.
  */
-private fun companionDropsFor(dir: File, mediaFiles: List<File>, builder: MuxCommandBuilder): CompanionDrops? {
+private fun companionDropsFor(mediaFiles: List<File>, builder: MuxCommandBuilder): CompanionDrops? {
     val sources = builder.group.additionalSources
     if (sources.isEmpty()) return null
 
@@ -844,17 +836,9 @@ private fun companionDropsFor(dir: File, mediaFiles: List<File>, builder: MuxCom
     val blocked = LinkedHashSet<String>()
 
     for (file in mediaFiles) {
-        val vars = builder.substitution.fileVarsFor(file).vars
         sources.forEachIndexed { i, source ->
-            val masks = source.files
-            val (pattern, present) = if (masks != null) {
-                "${groupSourcePath(i)}.files: ${masks.joinToString(", ")}" to
-                    (builder.boundFileFor(i, file) != null)
-            } else {
-                val template = source.file ?: return@forEachIndexed
-                template to resolveAgainst(dir, substitute(template, vars)).isFile
-            }
-            if (!present) {
+            val pattern = source.file ?: return@forEachIndexed
+            if (builder.companionFor(i, file) == null) {
                 bySource.getOrPut(pattern) { ArrayList() } += file.name
                 blocked += file.name
             }

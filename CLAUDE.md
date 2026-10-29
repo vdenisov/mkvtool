@@ -224,8 +224,8 @@ hand-assembled `episodes.txt` — use `core/CharsetDetection.kt` rather than qui
 | `YamlMapping.kt` | `loadMapping`: "read this file, get a mapping or a named reason why not", with the numbers YAML 1.1 would misread kept as text |
 | `CharsetDetection.kt` | Groovy's auto-detection semantics, transcribed, for the files that need them |
 | `Episodes.kt` | the episode-metadata *shape*: `parseSeasonEpisode`, `parseCanonicalName`, `sanitizeForFilename`, `indexFromLines`, `normalizeYaml`, plus the display-only `formatRanges`/`batchLabels` |
-| `Discovery.kt` | external-file discovery: `walkTree`, `discoverCompanions`, the extension tables, `trimForDisplay`, and the longest-prefix lookup binding shares |
-| `Binding.kt` | `bindFiles`: main files to episodes by one rule per run, and `files:` sources' files to main files; anything ambiguous or unpaired is a problem that fails the batch |
+| `Discovery.kt` | external-file discovery: `walkTree`, `discoverCompanions`, the extension tables, `trimForDisplay`, `withPartners`, and the longest-prefix lookup |
+| `Binding.kt` | `bindFiles`: main files to episodes by one rule per run, and each source's `file:` template resolved per main, wildcards included; anything ambiguous is a problem that fails the batch |
 | `LanguageGuess.kt` | the CLDR-derived language tables and `guessLanguage` |
 | `Probe.kt` | `mkvmerge -J`: `parseProbe`, `probeFile`, typed track records, signatures, slot grouping, `layoutKey`, `findDuplicates` |
 | `CheckReport.kt` | `buildCheckReport` — the consistency **model**, with no presentation in it |
@@ -588,17 +588,15 @@ edit: an inherited field's problem names the top-level path, once, however many 
 
 **Matchers, the episode map and `outputName`.** They say how
 each file gets its episode and what the output is called, which is what lets a config face raw release
-names instead of renamed ones. The main files' keys live in `general` (`matcher`, `episodeRegex`,
-`seasonRegex`, `episodeMap`), not in a group, because groups claim files *by* episode number, so a main
-file's number has to be known before its group is. An additional source pairs its files with main files
-over what its `files:` masks match, with its own `matcher`, `episodeRegex` and `seasonRegex`; `file:` keeps
-naming one file per episode through the template engine, and a source may not set both. An `episodeRegex`
-is *the* rule wherever it is set. `matcher:` pins `sequence`, case-insensitively, and nothing else:
-positional matching is the one rule that can silently mis-pair, so it is never a default, and a regex beside
-it is an error. The map lives in `general` alone, because it maps every number read anywhere — one
-numbering per directory — so a source setting one is refused. It is range to range (`13-24: 1-12`), equal
-lengths, release side from 0 and real side from 1, absent meaning
-identity. `outputName` is a file-scope template, so stage one validates it like `general.title`; `.mkv` is
+names instead of renamed ones. The keys live in `general` (`episodeRegex`, `seasonRegex`, `episodeMap`),
+not in a group, because groups claim files *by* episode number, so a main file's number has to be known
+before its group is. An `episodeRegex` is *the* rule when set. There is no positional matching: it is the one
+rule that can silently mis-pair, so a release with no readable number is renamed by hand. A companion is a
+source's `file:` template, resolved per episode; its own text may carry wildcards, for names no variable
+spells (a CRC), and `${episodeRead}` is the number as the main's name spelled it, before the map, for
+companions numbered like the release. The map is range to range (`13-24: 1-12`), equal lengths, release side
+from 0 and real side from 1, absent meaning identity.
+`outputName` is a file-scope template, so stage one validates it like `general.title`; `.mkv` is
 appended. `bindingProblems` reports what the config alone can show: fatal in `mux`, counted in `inspect`.
 Binding runs on every `mux` and `inspect` run, with `SxxEyy` when no key says otherwise; there is no second
 path. `outputName` needs no episode — `${fileName} fixed` is a fine name for files no rule could read. The
@@ -614,7 +612,8 @@ and fails on Windows. The file list is sorted by name, so batches process predic
 
 **Every file pattern in the tool is one glob of its own**, `maskRegex`: `*` within a path segment, `**`
 across segments, `?` one character, and everything else literal. That covers these arguments and the
-config's `files:` masks alike. It is not the JDK glob because release names are full of brackets
+wildcards in a `file:` template alike, where `globRegex` keeps the substituted values
+literal. It is not the JDK glob because release names are full of brackets
 (`[MC-Ent]`), which a JDK glob reads as a character class, so a mask over them silently matches the wrong
 files; with brackets and braces literal, no pattern can be invalid either. Case is ignored on Windows and
 significant elsewhere. A pattern that names an existing file **in the media directory** is still matched
@@ -738,50 +737,50 @@ decides from what the config says. It is deliberately plain: a sane release bind
 one regex, and anything else gets a precise diagnosis and a user who fixes the files by hand — renaming
 worked for years, so avoiding it is a convenience, not a requirement.
 
-A main file gets its episode by **one rule per run**: `sequence` when pinned, the regex when given,
-`SxxEyy` otherwise; the rule is the run's, on `BindingResult`, not each main's. **A main is any top-level
-media file; an episode is a main that read a number.** One that read none (`NCOP.mkv`, a movie) stays a main:
-muxed under its own name, inspected, checked, `-` in the table, and dropped by stage two only when a template
-needs its episode — when nothing does, nothing is missing and nothing is said. A name can pair with it; a
-number rule cannot reach it. A
-`files:` source's file pairs with a **main file**, never with an episode on its own: by its regex when it has
-one, by `sequence` when pinned, and otherwise by name (discovery's longest-prefix lookup — an equal base is
-EXACT, a longer one SUFFIX) and, only when no main name starts its own, by `SxxEyy`. The regex is a `find`
-over the base name with group 1 the number, and with a `seasonRegex` both must match. `sequence` numbers the
-files 1..N in plain name order, the mains by name and a source's by relative path; the mains' count must
-equal the metadata's episode count, a source's the episodes the mains read. Every number read goes
-through the one episode map, episode only, a number no range covers staying itself, and a main records the
-number it read beside the episode it maps to, and the season its name gave.
+A main file gets its episode by **one rule per run**: the regex when given, `SxxEyy` otherwise; the rule is
+the run's, on `BindingResult`, not each main's. **A main is any top-level media file; an episode is a main
+that read a number.** One that read none (`NCOP.mkv`, a movie) stays a main: muxed under its own name,
+inspected, checked, `-` in the table, and dropped by stage two only when a template needs its episode — when
+nothing does, nothing is missing and nothing is said. The regex is a `find` over the base name with group 1
+the number, and with a `seasonRegex` both must match. Every number read goes through the one episode map, a
+number no range covers staying itself, and a main records the number as its name spelled it beside the
+episode it maps to, and the season its name gave.
 
-**The files of one run share one season**, from what they read (`SxxEyy`, `seasonRegex`) and the metadata.
-Numbers therefore pair on the episode alone, and a season nobody names, or two of them, is a problem. The
-season, duplicate-episode and `sequence` checks consider only mains that read an episode, so a directory of
-un-numbered files with no metadata has no season and no problem.
+**The files of one run share one season**, from what the mains read (`SxxEyy`, `seasonRegex`) and the
+metadata; a season nobody names, or two of them, is a problem. The season and duplicate-episode checks
+consider only mains that read an episode, so a directory of un-numbered files with no metadata has no season
+and no problem.
+
+**Groups are split inside binding**, between reading the mains and resolving the sources, because groups claim
+by episode; `BindingResult.partition` carries the split, over every main. Each group's source templates are
+then resolved for that group's mains in the run, through a `SubstitutionEngine` binding builds over the mains
+it read. A template a main has no value for resolves nothing for it, and one naming a variable nothing knows
+resolves nothing at all, since it would expand to nothing and turn `*${typo}*` into a `**` across folders. A
+main missing a variable its group's templates use is still resolved, so `--identify` shows what is there, but
+raises no problem: stage two drops it. A literal template resolves as it always did, against the media
+directory; a wildcard is matched against the walked tree, the mains aside and `destinationDir` left out, and
+must be relative to the media directory with no dot-folder, which the walk skips (a config problem
+otherwise); a file existing under the template's exact name is named literally, as a mask names one, and `mux`
+walks only when a template has a wildcard or names a paired format's half. A paired format's partner (a VobSub
+`.sub` beside its `.idx`) travels with its primary half however the template named it. Exactly one match is
+the companion; none is a companion drop, not a binding problem.
+
+**A template is the user's to get right.** A glob has no notion of where a number ends, so `*E${episodeN}*`
+matches `S01E10.ass` for episode 1; binding does not second-guess that, since every such guard grows a new
+edge case. Whether one file may feed several episodes (fonts) or only one (a dub) depends on what the file
+is, which glob syntax cannot tell; that question belongs to attachments, not to binding.
 
 **Nothing is soft**: every failure is a typed `BindingProblem`, and any one of them fails the batch — two
-mains on one episode, a `sequence` count mismatch, a file that pairs with no main, a name tie, two files of
-one source on one main, one file in two sources. Since binding runs on every run,
-that includes a directory holding two seasons or metadata naming another season, with no matcher set at all. An episode the
-metadata lacks is not binding's concern; stage-two substitution drops that file, as it always has. A
-source's candidates are what its masks match against the relative path, the mains aside and with no
-extension filter, and the partner of a paired format (a VobSub `.sub` beside its `.idx`), whatever the case
-of its name, travels with it rather than competing. Callers pass every main, before any command-line mask,
-since with the longest name winning a masked-out `X 2.mkv` would hand `X 2.srt` to `X.mkv`, plus the run the
-masks chose: the season and duplicate-episode checks and pairing by number are about the run alone, so a
-sample beside its episode can be excluded rather than moved, while `sequence` still numbers every main. The
-tree leaves out `destinationDir`, as discovery's does.
+mains on one episode, a season conflict, a template matching several files for a main in the run, a file two
+sources pick for one main (it would be muxed twice). Since binding runs on every run, that includes a
+directory holding two seasons or metadata naming another season, with no key set at all. An episode the
+metadata lacks is not binding's concern; stage-two substitution drops that file, as it always has. Callers
+pass every main, before any command-line mask, plus the run the masks chose: the checks and the templates are
+about the run alone, so a sample beside its episode can be excluded rather than moved.
 
-**Groups are split inside binding**, between reading the mains and pairing the sources, because groups claim
-by episode; `BindingResult.partition` carries the split, over every main. A group's source looks a file's
-main up among every main, as above, so a file named after another group's `X 2.mkv` cannot fall to this
-group's `X.mkv`, and then keeps only the pairings with its own members: a file whose main another group
-claims, or none does, is simply not that source's, which is what lets two groups share one mask. A file no
-main can be found for is still unpaired, and a tie still a tie. A group's source may not pin `sequence`,
-since numbering 1..N cannot know which of the group's episodes the first file is. A main no group claims is
-no problem: `BindingReport` lists it, from the partition narrowed to the run, as skipped — on stdout like the
-drops — unless the batch is refused, which skips nothing (and a refused `sequence` leaves every main unread,
-so every main would be listed). `inspect` binds a grouped config without its groups for now, so it shows no
-unclaimed main.
+A main no group claims is no problem: `BindingReport` lists it, from the partition narrowed to the run, as
+skipped — on stdout like the drops — unless the batch is refused, which skips nothing. `inspect` binds a
+grouped config without its groups for now, so it shows no unclaimed main.
 
 ### Language guessing
 
@@ -851,8 +850,8 @@ problem), binding (fatal on any problem), stage-two substitution drops, the comp
 collisions (fatal),
 and the consistency check (`Pre-flight check`, warn-only unless `--strict`). The two drop stages report and
 drop rather than aborting, because those episodes would have failed in mkvmerge anyway and a partially
-released dub is a normal situation — which is also why a main that a `files:` source paired nothing with is
-a companion drop, not a binding problem.
+released dub is a normal situation — which is also why a template that finds no file is a companion drop,
+not a binding problem.
 
 Everything up to binding is the batch's; from stage two on, the gates and the run are one **pass** over a
 group's selection (`MuxCommandBuilder` reads the group's `mainSource`, `additionalSources` and track order,
@@ -871,13 +870,13 @@ named once, before the first pass runs (`MuxRun.nonMedia`). `mux` resolves and r
 order up front, as it always rendered the one.
 
 Binding's episode is the template engine's only source of `${episodeNum}`, `${seasonNum}` and the rest
-(`SubstitutionEngine.boundTo`); the engine reads no number out of a file name itself. A `files:` source's
-paired file goes on the command line, a VobSub pair as its `.idx`. The collision check runs after the drops
+(`SubstitutionEngine.boundTo`); the engine reads no number out of a file name itself. The file binding
+resolved goes on the command line, a VobSub pair as its `.idx`. The collision check runs after the drops
 (a dropped episode writes nothing) and before anything is probed: with no `outputName` it catches two mains
 sharing a base name, `a.mkv` and `a.mp4`, which would otherwise overwrite one another in silence. It is
 batch-wide: each pass checks its files against its own and every earlier pass's outputs, so a later pass's
-clash still stops the batch before that pass probes anything. A companion drop names a `files:` source by its
-path within the group, the pass's label naming the group. Paths
+clash still stops the batch before that pass probes anything. A companion drop names a source by its
+template, the pass's label naming the group. Paths
 compare ignoring case on every platform, unlike masks: Windows and macOS file systems ignore it by default,
 and an output muxed on Linux may well be copied to one.
 
@@ -921,15 +920,14 @@ held no media.
 
 `inspect` binds as `mux` does and emits the same `BindingReport`, narrowed to the masked run, with
 `fatal = false`: problems print as warnings and the run carries on. With no config it binds over the default
-one. Over a config `bindingProblems` refused (binding takes one that passed; a bad regex would throw) or one
-declaring groups (whose sources wait for `inspect` to report per group), it keeps `general`'s matchers
-when they passed and drops the sources, the config problem already reported. Binding problems are not
+one. Over a config whose matcher keys were refused (a bad regex would throw) it binds by `SxxEyy`, the config
+problem already reported, and keeps the sources; over one declaring groups it drops them, until `inspect`
+reports per group. Binding problems are not
 config problems, but `--strict` counts them, because they are what `mux` would refuse the batch for, and a
 script gating on `inspect --strict` should fail exactly where `mux` would.
-`--identify` lists a `files:` source's paired file per episode beside the `file:` sources, or `(not found)`
-under the source's masks, and a file a source paired is never listed as unmatched or as an extra, whatever
-discovery made of its name. A batch with binding problems still resolves its `file:` templates from what
-binding read, there being no other source of an episode.
+`--identify` lists each source's resolved file per episode, `(not found)` under the substituted template where
+it found none and `(ambiguous: …)` where a wildcard found several, and a file a source resolved to is never
+listed as unmatched or as an extra, whatever discovery made of its name.
 
 ### `rename` and `--external`
 
@@ -1095,8 +1093,8 @@ this section outlives its subject:
   for muxing, and one script trying to be both was the confusing part.
 - **`${fileName}` and rename's verbatim suffix preservation are one mechanism**, not two features: a
   companion is bound to its main file by *name*, so the file names had to be mutated until that was true.
-  That coupling is a weakness rather than a design goal, and replacing it with matchers declared in the
-  config is planned work.
+  That coupling was a weakness rather than a design goal; a wildcard in the template and `${episodeRead}`
+  now reach companions the name does not tie, so the files no longer need renaming for it.
 
 Its acceptance suite outlived the scripts as the oracle the port was built against, and was then
 translated case by case into the end-to-end tier. No Groovy is left in the repository.

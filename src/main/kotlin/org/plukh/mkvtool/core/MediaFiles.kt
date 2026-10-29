@@ -62,19 +62,30 @@ fun compileMasks(patterns: List<String>, dir: File): List<FileMask> =
  * Backslashes fold to forward slashes, since a Windows caller types the separator that way. Case is
  * ignored on Windows and significant elsewhere.
  */
-fun maskRegex(pattern: String): Regex {
-    val glob = pattern.replace('\\', '/')
+fun maskRegex(pattern: String): Regex = globRegex(listOf(pattern to true))
+
+/**
+ * [parts] joined into one [maskRegex] glob, where only a part flagged `true` is glob text and every other part
+ * matches literally, its `*` and `?` included: a template's own text against the values substituted into it.
+ */
+fun globRegex(parts: List<Pair<String, Boolean>>): Regex {
+    val chars = parts.flatMap { (text, glob) -> (if (glob) text.replace('\\', '/') else text).map { it to glob } }
+    fun globAt(i: Int, token: String) =
+        token.indices.all { k -> chars.getOrNull(i + k)?.let { it.second && it.first == token[k] } == true }
+
     val regex = StringBuilder()
     var i = 0
-    while (i < glob.length) {
-        val segmentStart = i == 0 || glob[i - 1] == '/'
+    while (i < chars.size) {
+        val (c, glob) = chars[i]
+        val segmentStart = i == 0 || chars[i - 1].first == '/'
         val token = when {
-            segmentStart && glob.startsWith("**/", i) -> "(?:.*/)?" to 3
-            glob.startsWith("**", i) -> ".*" to 2
-            glob[i] == '*' -> "[^/]*" to 1
-            glob[i] == '?' -> "[^/]" to 1
-            glob[i] in REGEX_SPECIALS -> "\\${glob[i]}" to 1
-            else -> glob[i].toString() to 1
+            !glob -> (if (c in REGEX_SPECIALS) "\\$c" else c.toString()) to 1
+            segmentStart && globAt(i, "**/") -> "(?:.*/)?" to 3
+            globAt(i, "**") -> ".*" to 2
+            c == '*' -> "[^/]*" to 1
+            c == '?' -> "[^/]" to 1
+            c in REGEX_SPECIALS -> "\\$c" to 1
+            else -> c.toString() to 1
         }
         regex.append(token.first)
         i += token.second

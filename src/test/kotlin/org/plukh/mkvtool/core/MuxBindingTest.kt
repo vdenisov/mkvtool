@@ -37,11 +37,11 @@ class MuxBindingTest : FunSpec({
         run.files.first().command!! shouldContainInOrder listOf("--output", "mkv/Show - S01E01 - One Start.mkv")
     }
 
-    test("a files: source's paired file goes on the command line, and a VobSub pair as its .idx alone") {
+    test("a wildcard template's file goes on the command line, and a VobSub pair as its .idx alone") {
         val dir = tempdir()
         touch(dir, "Show - S01E01.mkv", "Show - S01E02.mkv")
         touch(dir, "Subs/Show - S01E01.idx", "Subs/Show - S01E01.sub", "Subs/Show - S01E02.srt")
-        val config = config(sources = listOf(source("Subs/*")))
+        val config = config(sources = listOf(source("Subs/\${fileName}.*")))
 
         val run = mux(dir, config)
 
@@ -102,16 +102,29 @@ class MuxBindingTest : FunSpec({
         renderer.results.filterIsInstance<BindingReport>().single().fatal shouldBe true
     }
 
-    test("a main its files: source paired nothing with is dropped like a missing companion, and the rest muxes") {
+    test("a main its wildcard finds nothing for is dropped like a missing companion, and the rest muxes") {
         val dir = tempdir()
-        touch(dir, "Show - S01E01.mkv", "Show - S01E02.mkv", "Subs/Show - S01E01.srt")
+        touch(dir, "Show - S01E01.mkv", "Show - S01E02.mkv", "Subs/Show - S01E01 [AB12].srt")
 
-        val run = mux(dir, config(sources = listOf(source("Subs/*.srt"))))
+        val run = mux(dir, config(sources = listOf(source("Subs/\${fileName} [*].srt"))))
 
         val drops = run.companionDrops!!
         drops.fileNames shouldContainExactly listOf("Show - S01E02.mkv")
-        drops.sources.single().pattern shouldBe "additionalSources[0].files: Subs/*.srt"
+        drops.sources.single().pattern shouldBe "Subs/\${fileName} [*].srt"
         run.files.map { it.fileName } shouldContainExactly listOf("Show - S01E01.mkv")
+    }
+
+    test("a wildcard matching several files stops the batch before anything is written") {
+        val dir = tempdir()
+        touch(dir, "Show - S01E01.mkv", "Subs/Show - S01E01 a.srt", "Subs/Show - S01E01 b.srt")
+        var ran = false
+
+        val run = mux(dir, config(sources = listOf(source("Subs/\${fileName} *.srt"))), record = { ran = true })
+
+        run.aborted shouldBe MuxAbort.Unbound(1)
+        run.binding!!.problems.single().shouldBeInstanceOf<AmbiguousCompanion>()
+        ran shouldBe false
+        File(dir, "mkv").exists() shouldBe false
     }
 
     test("a config with no matcher still binds, so two seasons in one directory stop the batch") {
@@ -165,8 +178,8 @@ private fun touch(dir: File, vararg paths: String) = paths.forEach {
     File(dir, it).apply { parentFile.mkdirs() }.writeText("x")
 }
 
-private fun source(vararg masks: String) =
-    AdditionalSource(files = masks.toList(), tracks = listOf(SourceTrackConfig(language = "ru")))
+private fun source(template: String) =
+    AdditionalSource(file = template, tracks = listOf(SourceTrackConfig(language = "ru")))
 
 private fun config(
     matching: MatcherConfig = MatcherConfig(),

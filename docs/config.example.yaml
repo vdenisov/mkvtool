@@ -58,16 +58,12 @@ general:
   # episodeRegex is *the* rule when set: group 1 of its first match in the base name is the number.
   # seasonRegex reads the season the same way, and with it both must match; without it the season
   # comes from episodes.yaml. A main file the rule cannot read (a creditless opening, say) is still
-  # muxed, under its own name; only a title or outputName that needs its episode drops it.
+  # muxed, under its own name; only a template that needs its episode drops it.
   # episodeRegex: " - (\\d+) "
   # seasonRegex: "S(\\d+)"
   #
-  # `sequence` numbers the main files 1..N in name order instead, and needs episodes.yaml listing
-  # exactly N episodes. It is never a default: positional matching can mis-pair silently.
-  # matcher: "sequence"
-  #
-  # Release numbers to real ones, range to range, for a release numbered across seasons. Every
-  # number read is mapped, the additional sources' included; a number no range covers stays itself.
+  # Release numbers to real ones, range to range, for a release numbered across seasons. A number no
+  # range covers stays itself; ${episodeRead} keeps the number as the name spelled it.
   # episodeMap:
   #   13-24: 1-12
 
@@ -127,8 +123,10 @@ mainSource:
 #
 # `file` is a template resolved per episode. After `mkvtool rename` a companion's name is the main
 # file's name plus its own suffix, which is what makes `${fileName}` the usual pattern; a companion
-# kept in a per-studio folder works the same way. `inspect --identify` shows what each pattern
-# resolved to for each episode, and finds companions no config mentions yet.
+# kept in a per-studio folder works the same way. Wildcards (`*`, `**`, `?`; brackets literal) cover
+# a name no variable spells, such as a CRC, and must find exactly one file: none drops the episode,
+# several stop the batch. `inspect --identify` shows what each template resolved to for each
+# episode, and finds companions no config mentions yet.
 # additionalSources:
 #   - file: "Rus sound/[Studio]/${fileName}.mka"
 #     tracks:
@@ -146,12 +144,10 @@ mainSource:
 #         charset: "UTF-8"
 #         default: false
 #
-#   # `files` is the other way: masks over the directory tree, each match paired with a main file —
-#   # by name (the main's name plus a suffix), else by its SxxEyy, or by its own episodeRegex when set,
-#   # or by `matcher: "sequence"` in path order. A matched file that pairs with no main stops the batch;
-#   # an episode left with no file of this source is dropped from the batch with a warning.
-#   - files: ["Subs/*.srt"]
-#     episodeRegex: "^(\\d+)$"
+#   # A per-file CRC no variable spells. A glob has no notion of where a number ends, so write the
+#   # number the way the names do: "Subs/*E${episodeNum}*.srt", or "Subs/*S??E${episodeNum}*.srt" to pin
+#   # the whole token.
+#   - file: "Subs/* - ${episodeNum} [*].srt"
 #     tracks:
 #       - language: "en"
 #         title: "${languageName}"

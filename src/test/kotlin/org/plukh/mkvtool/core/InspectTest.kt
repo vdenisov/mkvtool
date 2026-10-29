@@ -568,52 +568,36 @@ class InspectTest : FunSpec({
             report.bindingProblems shouldBe 0
         }
 
-        test("a files: source lists the file it paired with each episode, and the masks where it paired none") {
+        test("a wildcard template lists the file it resolved, and says where it found none or several") {
             val dir = tempdir()
-            listOf("Show - S01E01.mkv", "Show - S01E02.mkv").forEach { File(dir, it).writeText("x") }
+            (1..3).forEach { File(dir, "Show - S01E0$it.mkv").writeText("x") }
             File(dir, "Subs").mkdirs()
-            File(dir, "Subs/Show - S01E01.mka").writeText("x")
-            val config = Config(additionalSources = listOf(AdditionalSource(files = listOf("Subs/*.mka"))))
+            listOf("a 01", "a 02", "b 02").forEach { File(dir, "Subs/$it.mka").writeText("x") }
+            val config = Config(additionalSources = listOf(AdditionalSource(file = "Subs/*\${episodeNum}.mka")))
 
             val report = inspectDirectory(dir, options(identify = true, config = config), SilentRenderer) {
                 probedResult(it, track(0, "audio"))
             }
 
-            val (first, second) = report.files.map { it.configuredSources.single() }
-            first.path shouldBe "Subs/Show - S01E01.mka"
+            val (first, second, third) = report.files.map { it.configuredSources.single() }
+            first.path shouldBe "Subs/a 01.mka"
             first.listing.shouldBeInstanceOf<SourceListing.Tracks>()
-            second shouldBe ConfiguredSource("additionalSources[0].files: Subs/*.mka", SourceListing.Missing)
+            second.path shouldBe "Subs/*02.mka"
+            second.listing.shouldBeInstanceOf<SourceListing.Ambiguous>().matches.sorted() shouldContainExactly
+                listOf("Subs/a 02.mka", "Subs/b 02.mka")
+            third shouldBe ConfiguredSource("Subs/*03.mka", SourceListing.Missing)
         }
 
-        test("a file a files: source paired is not listed as unmatched, whatever discovery made of its name") {
+        test("a file a template resolved to is not listed as unmatched, whatever discovery made of its name") {
             val dir = tempdir()
             File(dir, "Show - S01E01.mkv").writeText("x")
             File(dir, "Subs").mkdirs()
             File(dir, "Subs/01.srt").writeText("x")
-            val source = AdditionalSource(
-                files = listOf("Subs/*.srt"),
-                matching = MatcherConfig(episodeRegex = """^(\d+)$"""),
-            )
-
-            val config = Config(additionalSources = listOf(source))
+            val config = Config(additionalSources = listOf(AdditionalSource(file = "Subs/\${episodeRead}.srt")))
 
             val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }
 
             report.leftovers.unmatched.shouldBeEmpty()
-        }
-
-        test("a tie among a files: source's candidates is reported by binding alone") {
-            val dir = tempdir()
-            listOf("Show - S01E01.mkv", "Show - S01E01.mp4").forEach { File(dir, it).writeText("x") }
-            File(dir, "Subs").mkdirs()
-            File(dir, "Subs/Show - S01E01.ass").writeText("x")
-            val config = Config(additionalSources = listOf(AdditionalSource(files = listOf("Subs/*.ass"))))
-
-            val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }
-
-            report.binding?.problems.orEmpty().filterIsInstance<NameTie>().map { it.entry.relPath } shouldContainExactly
-                listOf("Subs/Show - S01E01.ass")
-            report.leftovers.tied.shouldBeEmpty()
         }
 
         test("a config whose general matchers the binding checks refused binds as no config does: by SxxEyy") {
@@ -629,24 +613,24 @@ class InspectTest : FunSpec({
             binding.episodes.single().episode shouldBe 1
         }
 
-        test("a config refused elsewhere, or declaring groups, keeps its general matchers and pairs no source") {
+        test("a config refused elsewhere binds its sources, and one declaring groups binds none of them yet") {
             val dir = tempdir()
             File(dir, "Show E01.mkv").writeText("x")
             File(dir, "Subs").mkdirs()
             File(dir, "Subs/Show E01.srt").writeText("x")
-            val subs = listOf(AdditionalSource(files = listOf("Subs/*.srt")))
+            val subs = listOf(AdditionalSource(file = "Subs/*.srt"))
             val emptyName = byRegex.copy(
                 general = byRegex.general.copy(outputName = Template("")),
                 additionalSources = subs,
             )
             val grouped = byRegex.copy(declaredGroups = listOf(DeclaredGroup(name = "all")), additionalSources = subs)
 
-            for (config in listOf(emptyName, grouped)) {
+            for ((config, resolved) in listOf(emptyName to listOf("Subs/Show E01.srt"), grouped to emptyList())) {
                 val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }
                 val binding = report.binding!!
                 binding.rule shouldBe BindingRule.REGEX
                 binding.episodes.single().episode shouldBe 1
-                binding.sources.shouldBeEmpty()
+                binding.sources.flatMap { source -> source.companions.map { it.path } } shouldBe resolved
             }
         }
 
@@ -664,12 +648,12 @@ class InspectTest : FunSpec({
             report.leftovers.unmatched.shouldBeEmpty()
         }
 
-        test("a main-type file a files: source paired is a source, not an extra") {
+        test("a main-type file a template resolved to is a source, not an extra") {
             val dir = tempdir()
             File(dir, "Show - S01E01.mkv").writeText("x")
             File(dir, "Rus").mkdirs()
             File(dir, "Rus/Show - S01E01.mkv").writeText("x")
-            val config = Config(additionalSources = listOf(AdditionalSource(files = listOf("Rus/*.mkv"))))
+            val config = Config(additionalSources = listOf(AdditionalSource(file = "Rus/\${fileName}.mkv")))
 
             val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }
 
