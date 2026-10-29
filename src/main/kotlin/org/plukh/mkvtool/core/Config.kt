@@ -378,12 +378,14 @@ fun mainMatcherProblems(config: Config, configName: String): List<String> =
     matcherProblems(config.general.matching, "general", configName)
 
 /** A file list split by group. Data only: what an unclaimed file *means* is the caller's to say. Every file is
- *  in exactly one of the two. */
+ *  in exactly one of the three. */
 data class GroupPartition(
     /** Per group, in group order, the files it claims. */
     val members: List<List<File>>,
     /** The files no group claims. */
     val unclaimed: List<File>,
+    /** The files several groups' ranges claim, which none of them gets. */
+    val contested: List<File> = emptyList(),
 )
 
 /**
@@ -393,19 +395,24 @@ data class GroupPartition(
 fun partitionByGroup(groups: List<GroupConfig>, files: List<File>, episodeOf: (File) -> Int?): GroupPartition {
     val groupOf = files.associateWith { file ->
         val episode = episodeOf(file)
+        val claimants = groups.indices.filter { i ->
+            val membership = groups[i].membership ?: return@filter true
+            episode != null && membership.episodes.any { episode in it }
+        }
         // Overlapping ranges are a config problem, which inspect reports and carries on past: no group gets that
         // episode, rather than whichever is listed first.
-        groups.indices.singleOrNull { i ->
-            val membership = groups[i].membership ?: return@singleOrNull true
-            episode != null && membership.episodes.any { episode in it }
-        } ?: -1
+        claimants.singleOrNull() ?: if (claimants.isEmpty()) UNCLAIMED else CONTESTED
     }
 
     return GroupPartition(
         members = groups.indices.map { i -> files.filter { groupOf.getValue(it) == i } },
-        unclaimed = files.filter { groupOf.getValue(it) == -1 },
+        unclaimed = files.filter { groupOf.getValue(it) == UNCLAIMED },
+        contested = files.filter { groupOf.getValue(it) == CONTESTED },
     )
 }
+
+private const val UNCLAIMED = -1
+private const val CONTESTED = -2
 
 /** A declared group as output names it: its [index] in the config, and its [name] when it has one. */
 data class GroupRef(val index: Int, val name: String?)

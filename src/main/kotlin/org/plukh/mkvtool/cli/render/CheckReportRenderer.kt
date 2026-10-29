@@ -14,6 +14,7 @@ import org.plukh.mkvtool.core.SlotGroup
 import org.plukh.mkvtool.core.TrackSlot
 import org.plukh.mkvtool.core.TrackValueFinding
 import org.plukh.mkvtool.core.formatRanges
+import org.plukh.mkvtool.core.groupLabel
 import org.plukh.mkvtool.out.ResultTextRenderer
 import org.plukh.mkvtool.out.TextStyle
 import org.plukh.mkvtool.out.plural
@@ -21,8 +22,8 @@ import org.plukh.mkvtool.out.pluralize
 
 /**
  * The consistency check's text form. Bound to [CheckReport] once, so `inspect` and `mux`'s pre-flight
- * render the same report identically by construction — the only thing that differs between them is the
- * header label, which the model carries.
+ * render the same report identically by construction — the only things that differ between them are the
+ * header label and the group, which the model carries.
  *
  * Everything here is presentation: the column grid, the differing-cell highlight, the file-evidence
  * lists, and every phrase v1 composed inside the check itself. The model composes no text at all.
@@ -37,7 +38,8 @@ class CheckReportRenderer(private val verbose: Boolean = false) : ResultTextRend
         val out = style.out
         val limit = if (verbose) Int.MAX_VALUE else DEFAULT_FILE_LIST_LIMIT
 
-        var header = "*** ${result.headerLabel}: ${plural(result.readable.size, "file")}"
+        val group = result.group?.let { ", ${groupLabel(it)}" }.orEmpty()
+        var header = "*** ${result.headerLabel}$group: ${plural(result.readable.size, "file")}"
         if (result.unreadable.isNotEmpty()) {
             header += " (${result.unreadable.size} could not be identified by mkvmerge and are excluded)"
         }

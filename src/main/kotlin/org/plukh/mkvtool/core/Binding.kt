@@ -85,6 +85,7 @@ data class BindingResult(
         partition = GroupPartition(
             members = partition.members.map { members -> members.filter { it in files } },
             unclaimed = partition.unclaimed.filter { it in files },
+            contested = partition.contested.filter { it in files },
         ),
     )
 }

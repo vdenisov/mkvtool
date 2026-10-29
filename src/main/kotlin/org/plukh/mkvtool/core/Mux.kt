@@ -750,11 +750,11 @@ private fun preparePass(
     renderer.render(Notice(""))
 
     // No externals: `mux` discovers nothing, so every external path in the report is inert here and it
-    // renders exactly as `inspect`'s does bar the header.
+    // renders exactly as `inspect`'s does bar the header, which says so.
     val check = buildCheckReport(
         infos = infos,
         selection = trackSelectionOf(builder.group.mainSource),
-        headerLabel = "Pre-flight check",
+        headerLabel = PRE_FLIGHT_CHECK,
     )
     renderer.render(check)
 

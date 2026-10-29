@@ -195,13 +195,14 @@ data class InspectReport(
     val files: List<FileIdentification>,
     val legend: ExternalLegend,
     val leftovers: ExternalLeftovers,
-    /** Null in an `--identify`-only run. */
-    val check: CheckReport?,
+    /** One per group with files in the run, in config order; empty in an `--identify`-only run, and when no group
+     *  claims a file in the run. */
+    val checks: List<CheckReport>,
     val configProblems: Int,
     /** Null when there was no media file to bind. */
     val binding: BindingResult? = null,
 ) : CommandResult {
-    val blockingCount: Int get() = check?.blockingCount ?: 0
+    val blockingCount: Int get() = checks.sumOf { it.blockingCount }
 
     /** What would make `mux` refuse this batch, which is why `--strict` counts it. */
     val bindingProblems: Int get() = binding?.problems?.size ?: 0
@@ -251,20 +252,18 @@ fun inspectDirectory(
             files = emptyList(),
             legend = ExternalLegend(emptyList()),
             leftovers = ExternalLeftovers(emptyList(), emptyList()),
-            check = null,
+            checks = emptyList(),
             configProblems = options.configProblems,
         )
     }
 
     val tree = walkTree(dir, excludedPaths(dir, options.config))
 
-    // Binding takes only matchers that passed their checks (a bad regex would throw), and binds by SxxEyy
-    // otherwise; a grouped config's sources wait for inspect to report per group.
+    // Binding takes only matchers that passed their checks (a bad regex would throw), and binds by SxxEyy otherwise.
     val config = options.config
     val bindingConfig = config?.let {
         val matching = if (mainMatcherProblems(it, "").isEmpty()) it.general.matching else MatcherConfig()
-        val general = it.general.copy(matching = matching)
-        if (it.declaredGroups == null) it.copy(general = general) else Config(general = general)
+        it.copy(general = it.general.copy(matching = matching))
     } ?: Config()
     val binding =
         bindFiles(dir, bindingConfig, selection.all, tree, options.substitution.episodeData, selection.selected)
@@ -305,10 +304,20 @@ fun inspectDirectory(
         .filter { it.entry.ext in PROBE_EXTENSIONS && it.main in selected }
         .distinctBy { pathKey(it.entry.file) }
 
+    // Each main's group, by index: a file no group claims has none, so no sources and no check.
+    val groupOf = binding.partition.members.withIndex()
+        .flatMap { (g, members) -> members.map { it to g } }
+        .toMap()
+
     // Only --identify resolves them, so a check-only run costs no substitution and no extra subprocess.
     val configuredSources: Map<File, List<ResolvedSource>> =
-        if (options.identify) selected.associateWith { resolveSources(it, options.config, substitution, binding) }
-        else emptyMap()
+        if (options.identify) {
+            selected.associateWith { main ->
+                groupOf[main]?.let { resolveSources(main, it, options.config, substitution, binding) }.orEmpty()
+            }
+        } else {
+            emptyMap()
+        }
 
     val companionProbes = (probeWorthy.map { it.entry.file } +
         configuredSources.values.flatten().mapNotNull { it.file }.filter { it.isFile })
@@ -341,19 +350,21 @@ fun inspectDirectory(
     // Precomputed, because the report asks for a file's externals once per grouping, once per layout for
     // the labels and the findings, and once per file *per slot id* while grouping — a closure that
     // rebuilt them each time would be the hot path.
-    val check = if (options.check) {
+    val checks = if (options.check) {
         val slotsByFile = externalsByFile.mapValues { (_, externals) -> externalSlotsFor(externals) }
-        buildCheckReport(
-            infos = selected.map { infos.getValue(it) },
-            externalsOf = { slotsByFile[it.file].orEmpty() },
-            // A grouped config's top level is only what some groups inherit; findings wait for per-group checks.
-            selection = trackSelectionOf(
-                options.config?.let { if (it.declaredGroups == null) it.mainSource else MainSourceConfig() },
-            ),
-            headerLabel = "Consistency check",
-        ).also(renderer::render)
+        // One per group with files in the run, as mux checks one per pass: each against its own selection.
+        binding.partition.members.indices.mapNotNull { g ->
+            val members = selected.filter { groupOf[it] == g }.ifEmpty { return@mapNotNull null }
+            buildCheckReport(
+                infos = members.map { infos.getValue(it) },
+                externalsOf = { slotsByFile[it.file].orEmpty() },
+                selection = trackSelectionOf(config?.groups?.get(g)?.mainSource),
+                headerLabel = "Consistency check",
+                group = config?.groupRef(g),
+            ).also(renderer::render)
+        }
     } else {
-        null
+        emptyList()
     }
 
     val files = if (options.identify) {
@@ -376,7 +387,7 @@ fun inspectDirectory(
         files = files,
         legend = legend,
         leftovers = leftovers,
-        check = check,
+        checks = checks,
         configProblems = options.configProblems,
         binding = binding,
     )
@@ -546,18 +557,19 @@ private data class ResolvedSource(val path: String, val file: File?, val ambiguo
     )
 }
 
-/** [main]'s configured sources, each the file binding resolved its template to, or the template as substituted. */
+/** [main]'s configured sources in group [group], each the file binding resolved its template to, or the template
+ *  as substituted. */
 private fun resolveSources(
     main: File,
+    group: Int,
     config: Config?,
     substitution: SubstitutionEngine,
     binding: BindingResult,
 ): List<ResolvedSource> {
-    // A declared group's sources wait until inspect reports per group; the implicit one is the top level.
-    if (config == null || config.declaredGroups != null) return emptyList()
-    return config.groups.single().additionalSources.mapIndexedNotNull { i, source ->
+    if (config == null) return emptyList()
+    return config.groups[group].additionalSources.mapIndexedNotNull { i, source ->
         val template = source.file ?: return@mapIndexedNotNull null
-        val path = config.sourcePath(0, i)
+        val path = config.sourcePath(group, i)
         val substituted = substitute(template, substitution.fileVarsFor(main).vars)
         val ambiguous = binding.sources.firstOrNull { it.path == path }?.ambiguous?.get(main)
         when {

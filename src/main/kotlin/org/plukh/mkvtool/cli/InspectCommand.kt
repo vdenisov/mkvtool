@@ -153,17 +153,6 @@ class InspectCommand : Callable<Int> {
             renderer.render(Warning("$it."))
             configProblems++
         }
-        // Not counted: a valid grouped config is not a problem, and --strict must not fail it.
-        // An empty groups: is already reported above; there are no groups to say anything about.
-        if (!config?.declaredGroups.isNullOrEmpty()) {
-            renderer.render(
-                Warning(
-                    "$configName declares groups, which inspect does not report per group yet; " +
-                        "findings are not classified against the groups' selections, " +
-                        "and --identify does not list the groups' sources.",
-                ),
-            )
-        }
         config?.let { bindingProblems(it, configName) }?.forEach {
             renderer.render(Warning("$it."))
             configProblems++

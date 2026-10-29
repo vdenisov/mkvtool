@@ -143,7 +143,7 @@ class MuxPreflightTest : FunSpec({
 
             val run = mux(dir, renderer, probe = { probedOk(it) })
 
-            run.check!!.headerLabel shouldBe "Pre-flight check"
+            run.check!!.headerLabel shouldBe "Pre-flight check (internal tracks only)"
             run.check!!.readable shouldContainExactly listOf("a.mkv", "b.mkv")
             // The meter's total is the work that actually ran, so nothing continues after it finishes.
             renderer.progressTotal shouldBe 2

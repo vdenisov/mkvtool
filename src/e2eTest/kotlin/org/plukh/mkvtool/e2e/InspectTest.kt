@@ -480,27 +480,7 @@ class InspectTest : FunSpec({
         }
     }
 
-    // Groups are not reported per group yet, which inspect says; a valid grouped config is still no problem.
-    test("a valid grouped config is a warning and no config problem").config(enabledOrReasonIf = needsMkvmerge) {
-        val workDir = tempdir()
-        stageInput(workDir, "a.mkv")
-        File(workDir, "config.yaml").writeText(
-            "groups:\n  - name: \"raw\"\n    episodes: [1-6]\n  - name: \"dubbed\"\n    episodes: [7-12]\n",
-            StandardCharsets.UTF_8,
-        )
-
-        val run = inspect(workDir, "--strict")
-        withClue(run.output) {
-            run.exitCode shouldBe 0
-            run.output shouldContain
-                "*** Warning: config.yaml declares groups, which inspect does not report per group yet"
-            run.output shouldNotContain "config problem"
-        }
-    }
-
-    test("an empty groups list is one problem, with no per-group warning about it").config(
-        enabledOrReasonIf = needsMkvmerge,
-    ) {
+    test("an empty groups list is one problem").config(enabledOrReasonIf = needsMkvmerge) {
         val workDir = tempdir()
         stageInput(workDir, "a.mkv")
         File(workDir, "config.yaml").writeText("groups: []\n", StandardCharsets.UTF_8)
@@ -509,7 +489,6 @@ class InspectTest : FunSpec({
         withClue(run.output) {
             run.exitCode shouldBe 2
             run.output shouldContain "*** Warning: config.yaml declares groups but lists none."
-            run.output shouldNotContain "does not report per group"
         }
     }
 
