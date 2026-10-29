@@ -174,7 +174,8 @@ class MuxPreflightTest : FunSpec({
 
         withClue(run.output) {
             run.exitCode shouldBe 0
-            run.output shouldContain "Pre-flight"
+            // mux discovers no external files, so its pre-flight says what it compared.
+            run.output shouldContain "*** Pre-flight check (internal tracks only): 2 files"
             run.output shouldContain "Processing"
             (run.output.indexOf("Pre-flight") < run.output.indexOf("Processing")) shouldBe true
         }

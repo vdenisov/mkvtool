@@ -18,6 +18,9 @@ import org.plukh.mkvtool.out.CommandResult
  * different ids and was unreadable.
  */
 
+/** `mux`'s header for the check: it discovers no external files, so its layouts are its tracks alone. */
+const val PRE_FLIGHT_CHECK = "Pre-flight check (internal tracks only)"
+
 /** Something the check found. [blocking] means it can change what gets muxed; everything else is worth
  *  saying but cannot corrupt output. */
 sealed interface Finding {
@@ -106,7 +109,7 @@ data class ChapterSplit(
 
 /**
  * Everything the check found. The root of its own result document, embedded by `inspect` and by `mux`'s
- * pre-flight — the same report, which is why [headerLabel] is the only thing that differs between them.
+ * pre-flight — the same report, which is why [headerLabel] and [group] are the only things that differ between them.
  */
 data class CheckReport(
     val headerLabel: String,
@@ -118,6 +121,9 @@ data class CheckReport(
     val duplicates: List<DuplicateTracks>,
     val chapters: ChapterSplit?,
     val findings: List<Finding>,
+    /** The group whose selection classified the findings; null for the implicit group, and where a parent names
+     *  the group itself. */
+    val group: GroupRef? = null,
 ) : CommandResult {
 
     /** What `--strict` exits on. */
@@ -125,7 +131,8 @@ data class CheckReport(
 }
 
 /**
- * Build the check's answer for [infos], in the order given.
+ * Build the check's answer for [infos], in the order given, classified against [selection] — [group]'s, when
+ * there is one.
  *
  * [externalsOf] supplies the external files attached to each episode — `inspect` builds them from
  * discovery, `mux` supplies none, so every external path here is inert there and its pre-flight output is
@@ -138,7 +145,8 @@ fun buildCheckReport(
     infos: List<ProbeResult>,
     externalsOf: (ProbeResult.Probed) -> Map<String, ExternalSlot> = { emptyMap() },
     selection: TrackSelection = TrackSelection.NONE,
-    headerLabel: String = "Pre-flight check",
+    headerLabel: String = PRE_FLIGHT_CHECK,
+    group: GroupRef? = null,
 ): CheckReport {
     val ok = infos.filterIsInstance<ProbeResult.Probed>()
     val unreadable = infos.filterIsInstance<ProbeResult.Failed>().map { UnreadableFile(it.file.name, it.reason) }
@@ -154,6 +162,7 @@ fun buildCheckReport(
             duplicates = emptyList(),
             chapters = null,
             findings = emptyList(),
+            group = group,
         )
     }
 
@@ -165,12 +174,12 @@ fun buildCheckReport(
     val largest = grouped[0]
     val findings = ArrayList<Finding>()
 
-    val layouts = grouped.mapIndexed { index, group ->
-        val trackGroups = groupTracks(group)
-        val externalGroups = groupExternals(group, externalsOf)
+    val layouts = grouped.mapIndexed { index, members ->
+        val trackGroups = groupTracks(members)
+        val externalGroups = groupExternals(members, externalsOf)
 
         if (index > 0) {
-            findings += layoutFinding(group, largest, externalsOf, selection)
+            findings += layoutFinding(members, largest, externalsOf, selection)
         } else {
             for (slotGroup in trackGroups.filter { !it.consistent }) {
                 findings += TrackValueFinding(
@@ -196,13 +205,13 @@ fun buildCheckReport(
         }
 
         LayoutGroup(
-            fileNames = group.map { it.file.name },
-            episodeLabels = membershipLabels(group.map { it.file.name.substringBeforeLast('.') }),
-            trackTypes = group[0].tracks.entries.sortedBy { it.key }.map { it.value.signature.type },
-            externalLabels = externalsOf(group[0]).values.map { it.label }.distinct().sorted(),
+            fileNames = members.map { it.file.name },
+            episodeLabels = membershipLabels(members.map { it.file.name.substringBeforeLast('.') }),
+            trackTypes = members[0].tracks.entries.sortedBy { it.key }.map { it.value.signature.type },
+            externalLabels = externalsOf(members[0]).values.map { it.label }.distinct().sorted(),
             trackGroups = trackGroups,
             externalGroups = externalGroups,
-            videoNamesById = videoNamesById(group),
+            videoNamesById = videoNamesById(members),
         )
     }
 
@@ -232,6 +241,7 @@ fun buildCheckReport(
         duplicates = duplicates,
         chapters = chapters,
         findings = findings,
+        group = group,
     )
 }
 

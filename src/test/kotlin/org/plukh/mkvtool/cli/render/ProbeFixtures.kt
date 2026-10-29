@@ -1,6 +1,7 @@
 package org.plukh.mkvtool.cli.render
 
 import org.plukh.mkvtool.core.ExternalSlot
+import org.plukh.mkvtool.core.GroupRef
 import org.plukh.mkvtool.core.ProbeResult
 import org.plukh.mkvtool.core.ProbedTrack
 import org.plukh.mkvtool.core.TrackSelection
@@ -49,6 +50,7 @@ internal fun render(
     externals: Map<String, Map<String, ExternalSlot>> = emptyMap(),
     selection: TrackSelection = TrackSelection.NONE,
     label: String = "Consistency check",
+    group: GroupRef? = null,
     verbose: Boolean = false,
     colour: Boolean = false,
 ): String {
@@ -57,6 +59,7 @@ internal fun render(
         externalsOf = { externals[it.file.name] ?: emptyMap() },
         selection = selection,
         headerLabel = label,
+        group = group,
     )
     val buffer = ByteArrayOutputStream()
     val stream = PrintStream(buffer, true, Charsets.UTF_8)

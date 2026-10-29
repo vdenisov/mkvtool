@@ -163,6 +163,18 @@ class BindingRendererTest : FunSpec({
             )
         }
 
+        test("a file several groups claim is listed apart from one none claims") {
+            val partition = GroupPartition(
+                listOf(emptyList(), emptyList()),
+                unclaimed = listOf(File("NCOP.mkv")),
+                contested = listOf(File("Show - S01E05.mkv")),
+            )
+
+            render(binding(groups = groups).copy(partition = partition), fatal = false).first shouldBe
+                "*** 1 file will be skipped: not claimed by any group\n      NCOP.mkv\n\n" +
+                "*** 1 file will be skipped: claimed by several groups\n      Show - S01E05.mkv\n\n"
+        }
+
         test("a refused batch skips nothing, so it lists no unclaimed file; a carried-on one still does") {
             val unclaimed = listOf(File("Show - S01E05.mkv"))
             val binding = binding(groups = groups, problems = listOf(SeasonUnknown))

@@ -32,15 +32,12 @@ class BindingReportRenderer(private val table: Boolean = false) : ResultTextRend
         if (table && binding.mains.isNotEmpty()) renderTable(binding, style)
 
         // Skipped, never refused: claiming a file is the config's decision, and leaving one out is a decision too.
-        // Unsaid when the batch is refused, which skips nothing.
-        val unclaimed = binding.partition.unclaimed
+        // Unsaid when the batch is refused, which skips nothing. Only inspect meets a contested file: mux refuses
+        // the overlapping ranges before it binds.
         val refused = result.fatal && binding.problems.isNotEmpty()
-        if (unclaimed.isNotEmpty() && !refused) {
-            style.out.println(
-                style.yellow("*** ${plural(unclaimed.size, "file")} will be skipped: not claimed by any group"),
-            )
-            formatFileList(unclaimed.map { it.name }, "      ").forEach { style.out.println(it) }
-            style.out.println()
+        if (!refused) {
+            renderSkipped(binding.partition.unclaimed, "not claimed by any group", style)
+            renderSkipped(binding.partition.contested, "claimed by several groups", style)
         }
 
         if (binding.problems.isEmpty()) return
@@ -49,6 +46,13 @@ class BindingReportRenderer(private val table: Boolean = false) : ResultTextRend
         for (problem in binding.problems) {
             bindingProblemLines(problem, binding.groups).forEach { style.err.println("      $it") }
         }
+    }
+
+    private fun renderSkipped(files: List<File>, why: String, style: TextStyle) {
+        if (files.isEmpty()) return
+        style.out.println(style.yellow("*** ${plural(files.size, "file")} will be skipped: $why"))
+        formatFileList(files.map { it.name }, "      ").forEach { style.out.println(it) }
+        style.out.println()
     }
 
     /** One row per main file, `-` for one with no episode, its sources' files beneath it; READ only when the map

@@ -152,6 +152,31 @@ class InspectTest : FunSpec({
                 SourceListing.Unreadable("broken")
         }
 
+        test("each episode's sources are its group's, and an episode no group claims has none and no check") {
+            val dir = tempdir()
+            (1..3).forEach { File(dir, "Show - S01E0$it.mkv").writeText("x") }
+            val grouped = configWithSource("\${fileName}.eng.srt").copy(
+                declaredGroups = listOf(
+                    DeclaredGroup(membership = Membership(listOf(1..1))),
+                    DeclaredGroup(
+                        membership = Membership(listOf(2..2)),
+                        additionalSources = listOf(AdditionalSource(file = "\${fileName}.rus.srt")),
+                    ),
+                ),
+            )
+
+            val options = options(identify = true, check = true, config = grouped)
+            val report = inspectDirectory(dir, options, SilentRenderer) { probedResult(it) }
+
+            report.files.map { file -> file.configuredSources.map { it.path } } shouldContainExactly listOf(
+                listOf("Show - S01E01.eng.srt"),
+                listOf("Show - S01E02.rus.srt"),
+                emptyList(),
+            )
+            report.checks.flatMap { it.readable } shouldContainExactly listOf("Show - S01E01.mkv", "Show - S01E02.mkv")
+            report.binding!!.partition.unclaimed.map { it.name } shouldContainExactly listOf("Show - S01E03.mkv")
+        }
+
         test("a check-only run resolves none of them, so it costs no probe") {
             val dir = tempdir()
             File(dir, "a.mkv").writeText("x")
@@ -325,7 +350,7 @@ class InspectTest : FunSpec({
 
             val report = inspectDirectory(dir, options(), SilentRenderer) { probedResult(it) }
 
-            val layouts = report.check!!.layouts
+            val layouts = report.checks.single().layouts
             layouts.map { it.fileNames } shouldContainExactlyInAnyOrder listOf(
                 listOf("Show - S01E01 - Title.mkv"),
                 listOf("Show - S01E02 - Title.mkv"),
@@ -333,22 +358,37 @@ class InspectTest : FunSpec({
             layouts.forEach { it.externalGroups shouldHaveSize 1 }
         }
 
-        test("a grouped config's top level is not the selection its findings are classified against") {
+        test("a grouped config is checked per group, each group's files against its own selection") {
             val dir = tempdir()
-            listOf("01", "02").forEach { File(dir, "Show - S01E$it - Title.mkv").writeText("x") }
-            val topLevel = MainSourceConfig(audioTracks = listOf(TrackConfig(id = 1)))
-            val plain = Config(mainSource = topLevel)
-            val grouped = plain.copy(declaredGroups = listOf(DeclaredGroup(membership = Membership(listOf(1..2)))))
-            // Audio 1's language differs between the two files, and audio 2 is not copied: blocking when selected.
+            (1..4).forEach { File(dir, "Show - S01E0$it - Title.mkv").writeText("x") }
+            val audio1 = MainSourceConfig(audioTracks = listOf(TrackConfig(id = 1)))
+            val plain = Config(mainSource = audio1)
+            val grouped = plain.copy(
+                declaredGroups = listOf(
+                    DeclaredGroup(name = "raw", membership = Membership(listOf(1..2))),
+                    DeclaredGroup(
+                        name = "dubbed",
+                        membership = Membership(listOf(3..4)),
+                        mainSource = MainSourceConfig(audioTracks = listOf(TrackConfig(id = 2))),
+                    ),
+                ),
+            )
+            // Audio 2's language differs within each pair, and audio 1 is not copied: blocking where 2 is selected.
             fun probe(file: File) = probedResult(
                 file,
                 track(0, "video"),
-                track(1, "audio", language = if ("E01" in file.name) "eng" else "jpn"),
-                track(2, "audio", language = "rus"),
+                track(1, "audio", language = "jpn"),
+                track(2, "audio", language = if ("E01" in file.name || "E03" in file.name) "eng" else "rus"),
             )
 
-            inspectDirectory(dir, options(config = plain), SilentRenderer, ::probe).check!!.blockingCount shouldBe 1
-            inspectDirectory(dir, options(config = grouped), SilentRenderer, ::probe).check!!.blockingCount shouldBe 0
+            val v1 = inspectDirectory(dir, options(config = plain), SilentRenderer, ::probe).checks.single()
+            v1.group.shouldBeNull()
+            v1.readable shouldHaveSize 4
+
+            val checks = inspectDirectory(dir, options(config = grouped), SilentRenderer, ::probe).checks
+            checks.map { it.group } shouldContainExactly listOf(GroupRef(0, "raw"), GroupRef(1, "dubbed"))
+            checks.map { it.readable.size } shouldContainExactly listOf(2, 2)
+            checks.map { it.blockingCount } shouldContainExactly listOf(0, 1)
         }
 
         test("matching runs pre-mask, so a mask does not turn the rest of the season into leftovers") {
@@ -613,7 +653,7 @@ class InspectTest : FunSpec({
             binding.episodes.single().episode shouldBe 1
         }
 
-        test("a config refused elsewhere binds its sources, and one declaring groups binds none of them yet") {
+        test("a config refused elsewhere binds its sources, and so does one declaring groups") {
             val dir = tempdir()
             File(dir, "Show E01.mkv").writeText("x")
             File(dir, "Subs").mkdirs()
@@ -623,14 +663,18 @@ class InspectTest : FunSpec({
                 general = byRegex.general.copy(outputName = Template("")),
                 additionalSources = subs,
             )
-            val grouped = byRegex.copy(declaredGroups = listOf(DeclaredGroup(name = "all")), additionalSources = subs)
+            val grouped = byRegex.copy(
+                declaredGroups = listOf(DeclaredGroup(name = "all", membership = Membership(listOf(1..1)))),
+                additionalSources = subs,
+            )
 
-            for ((config, resolved) in listOf(emptyName to listOf("Subs/Show E01.srt"), grouped to emptyList())) {
+            for (config in listOf(emptyName, grouped)) {
                 val report = inspectDirectory(dir, options(config = config), SilentRenderer) { probedResult(it) }
                 val binding = report.binding!!
                 binding.rule shouldBe BindingRule.REGEX
                 binding.episodes.single().episode shouldBe 1
-                binding.sources.flatMap { source -> source.companions.map { it.path } } shouldBe resolved
+                binding.sources.flatMap { source -> source.companions.map { it.path } } shouldBe
+                    listOf("Subs/Show E01.srt")
             }
         }
 

@@ -53,7 +53,12 @@ problem belongs to the config, not to the batch.
 This is what a bare `mkvtool inspect` prints, and the same report `mkvtool mux`
 runs as its pre-flight before muxing (`--no-check` skips it there). Under
 `inspect` the header reads `*** Consistency check: 5 files`; run from `mux` it
-reads `*** Pre-flight check: 5 files`. Everything below applies to both.
+reads `*** Pre-flight check (internal tracks only): 5 files`, because `mux` does
+not look for external files, so they take no part in its layouts. That costs
+nothing: a source handing one episode an `.ass` and the next an `.srt` is the
+same command line, and a source missing for an episode is dropped before the
+check. Over a config with [groups](#groups) both print one report per group.
+Everything below applies to both.
 
 The check works in two layers. First it groups files by **track layout** — the
 type at each ID. Files that share a layout are the same release and get one
@@ -721,7 +726,7 @@ pass would. Output names a group by number, and by name when it has one:
 
 ```
 *** Pass 1 of 2: group 1 (raw), 10 files
-*** Pre-flight check: 10 files
+*** Pre-flight check (internal tracks only): 10 files
 ...
 *** Pass 2 of 2: group 2 (dubbed), 14 files
 ...
@@ -729,9 +734,11 @@ pass would. Output names a group by number, and by name when it has one:
 *** Processing Show - S01E01.mkv
 ```
 
-`inspect` does not report per group yet: over a grouped config it says so,
-does not classify findings against the groups' selections, and `--identify`
-does not list the groups' sources.
+`inspect` reports by group too. It runs one consistency check per group, over
+that group's episodes and classified against its selection, headed
+`*** Consistency check, group 2 (dubbed): 14 files`. `--identify` lists each
+episode's sources from the group that claims it. A file no group claims is
+listed as skipped, as `mux` lists it, and is left out of every check.
 
 ### Example configurations
 

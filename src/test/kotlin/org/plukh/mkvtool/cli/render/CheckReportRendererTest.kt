@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import org.plukh.mkvtool.core.GroupRef
 import org.plukh.mkvtool.core.ProbeResult
 import org.plukh.mkvtool.core.TrackSelection
 import java.io.File
@@ -31,8 +32,16 @@ class CheckReportRendererTest : FunSpec({
             // run when inspect does.
             render(listOf(probed("e01.mkv", t(0, "video"))), label = "Consistency check") shouldContain
                 "*** Consistency check: 1 file"
-            render(listOf(probed("e01.mkv", t(0, "video"))), label = "Pre-flight check") shouldContain
-                "*** Pre-flight check: 1 file"
+            val label = "Pre-flight check (internal tracks only)"
+            render(listOf(probed("e01.mkv", t(0, "video"))), label = label) shouldContain
+                "*** Pre-flight check (internal tracks only): 1 file"
+        }
+
+        test("names the group whose selection classified it, when there is one") {
+            render(listOf(probed("e01.mkv", t(0, "video"))), group = GroupRef(1, "dubbed")) shouldContain
+                "*** Consistency check, group 2 (dubbed): 1 file"
+            render(listOf(probed("e01.mkv", t(0, "video"))), group = GroupRef(0, null)) shouldContain
+                "*** Consistency check, group 1: 1 file"
         }
 
         test("a clean batch says so, and says whether externals were part of it") {

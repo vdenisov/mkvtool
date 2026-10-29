@@ -770,7 +770,7 @@ class ConfigTest : FunSpec({
             partition.unclaimed shouldBe files("E03.mkv", "OVA.mkv")
         }
 
-        test("an episode overlapping ranges claim is in no group, rather than in the first") {
+        test("an episode overlapping ranges claim is contested and in no group, rather than in the first") {
             val partition = partitionByGroup(
                 listOf(group("raw", 1..2), group("dubbed", 2..3)),
                 files("E01.mkv", "E02.mkv", "E03.mkv"),
@@ -778,7 +778,8 @@ class ConfigTest : FunSpec({
             )
 
             partition.members shouldBe listOf(files("E01.mkv"), files("E03.mkv"))
-            partition.unclaimed shouldBe files("E02.mkv")
+            partition.unclaimed.shouldBeEmpty()
+            partition.contested shouldBe files("E02.mkv")
         }
 
         test("the implicit group claims every file") {

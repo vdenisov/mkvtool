@@ -440,8 +440,10 @@ report entirely different things — from being fused.
 
 The exception, and the reason it is one: the consistency report has a single renderer shared by `inspect`
 and `mux`, because the report *must* look identical in both, and a second copy would be a drift bug
-waiting to happen. `headerLabel` rides on the model (`Consistency check` versus `Pre-flight check`) and is
-the only difference; `verbose` is a renderer setting, not a model field.
+waiting to happen. `headerLabel` rides on the model (`Consistency check` versus `Pre-flight check
+(internal tracks only)`), and so does `group`, which `inspect` sets on each group's report and `mux` leaves
+null because its pass header already names the group; those are the only differences. `verbose` is a
+renderer setting, not a model field.
 
 ## Behavioural contracts
 
@@ -577,8 +579,8 @@ list by group with the episode lookup injected, and binding is where it runs (se
 `effectiveSelection` is a group's selection in
 the form two groups are compared in — `use:` names dropped, the track order resolved — so equal means the
 same output. `auto: <hash>` is reserved for a future config generator to mark the entries it wrote; every
-reader ignores it like any unknown key. `mux` runs one pass per group (see `mux` below); `inspect` says it
-does not report per group and carries on, uncounted, and `--identify` does not list the groups' sources.
+reader ignores it like any unknown key. `mux` runs one pass per group (see `mux` below), and `inspect` runs one
+check per group (see `inspect` below).
 
 Output names a declared group `group N (name)` — counted from 1 in config order, the name only when there is
 one — through `groupLabel`, and a group's source `group N (name): additionalSources[i]` through
@@ -682,6 +684,12 @@ extensions (the legend still counts files); an episode with only one half is a l
 mkvmerge cannot mux half a pair. External differences are never blocking (nothing selects an external file by
 id) but they do split groups, which is the point.
 
+`mux`'s pre-flight has **no external slots**, since it discovers nothing, so it can group a directory more
+coarsely than `inspect` does, and its header says `(internal tracks only)` so the two do not read as one report
+disagreeing with itself. Feeding the configured sources in as slots would split no pass: a source handing one
+episode an `.ass` and the next an `.srt` is one command shape, and a source missing for an episode is the
+companion pre-flight's drop.
+
 **A value that can reach a group key is data; everything said *about* that value is presentation.** The
 `?` an external row falls back to for a missing type or codec is composed in `core`, because it enters a
 signature and the grouping must have seen it. The `-` for an absent language and the `rus?` marking an
@@ -779,8 +787,9 @@ pass every main, before any command-line mask, plus the run the masks chose: the
 about the run alone, so a sample beside its episode can be excluded rather than moved.
 
 A main no group claims is no problem: `BindingReport` lists it, from the partition narrowed to the run, as
-skipped — on stdout like the drops — unless the batch is refused, which skips nothing. `inspect` binds a
-grouped config without its groups for now, so it shows no unclaimed main.
+skipped — on stdout like the drops — unless the batch is refused, which skips nothing. An episode overlapping
+ranges claim goes to no group and is listed apart, as claimed by several groups; only `inspect` gets that far,
+since `mux` refuses the overlap as a config problem.
 
 ### Language guessing
 
@@ -848,10 +857,10 @@ Discovers files, builds an `mkvmerge` command per file, and runs them, continuin
 pre-flights, in order: stage-one template validation (fatal), the episode-metadata load (fatal on any
 problem), binding (fatal on any problem), stage-two substitution drops, the companion pre-flight, output
 collisions (fatal),
-and the consistency check (`Pre-flight check`, warn-only unless `--strict`). The two drop stages report and
-drop rather than aborting, because those episodes would have failed in mkvmerge anyway and a partially
-released dub is a normal situation — which is also why a template that finds no file is a companion drop,
-not a binding problem.
+and the consistency check (`Pre-flight check (internal tracks only)`, warn-only unless `--strict`). The two
+drop stages report and drop rather than aborting, because those episodes would have failed in mkvmerge
+anyway and a partially released dub is a normal situation — which is also why a template that finds no file
+is a companion drop, not a binding problem.
 
 Everything up to binding is the batch's; from stage two on, the gates and the run are one **pass** over a
 group's selection (`MuxCommandBuilder` reads the group's `mainSource`, `additionalSources` and track order,
@@ -908,8 +917,16 @@ Mode rule: `wantCheck = checkOnly || checkVerbose || !identifyOnly`. A bare run 
 identifies, naming both runs both off one scan — `--identify` and the check share a single probe per file,
 so combining them does not double the subprocesses.
 
-`--identify` also lists configured sources, resolving each `additionalSources[].file` for that episode and
-printing the resolved path plus a probed sub-table. Never fatal: a source that is not there prints
+The check runs **once per group** with files in the run, as `mux` checks once per pass: over the group's own
+members, classified against its selection, the report carrying the group. A layout outlier is then measured
+against the group's largest layout, so a group whose tracks differ by design is not flagged against the
+season. A file no group claims is in no check — the
+`BindingReport` lists it, as `mux`'s does — and its tracks are still in `--identify`. The implicit group's
+report names no group, which keeps a v1 config's output unchanged.
+
+`--identify` also lists configured sources, resolving each `additionalSources[].file` of the group claiming the
+episode for that episode and printing the resolved path plus a probed sub-table; an episode no group claims
+lists none. Never fatal: a source that is not there prints
 `(not found)`, because `--identify` describes what exists rather than asserting it. Per-episode blocks are
 grouped **by variant, not by file**, and everything on the page shares one column grid at a two-space
 indent, so the columns line up straight down the report.
@@ -921,8 +938,7 @@ held no media.
 `inspect` binds as `mux` does and emits the same `BindingReport`, narrowed to the masked run, with
 `fatal = false`: problems print as warnings and the run carries on. With no config it binds over the default
 one. Over a config whose matcher keys were refused (a bad regex would throw) it binds by `SxxEyy`, the config
-problem already reported, and keeps the sources; over one declaring groups it drops them, until `inspect`
-reports per group. Binding problems are not
+problem already reported, and keeps the sources. Binding problems are not
 config problems, but `--strict` counts them, because they are what `mux` would refuse the batch for, and a
 script gating on `inspect --strict` should fail exactly where `mux` would.
 `--identify` lists each source's resolved file per episode, `(not found)` under the substituted template where
