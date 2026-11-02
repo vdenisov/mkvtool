@@ -18,7 +18,7 @@
 # Written out here rather than behind an ARG, which is what the digest used to sit in: Dependabot's
 # Dockerfile parser matches literal FROM references and substitutes no build args, so a
 # `FROM ${BASE_IMAGE}` is a reference it cannot see and therefore never bumps.
-FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 
 # The last GraalVM CE for JDK 21. Community builds stopped at 21.0.2, which is also why the Gradle
 # plugin's reachability-metadata repository is disabled - see build.gradle.kts.
